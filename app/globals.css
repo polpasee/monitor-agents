@@ -706,15 +706,14 @@ button:focus-visible,
 }
 
 .force-link {
-  stroke: var(--color-zinc-400);
+  stroke: var(--link-color, var(--color-zinc-400));
   stroke-opacity: 0.48;
   stroke-width: 2;
   vector-effect: non-scaling-stroke;
 }
 
 .force-link[data-cross-provider="true"] {
-  stroke: var(--color-zinc-300);
-  stroke-dasharray: 4 4;
+  stroke-dasharray: 4 8;
   stroke-opacity: 0.6;
 }
 
@@ -728,7 +727,7 @@ button:focus-visible,
 .force-link[data-target-status="running"]:not(
     [data-cross-provider="true"]
   ) {
-  stroke-dasharray: 5 3;
+  stroke-dasharray: 5 7;
 }
 
 @keyframes force-link-flow {
@@ -737,7 +736,7 @@ button:focus-visible,
   }
 
   to {
-    stroke-dashoffset: -8;
+    stroke-dashoffset: -12;
   }
 }
 

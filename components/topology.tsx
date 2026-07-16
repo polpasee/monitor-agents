@@ -56,6 +56,7 @@ interface GraphLink extends SimulationLinkDatum<GraphNode> {
   source: string | GraphNode;
   target: string | GraphNode;
   crossProvider: boolean;
+  sourceColor: TopologyNodeColor | "zinc";
   spawnMethod: AgentRun["spawnMethod"];
   targetStatus: AgentRun["status"];
 }
@@ -334,6 +335,10 @@ export function Topology({
           source: parent.id,
           target: agent.id,
           crossProvider: parent.provider !== agent.provider,
+          sourceColor:
+            parent.status === "running"
+              ? colorAssignments.get(parent.id)!
+              : "zinc",
           spawnMethod: agent.spawnMethod,
           targetStatus: agent.status,
         },
@@ -378,7 +383,11 @@ export function Topology({
       .join("line")
       .attr("class", "force-link")
       .attr("data-cross-provider", (item) => item.crossProvider || null)
-      .attr("data-target-status", (item) => item.targetStatus);
+      .attr("data-target-status", (item) => item.targetStatus)
+      .style(
+        "--link-color",
+        (item) => `var(--color-${item.sourceColor}-400)`,
+      );
 
     link
       .append("title")
