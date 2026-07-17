@@ -30,7 +30,14 @@ const SCAN_CONCURRENCY = 8;
 const DEAD_SESSION_GRACE_MS = 2 * 60 * 1_000;
 
 const execFileAsync = promisify(execFile);
-const CLAUDE_CONTEXT_LIMIT = 200_000;
+const DEFAULT_CONTEXT_LIMIT = 200_000;
+const FABLE_CONTEXT_LIMIT = 1_000_000;
+
+function contextLimitForModel(model: string | null): number {
+  return model?.toLowerCase().includes("fable")
+    ? FABLE_CONTEXT_LIMIT
+    : DEFAULT_CONTEXT_LIMIT;
+}
 
 type JsonRecord = Record<string, unknown>;
 
@@ -1000,6 +1007,7 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
         : null;
     const statusLineEffort =
       statusLine.sessionId === session.sessionId ? statusLine.effort : null;
+    const resolvedModel = transcript?.model ?? job?.model ?? "unknown";
     const root: AgentRun = {
       id: `claude:${session.sessionId}`,
       parentId: null,
@@ -1008,7 +1016,7 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
         job?.name ??
         `Claude session ${session.sessionId.slice(0, 8)}`,
       provider: "claude",
-      model: transcript?.model ?? job?.model ?? "unknown",
+      model: resolvedModel,
       effort: statusLineEffort ?? job?.effort ?? null,
       status,
       task:
@@ -1026,7 +1034,9 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
         cached: transcript?.cached ?? 0,
         contextUsed: transcript?.contextUsed ?? 0,
         contextLimit:
-          (transcript?.contextUsed ?? 0) > 0 ? CLAUDE_CONTEXT_LIMIT : 0,
+          (transcript?.contextUsed ?? 0) > 0
+            ? contextLimitForModel(resolvedModel)
+            : 0,
       },
       costUsd: job?.costUsd ?? transcript?.costUsd ?? null,
       toolCalls: transcript?.toolCalls ?? null,
@@ -1089,7 +1099,10 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
         output: transcript.output,
         cached: transcript.cached,
         contextUsed: transcript.contextUsed,
-        contextLimit: transcript.contextUsed > 0 ? CLAUDE_CONTEXT_LIMIT : 0,
+        contextLimit:
+          transcript.contextUsed > 0
+            ? contextLimitForModel(transcript.model)
+            : 0,
       },
       costUsd: transcript.costUsd,
       toolCalls: transcript.toolCalls,

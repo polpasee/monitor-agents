@@ -394,14 +394,25 @@ test("Claude collector completes dead-process sessions and counts tool calls", a
         updatedAt: new Date(now - 1_000).toISOString(),
       }),
     );
-    const assistantLine = (content: unknown[]) =>
+    await writeFile(
+      join(directory, "sessions", "live-sonnet.json"),
+      JSON.stringify({
+        sessionId: "live-sonnet-session",
+        pid: process.pid,
+        cwd: workspace,
+        status: "busy",
+        startedAt: new Date(now - 60_000).toISOString(),
+        updatedAt: new Date(now - 1_000).toISOString(),
+      }),
+    );
+    const assistantLine = (content: unknown[], model = "claude-fable-5") =>
       JSON.stringify({
         type: "assistant",
         timestamp: new Date(now - 30_000).toISOString(),
         requestId: "req-1",
         message: {
           id: "msg-1",
-          model: "claude-fable-5",
+          model,
           content,
           usage: { input_tokens: 100, output_tokens: 20 },
         },
@@ -429,6 +440,13 @@ test("Claude collector completes dead-process sessions and counts tool calls", a
       join(projectDirectory, "live-session.jsonl"),
       `${transcriptLines.join("\n")}\n`,
     );
+    await writeFile(
+      join(projectDirectory, "live-sonnet-session.jsonl"),
+      `${assistantLine(
+        [{ type: "tool_use", name: "Read" }],
+        "claude-sonnet-5",
+      )}\n`,
+    );
 
     const result = await collectClaudeTelemetry();
     const dead = result.agents.find(
@@ -443,6 +461,9 @@ test("Claude collector completes dead-process sessions and counts tool calls", a
     const live = result.agents.find(
       (agent) => agent.id === "claude:live-session",
     );
+    const liveSonnet = result.agents.find(
+      (agent) => agent.id === "claude:live-sonnet-session",
+    );
 
     assert.equal(dead?.status, "completed");
     assert.notEqual(dead?.endedAt, null);
@@ -455,7 +476,9 @@ test("Claude collector completes dead-process sessions and counts tool calls", a
     assert.equal(live?.toolCalls, 2);
     assert.equal(live?.tokenUsage.input, 100);
     assert.equal(live?.tokenUsage.output, 20);
-    assert.equal(live?.tokenUsage.contextLimit, 200_000);
+    assert.equal(live?.tokenUsage.contextLimit, 1_000_000);
+    assert.equal(liveSonnet?.model, "claude-sonnet-5");
+    assert.equal(liveSonnet?.tokenUsage.contextLimit, 200_000);
   } finally {
     if (previousDirectory === undefined) {
       delete process.env.CLAUDE_CONFIG_DIR;
