@@ -819,7 +819,7 @@ button:focus-visible,
 .force-node[data-status="running"] .force-node__pulse-ring,
 .force-node[data-status="running"] .force-node__status-ring {
   filter: drop-shadow(
-    0 0 2px
+    0 0 1px
       color-mix(in srgb, var(--provider-color-400) 55%, transparent)
   );
 }
@@ -845,8 +845,7 @@ button:focus-visible,
     stroke-opacity: 0.18;
   }
 
-  46%,
-  60% {
+  50% {
     stroke-opacity: 1;
   }
 }
