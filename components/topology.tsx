@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   drag,
   forceCenter,
@@ -111,6 +117,30 @@ const LAYOUT_PARAM_RANGES: Record<keyof LayoutParams, LayoutParamRange> = {
   collisionPadding: { min: 8, max: 40, step: 2 },
 };
 
+interface LayoutSliderField {
+  key: keyof LayoutParams;
+  label: string;
+  ariaLabel: string;
+}
+
+const LAYOUT_SLIDER_FIELDS: LayoutSliderField[] = [
+  {
+    key: "linkDistance",
+    label: "Distance",
+    ariaLabel: "Distance between a main agent and its sub-agents",
+  },
+  {
+    key: "chargeStrength",
+    label: "Repulsion",
+    ariaLabel: "Repulsion strength between agent nodes",
+  },
+  {
+    key: "collisionPadding",
+    label: "Spacing",
+    ariaLabel: "Minimum spacing between agent nodes",
+  },
+];
+
 const CROSS_PROVIDER_LINK_EXTRA = 20;
 const LAYOUT_PARAMS_STORAGE_KEY = "monitor-agents:topology-layout";
 
@@ -147,6 +177,21 @@ function sanitizeLayoutParams(value: unknown): LayoutParams {
       DEFAULT_LAYOUT_PARAMS.collisionPadding,
     ),
   };
+}
+
+function loadStoredLayoutParams(): LayoutParams {
+  if (typeof window === "undefined") {
+    return DEFAULT_LAYOUT_PARAMS;
+  }
+
+  try {
+    const stored = window.localStorage.getItem(LAYOUT_PARAMS_STORAGE_KEY);
+    return stored
+      ? sanitizeLayoutParams(JSON.parse(stored))
+      : DEFAULT_LAYOUT_PARAMS;
+  } catch {
+    return DEFAULT_LAYOUT_PARAMS;
+  }
 }
 
 function labelStatus(status: AgentRun["status"]): string {
@@ -286,23 +331,13 @@ export function Topology({
   });
   const [selectedGroupId, setSelectedGroupId] = useState(ALL_AGENT_GROUPS);
   const [layoutParams, setLayoutParams] = useState<LayoutParams>(
-    DEFAULT_LAYOUT_PARAMS,
+    loadStoredLayoutParams,
   );
+  const deferredLayoutParams = useDeferredValue(layoutParams);
   const [showLayoutPanel, setShowLayoutPanel] = useState(false);
 
   actionsRef.current = { onSelectAgent, onToggleCollapsed };
   selectedAgentIdRef.current = selectedAgentId;
-
-  useEffect(() => {
-    try {
-      const stored = window.localStorage.getItem(LAYOUT_PARAMS_STORAGE_KEY);
-      if (stored) {
-        setLayoutParams(sanitizeLayoutParams(JSON.parse(stored)));
-      }
-    } catch {
-      // Ignore unavailable or corrupted storage; defaults still apply.
-    }
-  }, []);
 
   useEffect(() => {
     try {
@@ -638,16 +673,19 @@ export function Topology({
           .id((item) => item.id)
           .distance((item) =>
             item.crossProvider
-              ? layoutParams.linkDistance + CROSS_PROVIDER_LINK_EXTRA
-              : layoutParams.linkDistance,
+              ? deferredLayoutParams.linkDistance + CROSS_PROVIDER_LINK_EXTRA
+              : deferredLayoutParams.linkDistance,
           )
           .strength(0.7),
       )
-      .force("charge", forceManyBody().strength(-layoutParams.chargeStrength))
+      .force(
+        "charge",
+        forceManyBody().strength(-deferredLayoutParams.chargeStrength),
+      )
       .force(
         "collide",
         forceCollide<GraphNode>()
-          .radius((item) => item.radius + layoutParams.collisionPadding)
+          .radius((item) => item.radius + deferredLayoutParams.collisionPadding)
           .strength(0.95)
           .iterations(2),
       )
@@ -819,7 +857,13 @@ export function Topology({
       svg.on(".zoom", null);
       svg.selectAll("*").remove();
     };
-  }, [agents, collapsedAgentIds, dimensions, displayedAgents, layoutParams]);
+  }, [
+  agents,
+  collapsedAgentIds,
+  dimensions,
+  displayedAgents,
+  deferredLayoutParams,
+]);
 
   useEffect(() => {
     const svgElement = svgRef.current;
@@ -889,94 +933,6 @@ export function Topology({
             viewBox={`0 0 ${dimensions.width} ${dimensions.height}`}
             width={dimensions.width}
           />
-          {showLayoutPanel ? (
-            <div
-              aria-label="Layout parameters"
-              className="topology-layout-panel"
-              role="group"
-            >
-              <div className="topology-layout-panel__header">
-                <span className="topology-layout-panel__title">Layout</span>
-                <button
-                  aria-label="Reset layout to defaults"
-                  className="topology-layout-panel__reset"
-                  onClick={() => setLayoutParams(DEFAULT_LAYOUT_PARAMS)}
-                  type="button"
-                >
-                  Reset
-                </button>
-              </div>
-              <label className="topology-layout-panel__row">
-                <span className="topology-layout-panel__label">
-                  <span>Distance</span>
-                  <span className="topology-layout-panel__value">
-                    {layoutParams.linkDistance}
-                  </span>
-                </span>
-                <input
-                  aria-label="Distance between a main agent and its sub-agents"
-                  max={LAYOUT_PARAM_RANGES.linkDistance.max}
-                  min={LAYOUT_PARAM_RANGES.linkDistance.min}
-                  onChange={(event) => {
-                    const linkDistance = Number(event.target.value);
-                    setLayoutParams((current) => ({
-                      ...current,
-                      linkDistance,
-                    }));
-                  }}
-                  step={LAYOUT_PARAM_RANGES.linkDistance.step}
-                  type="range"
-                  value={layoutParams.linkDistance}
-                />
-              </label>
-              <label className="topology-layout-panel__row">
-                <span className="topology-layout-panel__label">
-                  <span>Repulsion</span>
-                  <span className="topology-layout-panel__value">
-                    {layoutParams.chargeStrength}
-                  </span>
-                </span>
-                <input
-                  aria-label="Repulsion strength between agent nodes"
-                  max={LAYOUT_PARAM_RANGES.chargeStrength.max}
-                  min={LAYOUT_PARAM_RANGES.chargeStrength.min}
-                  onChange={(event) => {
-                    const chargeStrength = Number(event.target.value);
-                    setLayoutParams((current) => ({
-                      ...current,
-                      chargeStrength,
-                    }));
-                  }}
-                  step={LAYOUT_PARAM_RANGES.chargeStrength.step}
-                  type="range"
-                  value={layoutParams.chargeStrength}
-                />
-              </label>
-              <label className="topology-layout-panel__row">
-                <span className="topology-layout-panel__label">
-                  <span>Spacing</span>
-                  <span className="topology-layout-panel__value">
-                    {layoutParams.collisionPadding}
-                  </span>
-                </span>
-                <input
-                  aria-label="Minimum spacing between agent nodes"
-                  max={LAYOUT_PARAM_RANGES.collisionPadding.max}
-                  min={LAYOUT_PARAM_RANGES.collisionPadding.min}
-                  onChange={(event) => {
-                    const collisionPadding = Number(event.target.value);
-                    setLayoutParams((current) => ({
-                      ...current,
-                      collisionPadding,
-                    }));
-                  }}
-                  step={LAYOUT_PARAM_RANGES.collisionPadding.step}
-                  type="range"
-                  value={layoutParams.collisionPadding}
-                />
-              </label>
-            </div>
-          ) : null}
           <div
             aria-label="Topology zoom controls"
             className="force-graph__controls"
@@ -1009,6 +965,50 @@ export function Topology({
                 <circle cx="5" cy="11" r="1.75" />
               </svg>
             </button>
+            {showLayoutPanel ? (
+              <div
+                aria-label="Layout parameters"
+                className="topology-layout-panel"
+                role="group"
+              >
+                <div className="topology-layout-panel__header">
+                  <span className="topology-layout-panel__title">Layout</span>
+                  <button
+                    aria-label="Reset layout to defaults"
+                    className="topology-layout-panel__reset"
+                    onClick={() => setLayoutParams(DEFAULT_LAYOUT_PARAMS)}
+                    type="button"
+                  >
+                    Reset
+                  </button>
+                </div>
+                {LAYOUT_SLIDER_FIELDS.map(({ key, label, ariaLabel }) => (
+                  <label className="topology-layout-panel__row" key={key}>
+                    <span className="topology-layout-panel__label">
+                      <span>{label}</span>
+                      <span className="topology-layout-panel__value">
+                        {layoutParams[key]}
+                      </span>
+                    </span>
+                    <input
+                      aria-label={ariaLabel}
+                      max={LAYOUT_PARAM_RANGES[key].max}
+                      min={LAYOUT_PARAM_RANGES[key].min}
+                      onChange={(event) => {
+                        const value = Number(event.target.value);
+                        setLayoutParams((current) => ({
+                          ...current,
+                          [key]: value,
+                        }));
+                      }}
+                      step={LAYOUT_PARAM_RANGES[key].step}
+                      type="range"
+                      value={layoutParams[key]}
+                    />
+                  </label>
+                ))}
+              </div>
+            ) : null}
             <button
               aria-label="Fit topology to view"
               className="force-graph__control"
