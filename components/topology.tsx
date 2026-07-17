@@ -476,22 +476,22 @@ export function Topology({
     node
       .append("polygon")
       .attr("class", "force-node__selection-ring")
-      .attr("points", (item) => hexagonPoints(item.radius + 12));
+      .attr("points", (item) => hexagonPoints(item.radius + 16));
 
     node
       .append("polygon")
       .attr("class", "force-node__outer-pulse-ring")
-      .attr("points", (item) => hexagonPoints(item.radius + 9));
+      .attr("points", (item) => hexagonPoints(item.radius + 12));
 
     node
       .append("polygon")
       .attr("class", "force-node__pulse-ring")
-      .attr("points", (item) => hexagonPoints(item.radius + 6));
+      .attr("points", (item) => hexagonPoints(item.radius + 8));
 
     node
       .append("polygon")
       .attr("class", "force-node__status-ring")
-      .attr("points", (item) => hexagonPoints(item.radius + 3));
+      .attr("points", (item) => hexagonPoints(item.radius + 4));
 
     node
       .append("polygon")
@@ -501,7 +501,7 @@ export function Topology({
     node
       .append("polygon")
       .attr("class", "force-node__inner-ring")
-      .attr("points", (item) => hexagonPoints(item.radius - 3));
+      .attr("points", (item) => hexagonPoints(item.radius - 4));
 
     node
       .append("text")
