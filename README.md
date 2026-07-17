@@ -33,8 +33,9 @@ tool counts remain blank instead of being estimated.
 - **Claude Code:** reads `${CLAUDE_CONFIG_DIR:-~/.claude}/sessions`, matching job
   state, usage rows from the matching transcript, direct depth-one subagent
   metadata, and fresh rate-limit and effort data captured by
-  `scripts/claude-statusline-bridge.mjs`. It shows the two newest roots and up
-  to six direct subagents.
+  `scripts/claude-statusline-bridge.mjs`. It shows the eight newest roots and up
+  to twenty-four direct subagents. Pre-warmed background spare sessions —
+  registry entries with no job state and no transcript — are excluded.
 - **AGY:** remains unconfigured unless `AGY_TELEMETRY_FILE` points to a local JSON
   snapshot. No AGY installation or stable telemetry contract was found, so the
   app does not fabricate one.
