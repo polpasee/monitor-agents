@@ -911,11 +911,11 @@ button:focus-visible,
 }
 
 .force-node[data-depth="0"] .force-node__model {
-  font-size: 10px;
+  font-size: 8px;
 }
 
 .force-node[data-depth="0"] .force-node__effort {
-  font-size: 6px;
+  font-size: 5px;
 }
 
 .force-node[data-depth="1"] .force-node__model {
