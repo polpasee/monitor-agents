@@ -709,11 +709,10 @@ button:focus-visible,
   stroke: var(--link-color, var(--color-zinc-400));
   stroke-opacity: 0.48;
   stroke-width: 2;
-  vector-effect: non-scaling-stroke;
 }
 
 .force-link[data-cross-provider="true"] {
-  stroke-dasharray: 4 6;
+  stroke-dasharray: 2 6;
   stroke-opacity: 0.6;
 }
 
@@ -731,7 +730,7 @@ button:focus-visible,
 .force-link[data-target-status="running"]:not(
     [data-cross-provider="true"]
   ) {
-  stroke-dasharray: 5 5;
+  stroke-dasharray: 3 5;
 }
 
 @keyframes force-link-flow {
@@ -740,7 +739,7 @@ button:focus-visible,
   }
 
   to {
-    stroke-dashoffset: -10;
+    stroke-dashoffset: -8;
   }
 }
 
@@ -888,7 +887,7 @@ button:focus-visible,
 
 .force-node__model,
 .force-node__effort,
-.force-node__name {
+.force-node__repo {
   fill: var(--provider-color-300);
   pointer-events: none;
   text-anchor: middle;
@@ -935,7 +934,7 @@ button:focus-visible,
   font-size: 5px;
 }
 
-.force-node__name {
+.force-node__repo {
   opacity: 0;
   paint-order: stroke;
   stroke: var(--color-zinc-950);
@@ -944,11 +943,11 @@ button:focus-visible,
   transition: opacity 120ms ease;
 }
 
-.force-node[data-selected="true"] .force-node__name {
+.force-node[data-selected="true"] .force-node__repo {
   opacity: 1;
 }
 
-.force-node__name {
+.force-node__repo {
   font-size: 9px;
   font-weight: 650;
   letter-spacing: -0.015em;

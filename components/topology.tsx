@@ -532,9 +532,9 @@ export function Topology({
 
     node
       .append("text")
-      .attr("class", "force-node__name")
-      .attr("y", (item) => item.radius + 18)
-      .text((item) => item.agent.name);
+      .attr("class", "force-node__repo")
+      .attr("y", (item) => item.radius + 12)
+      .text((item) => workspaceLabel(item.agent.cwd));
 
     node
       .append("title")
