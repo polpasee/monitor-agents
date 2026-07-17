@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { createReadStream } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
+import { promisify } from "node:util";
 import {
   basename,
   dirname,
@@ -19,9 +21,16 @@ import type {
 } from "../telemetry";
 import type { CollectorResult } from "./types";
 
-const MAX_ROOTS = 2;
-const MAX_SUBAGENTS = 6;
+const MAX_ROOTS = 8;
+const MAX_SUBAGENTS = 24;
 const MAX_QUOTA_AGE_MS = 15 * 60 * 1_000;
+const MAX_TASK_LENGTH = 160;
+const MAX_NAME_LENGTH = 32;
+const SCAN_CONCURRENCY = 8;
+const DEAD_SESSION_GRACE_MS = 2 * 60 * 1_000;
+
+const execFileAsync = promisify(execFile);
+const CLAUDE_CONTEXT_LIMIT = 200_000;
 
 type JsonRecord = Record<string, unknown>;
 
@@ -32,6 +41,8 @@ interface Diagnostics {
 interface RegistrySession {
   sessionId: string;
   jobId: string | null;
+  name: string | null;
+  pid: number | null;
   cwd: string;
   status: string | null;
   startedAtMs: number;
@@ -42,6 +53,11 @@ interface JobState {
   state: string | null;
   tempo: string | null;
   inFlight: number;
+  name: string | null;
+  model: string | null;
+  effort: string | null;
+  task: string | null;
+  fanLabels: Map<string, string>;
   resumeSessionId: string | null;
   createdAtMs: number | null;
   updatedAtMs: number | null;
@@ -54,8 +70,10 @@ interface TranscriptSummary {
   output: number;
   cached: number;
   contextUsed: number;
+  toolCalls: number;
   model: string | null;
   stopReason: string | null;
+  firstUserText: string | null;
   firstAtMs: number | null;
   lastAtMs: number | null;
   costUsd: number | null;
@@ -70,6 +88,9 @@ interface StatusLineSnapshot {
 interface SubagentCandidate {
   agentId: string;
   agentType: string;
+  description: string | null;
+  fanLabel: string | null;
+  workflowId: string | null;
   parentId: string;
   rootStatus: AgentStatus;
   cwd: string;
@@ -220,6 +241,127 @@ function safeAgentType(value: unknown): string {
     : "subagent";
 }
 
+function truncateTask(value: string | null): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  return value.length <= MAX_TASK_LENGTH
+    ? value
+    : `${value.slice(0, MAX_TASK_LENGTH - 1)}…`;
+}
+
+function truncateName(value: string | null): string | null {
+  if (value === null) {
+    return null;
+  }
+
+  return value.length <= MAX_NAME_LENGTH
+    ? value
+    : `${value.slice(0, MAX_NAME_LENGTH - 1)}…`;
+}
+
+async function mapWithLimit<T, R>(
+  items: readonly T[],
+  limit: number,
+  mapItem: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex++;
+        results[index] = await mapItem(items[index]);
+      }
+    }),
+  );
+  return results;
+}
+
+function respawnFlagValue(value: JsonRecord, flag: string): string | null {
+  const flags = Array.isArray(value.respawnFlags) ? value.respawnFlags : [];
+  const index = flags.indexOf(flag);
+  return index === -1 ? null : stringValue(flags[index + 1]);
+}
+
+function fanLabels(value: JsonRecord): Map<string, string> {
+  const labels = new Map<string, string>();
+  const fan = Array.isArray(value.fan) ? value.fan : [];
+  for (const item of fan) {
+    const entry = record(item);
+    const id = entry ? stringValue(entry.id) : null;
+    const label = entry ? stringValue(entry.label) : null;
+    const shortLabel = truncateName(label);
+    if (id && shortLabel) {
+      labels.set(id, shortLabel);
+    }
+  }
+  return labels;
+}
+
+function isControlText(text: string): boolean {
+  return (
+    text.startsWith("<") ||
+    text.startsWith("Caveat:") ||
+    text.startsWith("[Request interrupted")
+  );
+}
+
+function firstPromptText(content: unknown): string | null {
+  const texts: string[] = [];
+  if (typeof content === "string") {
+    const text = stringValue(content);
+    if (text) {
+      texts.push(text);
+    }
+  } else if (Array.isArray(content)) {
+    for (const block of content) {
+      const blockRecord = record(block);
+      if (blockRecord?.type === "text") {
+        const text = stringValue(blockRecord.text);
+        if (text) {
+          texts.push(text);
+        }
+      }
+    }
+  }
+
+  // Skip system-reminder wrappers, local-command caveats, and interruption
+  // markers; the first plain text block carries the actual task prompt.
+  return texts.find((text) => !isControlText(text)) ?? null;
+}
+
+async function isProcessAlive(pid: number | null): Promise<boolean> {
+  if (pid === null || !Number.isInteger(pid) || pid <= 0) {
+    return true;
+  }
+
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    return record(error)?.code !== "ESRCH";
+  }
+
+  if (process.platform === "win32") {
+    return true;
+  }
+
+  // The pid exists, but registry pids can be recycled by unrelated
+  // processes after a crash or reboot; require a Claude-like command name.
+  try {
+    const { stdout } = await execFileAsync("ps", [
+      "-p",
+      String(pid),
+      "-o",
+      "comm=",
+    ]);
+    return /claude|node/iu.test(stdout);
+  } catch {
+    return true;
+  }
+}
+
 function explicitCost(value: JsonRecord): number | null {
   for (const key of [
     "costUsd",
@@ -283,6 +425,8 @@ async function loadRegistrySessions(
       return {
         sessionId,
         jobId: stringValue(value.jobId),
+        name: truncateName(stringValue(value.name)),
+        pid: numberValue(value.pid),
         cwd: stringValue(value.cwd) ?? "unknown",
         status: stringValue(value.status),
         startedAtMs,
@@ -324,6 +468,11 @@ async function loadJobState(
     inFlight:
       (numberValue(inFlight?.tasks) ?? 0) +
       (numberValue(inFlight?.queued) ?? 0),
+    name: truncateName(stringValue(value.name)),
+    model: truncateName(respawnFlagValue(value, "--model")),
+    effort: truncateName(respawnFlagValue(value, "--effort")),
+    task: truncateTask(stringValue(value.detail) ?? stringValue(value.intent)),
+    fanLabels: fanLabels(value),
     resumeSessionId: stringValue(value.resumeSessionId),
     createdAtMs: timestampMs(value.createdAt),
     updatedAtMs: timestampMs(value.updatedAt),
@@ -428,11 +577,18 @@ async function findTranscript(
 async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
   const requests = new Map<
     string,
-    { input: number; output: number; cached: number; contextUsed: number }
+    {
+      input: number;
+      output: number;
+      cached: number;
+      contextUsed: number;
+      toolCalls: number;
+    }
   >();
   let anonymousRequest = 0;
   let model: string | null = null;
   let stopReason: string | null = null;
+  let firstUserText: string | null = null;
   let firstAtMs: number | null = null;
   let lastAtMs: number | null = null;
   let costUsd: number | null = null;
@@ -461,6 +617,16 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
     }
 
     costUsd = explicitCost(value) ?? costUsd;
+    if (
+      firstUserText === null &&
+      value.type === "user" &&
+      value.isMeta !== true
+    ) {
+      const text = firstPromptText(record(value.message)?.content);
+      if (text) {
+        firstUserText = truncateTask(text.replace(/\s+/gu, " ").trim());
+      }
+    }
     if (value.type !== "assistant") {
       continue;
     }
@@ -475,6 +641,11 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
       model = messageModel;
     }
     stopReason = stringValue(message.stop_reason) ?? stopReason;
+
+    const content = Array.isArray(message.content) ? message.content : [];
+    const toolCalls = content.filter(
+      (block) => record(block)?.type === "tool_use",
+    ).length;
 
     const usage = record(message.usage);
     if (!usage) {
@@ -494,21 +665,25 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
       `anonymous-${anonymousRequest++}`;
 
     latestContextUsed = input + output;
+    const existing = requests.get(requestKey);
     requests.set(requestKey, {
       input,
       output,
       cached,
       contextUsed: latestContextUsed,
+      toolCalls: (existing?.toolCalls ?? 0) + toolCalls,
     });
   }
 
   let input = 0;
   let output = 0;
   let cached = 0;
+  let toolCalls = 0;
   for (const usage of requests.values()) {
     input += usage.input;
     output += usage.output;
     cached += usage.cached;
+    toolCalls += usage.toolCalls;
   }
 
   return {
@@ -516,27 +691,26 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
     output,
     cached,
     contextUsed: latestContextUsed,
+    toolCalls,
     model,
     stopReason,
+    firstUserText,
     firstAtMs,
     lastAtMs,
     costUsd,
   };
 }
 
-async function findDirectSubagents(
-  transcriptPath: string,
+async function collectSubagentsInDirectory(
+  agentDirectory: string,
+  workflowId: string | null,
   parent: AgentRun,
+  labels: ReadonlyMap<string, string>,
   diagnostics: Diagnostics,
 ): Promise<SubagentCandidate[]> {
-  const sessionDirectory = join(
-    dirname(transcriptPath),
-    basename(transcriptPath, ".jsonl"),
-    "subagents",
-  );
   let entries;
   try {
-    entries = await readdir(sessionDirectory, { withFileTypes: true });
+    entries = await readdir(agentDirectory, { withFileTypes: true });
   } catch (error) {
     if (!isMissing(error)) {
       diagnostics.errors += 1;
@@ -544,19 +718,24 @@ async function findDirectSubagents(
     return [];
   }
 
-  const candidates = await Promise.all(
-    entries.map(async (entry): Promise<SubagentCandidate | null> => {
+  const candidates = await mapWithLimit(
+    entries,
+    SCAN_CONCURRENCY,
+    async (entry): Promise<SubagentCandidate | null> => {
       const match = /^agent-([a-zA-Z0-9_-]+)\.jsonl$/.exec(entry.name);
       if (!entry.isFile() || !match) {
         return null;
       }
 
-      const transcript = join(sessionDirectory, entry.name);
+      const transcript = join(agentDirectory, entry.name);
       const meta = await readJsonRecord(
-        join(sessionDirectory, `agent-${match[1]}.meta.json`),
+        join(agentDirectory, `agent-${match[1]}.meta.json`),
         diagnostics,
       );
-      if (!meta || numberValue(meta.spawnDepth) !== 1) {
+      // Older Claude Code versions omit spawnDepth from direct-subagent
+      // metadata; only an explicit deeper depth marks a nested spawn.
+      const spawnDepth = meta ? numberValue(meta.spawnDepth) : null;
+      if (!meta || (spawnDepth !== null && spawnDepth !== 1)) {
         return null;
       }
 
@@ -564,6 +743,9 @@ async function findDirectSubagents(
         return {
           agentId: match[1],
           agentType: safeAgentType(meta.agentType),
+          description: truncateName(stringValue(meta.description)),
+          fanLabel: labels.get(match[1]) ?? null,
+          workflowId,
           parentId: parent.id,
           rootStatus: parent.status,
           cwd: parent.cwd,
@@ -576,12 +758,60 @@ async function findDirectSubagents(
         }
         return null;
       }
-    }),
+    },
   );
 
   return candidates.filter(
     (candidate): candidate is SubagentCandidate => candidate !== null,
   );
+}
+
+async function findDirectSubagents(
+  transcriptPath: string,
+  parent: AgentRun,
+  labels: ReadonlyMap<string, string>,
+  diagnostics: Diagnostics,
+): Promise<SubagentCandidate[]> {
+  const subagentsDirectory = join(
+    dirname(transcriptPath),
+    basename(transcriptPath, ".jsonl"),
+    "subagents",
+  );
+  const candidates = await collectSubagentsInDirectory(
+    subagentsDirectory,
+    null,
+    parent,
+    labels,
+    diagnostics,
+  );
+
+  const workflowsDirectory = join(subagentsDirectory, "workflows");
+  let workflowEntries;
+  try {
+    workflowEntries = await readdir(workflowsDirectory, {
+      withFileTypes: true,
+    });
+  } catch (error) {
+    if (!isMissing(error)) {
+      diagnostics.errors += 1;
+    }
+    return candidates;
+  }
+
+  const workflowCandidates = await mapWithLimit(
+    workflowEntries.filter((entry) => entry.isDirectory()),
+    SCAN_CONCURRENCY,
+    (entry) =>
+      collectSubagentsInDirectory(
+        join(workflowsDirectory, entry.name),
+        entry.name,
+        parent,
+        labels,
+        diagnostics,
+      ),
+  );
+
+  return candidates.concat(workflowCandidates.flat());
 }
 
 function subagentStatus(
@@ -716,8 +946,16 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
     );
   }
 
+  const seenSessionIds = new Set<string>();
   const sessions = matchingSessions
     .sort((left, right) => right.updatedAtMs - left.updatedAtMs)
+    .filter((session) => {
+      if (seenSessionIds.has(session.sessionId)) {
+        return false;
+      }
+      seenSessionIds.add(session.sessionId);
+      return true;
+    })
     .slice(0, MAX_ROOTS);
   const projectsDirectory = join(claudeDirectory, "projects");
   const agents: AgentRun[] = [];
@@ -725,7 +963,15 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
 
   for (const session of sessions) {
     const job = await loadJobState(claudeDirectory, session, diagnostics);
-    const status = statusFromValues(job, session.status);
+    let status = statusFromValues(job, session.status);
+    const lastSeenMs = Math.max(session.updatedAtMs, job?.updatedAtMs ?? 0);
+    if (
+      (status === "running" || status === "idle" || status === "queued") &&
+      Date.now() - lastSeenMs > DEAD_SESSION_GRACE_MS &&
+      !(await isProcessAlive(session.pid))
+    ) {
+      status = "completed";
+    }
     const transcriptPath = await findTranscript(
       projectsDirectory,
       session,
@@ -750,16 +996,23 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
       status === "completed" || status === "failed" || status === "aborted"
         ? (job?.updatedAtMs ?? lastActivityAtMs)
         : null;
+    const statusLineEffort =
+      statusLine.sessionId === session.sessionId ? statusLine.effort : null;
     const root: AgentRun = {
       id: `claude:${session.sessionId}`,
       parentId: null,
-      name: `Claude session ${session.sessionId.slice(0, 8)}`,
+      name:
+        session.name ??
+        job?.name ??
+        `Claude session ${session.sessionId.slice(0, 8)}`,
       provider: "claude",
-      model: transcript?.model ?? "unknown",
-      effort:
-        statusLine.sessionId === session.sessionId ? statusLine.effort : null,
+      model: transcript?.model ?? job?.model ?? "unknown",
+      effort: statusLineEffort ?? job?.effort ?? null,
       status,
-      task: "Local Claude Code session",
+      task:
+        job?.task ??
+        transcript?.firstUserText ??
+        "Local Claude Code session",
       spawnMethod: "root",
       cwd: session.cwd,
       startedAt: isoTime(startedAtMs),
@@ -770,10 +1023,11 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
         output: transcript?.output ?? 0,
         cached: transcript?.cached ?? 0,
         contextUsed: transcript?.contextUsed ?? 0,
-        contextLimit: 0,
+        contextLimit:
+          (transcript?.contextUsed ?? 0) > 0 ? CLAUDE_CONTEXT_LIMIT : 0,
       },
       costUsd: job?.costUsd ?? transcript?.costUsd ?? null,
-      toolCalls: null,
+      toolCalls: transcript?.toolCalls ?? null,
     };
     agents.push(root);
 
@@ -782,6 +1036,7 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
         ...(await findDirectSubagents(
           transcriptPath,
           root,
+          job?.fanLabels ?? new Map(),
           diagnostics,
         )),
       );
@@ -805,12 +1060,20 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
     agents.push({
       id: `${candidate.parentId}:${candidate.agentId}`,
       parentId: candidate.parentId,
-      name: `Claude ${candidate.agentType}`,
+      name:
+        candidate.description ??
+        candidate.fanLabel ??
+        truncateName(transcript.firstUserText) ??
+        `Claude ${candidate.agentType}`,
       provider: "claude",
       model: transcript.model ?? "unknown",
       effort: null,
       status,
-      task: "Direct Claude subagent (depth 1)",
+      task:
+        transcript.firstUserText ??
+        (candidate.workflowId
+          ? `Workflow ${candidate.workflowId} subagent (${candidate.agentType})`
+          : `Direct Claude subagent (${candidate.agentType})`),
       spawnMethod: "native",
       cwd: candidate.cwd,
       startedAt: isoTime(startedAtMs),
@@ -824,10 +1087,10 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
         output: transcript.output,
         cached: transcript.cached,
         contextUsed: transcript.contextUsed,
-        contextLimit: 0,
+        contextLimit: transcript.contextUsed > 0 ? CLAUDE_CONTEXT_LIMIT : 0,
       },
       costUsd: transcript.costUsd,
-      toolCalls: null,
+      toolCalls: transcript.toolCalls,
     });
   }
 
