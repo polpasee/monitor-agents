@@ -48,6 +48,7 @@ interface GraphNode extends SimulationNodeDatum {
   id: string;
   agent: AgentRun;
   childCount: number;
+  depth: number;
   radius: number;
   color: TopologyNodeColor;
 }
@@ -105,7 +106,17 @@ function middleEllipsis(value: string, maximumLength: number): string {
   return `${value.slice(0, startLength)}…${value.slice(-endLength)}`;
 }
 
-function shortModelName(model: string): string {
+function isUnknownModel(model: string): boolean {
+  const normalizedModel = model.trim();
+  return normalizedModel === "" || normalizedModel.toLowerCase() === "unknown";
+}
+
+function shortModelName(model: string, provider: Provider): string {
+  const normalizedModel = model.trim();
+  if (isUnknownModel(normalizedModel)) {
+    return providerLabels[provider].toUpperCase();
+  }
+
   const ignoredTokens = new Set([
     "agy",
     "anthropic",
@@ -115,7 +126,7 @@ function shortModelName(model: string): string {
     "gpt",
     "openai",
   ]);
-  const tokens = model
+  const tokens = normalizedModel
     .replace(/-\d{8}$/u, "")
     .toLowerCase()
     .split(/[-/_.]+/u)
@@ -125,7 +136,11 @@ function shortModelName(model: string): string {
       !ignoredTokens.has(token) && !/^\d+(?:[a-z])?$/u.test(token),
   );
 
-  return (family ?? tokens[0] ?? model).toUpperCase();
+  return (family ?? tokens[0] ?? normalizedModel).toUpperCase();
+}
+
+function shouldShowEffort(model: string, effort: string | null): boolean {
+  return effort !== null && !isUnknownModel(model);
 }
 
 function effortLabel(effort: string | null): string {
@@ -310,6 +325,7 @@ export function Topology({
         agent,
         childCount: childCounts.get(agent.id) ?? 0,
         color: colorAssignments.get(agent.id)!,
+        depth,
         radius,
         x: cachedPosition
           ? cachedPosition.normalizedX * width
@@ -418,6 +434,7 @@ export function Topology({
       .data(nodes, (item) => item.id)
       .join("g")
       .attr("class", "force-node")
+      .attr("data-depth", (item) => Math.min(item.depth, 3))
       .attr("data-node-color", (item) => item.color)
       .attr("data-provider", (item) => item.agent.provider)
       .attr("data-status", (item) => item.agent.status)
@@ -489,19 +506,29 @@ export function Topology({
     node
       .append("text")
       .attr("class", "force-node__model")
-      .attr("dy", (item) => (item.agent.effort === null ? null : "0.2em"))
-      .attr("dominant-baseline", (item) =>
-        item.agent.effort === null ? "middle" : null,
+      .attr("dy", (item) =>
+        shouldShowEffort(item.agent.model, item.agent.effort) ? "0.2em" : null,
       )
-      .attr("y", (item) => (item.agent.effort === null ? 0 : -2))
-      .text((item) => shortModelName(item.agent.model));
+      .attr("dominant-baseline", (item) =>
+        shouldShowEffort(item.agent.model, item.agent.effort) ? null : "middle",
+      )
+      .attr("y", (item) =>
+        shouldShowEffort(item.agent.model, item.agent.effort) ? -2 : 0,
+      )
+      .text((item) =>
+        shortModelName(item.agent.model, item.agent.provider),
+      );
 
     node
       .append("text")
       .attr("class", "force-node__effort")
       .attr("dy", "0.3em")
       .attr("y", 7)
-      .text((item) => effortLabel(item.agent.effort));
+      .text((item) =>
+        shouldShowEffort(item.agent.model, item.agent.effort)
+          ? effortLabel(item.agent.effort)
+          : "",
+      );
 
     node
       .append("text")

@@ -713,8 +713,12 @@ button:focus-visible,
 }
 
 .force-link[data-cross-provider="true"] {
-  stroke-dasharray: 4 8;
+  stroke-dasharray: 4 6;
   stroke-opacity: 0.6;
+}
+
+.force-link[data-target-status="idle"] {
+  stroke: var(--color-zinc-400);
 }
 
 .force-link[data-target-status="running"] {
@@ -727,7 +731,7 @@ button:focus-visible,
 .force-link[data-target-status="running"]:not(
     [data-cross-provider="true"]
   ) {
-  stroke-dasharray: 5 7;
+  stroke-dasharray: 5 5;
 }
 
 @keyframes force-link-flow {
@@ -736,7 +740,7 @@ button:focus-visible,
   }
 
   to {
-    stroke-dashoffset: -12;
+    stroke-dashoffset: -10;
   }
 }
 
@@ -896,15 +900,39 @@ button:focus-visible,
 }
 
 .force-node__model {
-  font-size: 6.5px;
+  font-size: 5px;
   font-weight: 760;
   letter-spacing: -0.025em;
 }
 
 .force-node__effort {
-  font-size: 5.5px;
-  font-weight: 620;
+  font-size: 4.5px;
+  font-weight: 400;
   letter-spacing: 0.01em;
+}
+
+.force-node[data-depth="0"] .force-node__model {
+  font-size: 10px;
+}
+
+.force-node[data-depth="0"] .force-node__effort {
+  font-size: 6px;
+}
+
+.force-node[data-depth="1"] .force-node__model {
+  font-size: 7px;
+}
+
+.force-node[data-depth="1"] .force-node__effort {
+  font-size: 5.5px;
+}
+
+.force-node[data-depth="2"] .force-node__model {
+  font-size: 6px;
+}
+
+.force-node[data-depth="2"] .force-node__effort {
+  font-size: 5px;
 }
 
 .force-node__name {
