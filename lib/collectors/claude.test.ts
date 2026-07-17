@@ -300,8 +300,10 @@ test("Claude collector enriches roots from registry and job state and finds suba
     assert.equal(root?.status, "running");
     assert.equal(direct?.name, "Code review");
     assert.equal(direct?.task, "Direct Claude subagent (code-reviewer)");
+    assert.equal(direct?.effort, "xhigh");
     assert.equal(workflowChild?.name, "verify:stash0");
     assert.equal(workflowChild?.task, "Verify the stash entry");
+    assert.equal(workflowChild?.effort, "xhigh");
     assert.equal(longTextChild?.name, `${longText.slice(0, 31)}…`);
     assert.equal(longTextChild?.task, longText);
     assert.equal(emptyChild?.name, "Claude workflow-subagent");

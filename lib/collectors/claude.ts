@@ -93,6 +93,7 @@ interface SubagentCandidate {
   workflowId: string | null;
   parentId: string;
   rootStatus: AgentStatus;
+  rootEffort: string | null;
   cwd: string;
   transcriptPath: string;
   modifiedAtMs: number;
@@ -748,6 +749,7 @@ async function collectSubagentsInDirectory(
           workflowId,
           parentId: parent.id,
           rootStatus: parent.status,
+          rootEffort: parent.effort,
           cwd: parent.cwd,
           transcriptPath: transcript,
           modifiedAtMs: (await stat(transcript)).mtimeMs,
@@ -1067,7 +1069,7 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
         `Claude ${candidate.agentType}`,
       provider: "claude",
       model: transcript.model ?? "unknown",
-      effort: null,
+      effort: candidate.rootEffort,
       status,
       task:
         transcript.firstUserText ??
