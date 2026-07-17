@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   drag,
   forceCenter,
@@ -86,6 +92,107 @@ const compactNumber = new Intl.NumberFormat("en-US", {
 });
 
 const ALL_AGENT_GROUPS = "";
+
+interface LayoutParams {
+  linkDistance: number;
+  chargeStrength: number;
+  collisionPadding: number;
+}
+
+interface LayoutParamRange {
+  min: number;
+  max: number;
+  step: number;
+}
+
+const DEFAULT_LAYOUT_PARAMS: LayoutParams = {
+  linkDistance: 92,
+  chargeStrength: 260,
+  collisionPadding: 22,
+};
+
+const LAYOUT_PARAM_RANGES: Record<keyof LayoutParams, LayoutParamRange> = {
+  linkDistance: { min: 40, max: 200, step: 4 },
+  chargeStrength: { min: 80, max: 500, step: 10 },
+  collisionPadding: { min: 8, max: 40, step: 2 },
+};
+
+interface LayoutSliderField {
+  key: keyof LayoutParams;
+  label: string;
+  ariaLabel: string;
+}
+
+const LAYOUT_SLIDER_FIELDS: LayoutSliderField[] = [
+  {
+    key: "linkDistance",
+    label: "Distance",
+    ariaLabel: "Distance between a main agent and its sub-agents",
+  },
+  {
+    key: "chargeStrength",
+    label: "Repulsion",
+    ariaLabel: "Repulsion strength between agent nodes",
+  },
+  {
+    key: "collisionPadding",
+    label: "Spacing",
+    ariaLabel: "Minimum spacing between agent nodes",
+  },
+];
+
+const CROSS_PROVIDER_LINK_EXTRA = 20;
+const LAYOUT_PARAMS_STORAGE_KEY = "monitor-agents:topology-layout";
+
+function clampLayoutParam(
+  value: unknown,
+  range: LayoutParamRange,
+  fallback: number,
+): number {
+  return typeof value === "number" && Number.isFinite(value)
+    ? clamp(value, range.min, range.max)
+    : fallback;
+}
+
+function sanitizeLayoutParams(value: unknown): LayoutParams {
+  const record =
+    typeof value === "object" && value !== null
+      ? (value as Record<string, unknown>)
+      : {};
+
+  return {
+    linkDistance: clampLayoutParam(
+      record.linkDistance,
+      LAYOUT_PARAM_RANGES.linkDistance,
+      DEFAULT_LAYOUT_PARAMS.linkDistance,
+    ),
+    chargeStrength: clampLayoutParam(
+      record.chargeStrength,
+      LAYOUT_PARAM_RANGES.chargeStrength,
+      DEFAULT_LAYOUT_PARAMS.chargeStrength,
+    ),
+    collisionPadding: clampLayoutParam(
+      record.collisionPadding,
+      LAYOUT_PARAM_RANGES.collisionPadding,
+      DEFAULT_LAYOUT_PARAMS.collisionPadding,
+    ),
+  };
+}
+
+function loadStoredLayoutParams(): LayoutParams {
+  if (typeof window === "undefined") {
+    return DEFAULT_LAYOUT_PARAMS;
+  }
+
+  try {
+    const stored = window.localStorage.getItem(LAYOUT_PARAMS_STORAGE_KEY);
+    return stored
+      ? sanitizeLayoutParams(JSON.parse(stored))
+      : DEFAULT_LAYOUT_PARAMS;
+  } catch {
+    return DEFAULT_LAYOUT_PARAMS;
+  }
+}
 
 function labelStatus(status: AgentRun["status"]): string {
   return status.charAt(0).toUpperCase() + status.slice(1);
@@ -223,9 +330,25 @@ export function Topology({
     height: 778,
   });
   const [selectedGroupId, setSelectedGroupId] = useState(ALL_AGENT_GROUPS);
+  const [layoutParams, setLayoutParams] = useState<LayoutParams>(
+    loadStoredLayoutParams,
+  );
+  const deferredLayoutParams = useDeferredValue(layoutParams);
+  const [showLayoutPanel, setShowLayoutPanel] = useState(false);
 
   actionsRef.current = { onSelectAgent, onToggleCollapsed };
   selectedAgentIdRef.current = selectedAgentId;
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        LAYOUT_PARAMS_STORAGE_KEY,
+        JSON.stringify(layoutParams),
+      );
+    } catch {
+      // Ignore unavailable storage (private browsing, quota, etc).
+    }
+  }, [layoutParams]);
 
   const agentGroups = useMemo(
     () =>
@@ -549,15 +672,20 @@ export function Topology({
         forceLink<GraphNode, GraphLink>(links)
           .id((item) => item.id)
           .distance((item) =>
-            mobile ? (item.crossProvider ? 92 : 76) : item.crossProvider ? 112 : 92,
+            item.crossProvider
+              ? deferredLayoutParams.linkDistance + CROSS_PROVIDER_LINK_EXTRA
+              : deferredLayoutParams.linkDistance,
           )
           .strength(0.7),
       )
-      .force("charge", forceManyBody().strength(mobile ? -190 : -260))
+      .force(
+        "charge",
+        forceManyBody().strength(-deferredLayoutParams.chargeStrength),
+      )
       .force(
         "collide",
         forceCollide<GraphNode>()
-          .radius((item) => item.radius + (mobile ? 18 : 22))
+          .radius((item) => item.radius + deferredLayoutParams.collisionPadding)
           .strength(0.95)
           .iterations(2),
       )
@@ -729,7 +857,13 @@ export function Topology({
       svg.on(".zoom", null);
       svg.selectAll("*").remove();
     };
-  }, [agents, collapsedAgentIds, dimensions, displayedAgents]);
+  }, [
+  agents,
+  collapsedAgentIds,
+  dimensions,
+  displayedAgents,
+  deferredLayoutParams,
+]);
 
   useEffect(() => {
     const svgElement = svgRef.current;
@@ -804,6 +938,77 @@ export function Topology({
             className="force-graph__controls"
             role="group"
           >
+            <button
+              aria-expanded={showLayoutPanel}
+              aria-label={
+                showLayoutPanel
+                  ? "Hide layout settings"
+                  : "Show layout settings"
+              }
+              className="force-graph__control"
+              onClick={() => setShowLayoutPanel((current) => !current)}
+              title="Layout settings"
+              type="button"
+            >
+              <svg
+                aria-hidden="true"
+                className="force-graph__control-icon"
+                fill="none"
+                stroke="currentColor"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="1.5"
+                viewBox="0 0 16 16"
+              >
+                <path d="M2 5h7m3 0h2M2 11h2m3 0h7" />
+                <circle cx="11" cy="5" r="1.75" />
+                <circle cx="5" cy="11" r="1.75" />
+              </svg>
+            </button>
+            {showLayoutPanel ? (
+              <div
+                aria-label="Layout parameters"
+                className="topology-layout-panel"
+                role="group"
+              >
+                <div className="topology-layout-panel__header">
+                  <span className="topology-layout-panel__title">Layout</span>
+                  <button
+                    aria-label="Reset layout to defaults"
+                    className="topology-layout-panel__reset"
+                    onClick={() => setLayoutParams(DEFAULT_LAYOUT_PARAMS)}
+                    type="button"
+                  >
+                    Reset
+                  </button>
+                </div>
+                {LAYOUT_SLIDER_FIELDS.map(({ key, label, ariaLabel }) => (
+                  <label className="topology-layout-panel__row" key={key}>
+                    <span className="topology-layout-panel__label">
+                      <span>{label}</span>
+                      <span className="topology-layout-panel__value">
+                        {layoutParams[key]}
+                      </span>
+                    </span>
+                    <input
+                      aria-label={ariaLabel}
+                      max={LAYOUT_PARAM_RANGES[key].max}
+                      min={LAYOUT_PARAM_RANGES[key].min}
+                      onChange={(event) => {
+                        const value = Number(event.target.value);
+                        setLayoutParams((current) => ({
+                          ...current,
+                          [key]: value,
+                        }));
+                      }}
+                      step={LAYOUT_PARAM_RANGES[key].step}
+                      type="range"
+                      value={layoutParams[key]}
+                    />
+                  </label>
+                ))}
+              </div>
+            ) : null}
             <button
               aria-label="Fit topology to view"
               className="force-graph__control"
