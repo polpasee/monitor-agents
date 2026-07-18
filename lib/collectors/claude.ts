@@ -52,6 +52,7 @@ interface RegistrySession {
   pid: number | null;
   cwd: string;
   status: string | null;
+  kind: string | null;
   startedAtMs: number;
   updatedAtMs: number;
 }
@@ -437,6 +438,7 @@ async function loadRegistrySessions(
         pid: numberValue(value.pid),
         cwd: stringValue(value.cwd) ?? "unknown",
         status: stringValue(value.status),
+        kind: stringValue(value.kind),
         startedAtMs,
         updatedAtMs,
       };
@@ -497,6 +499,14 @@ function statusFromValues(
   const tempo = job?.tempo?.toLowerCase() ?? "";
   const registry = registryStatus?.toLowerCase() ?? "";
 
+  // The job file's own liveness signals outrank its terminal state: a
+  // resumed background job keeps state "done" from the finished turn
+  // while tempo flips back to "active" and work is in flight. Registry
+  // status is deliberately not a liveness signal here — registry
+  // records freeze at "busy" when a session crashes.
+  if ((job?.inFlight ?? 0) > 0 || tempo === "active") {
+    return "running";
+  }
   if ([jobState, registry].some((value) => ["failed", "error"].includes(value))) {
     return "failed";
   }
@@ -522,12 +532,12 @@ function statusFromValues(
   ) {
     return "completed";
   }
-  if (
-    (job?.inFlight ?? 0) > 0 ||
-    [jobState, tempo, registry].some((value) =>
-      ["running", "working", "active", "busy"].includes(value),
-    )
-  ) {
+  if (["running", "working", "active"].includes(jobState)) {
+    // An open turn whose tempo has settled to "idle" is waiting on
+    // something rather than computing.
+    return tempo === "idle" ? "queued" : "running";
+  }
+  if (["running", "working", "active", "busy"].includes(registry)) {
     return "running";
   }
   return "idle";
@@ -964,14 +974,27 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
       }
       seenSessionIds.add(session.sessionId);
       return true;
-    })
-    .slice(0, MAX_ROOTS);
+    });
   const projectsDirectory = join(claudeDirectory, "projects");
   const agents: AgentRun[] = [];
   const subagentCandidates: SubagentCandidate[] = [];
 
   for (const session of sessions) {
+    if (agents.length >= MAX_ROOTS) {
+      break;
+    }
     const job = await loadJobState(claudeDirectory, session, diagnostics);
+    const transcriptPath = await findTranscript(
+      projectsDirectory,
+      session,
+      job,
+    );
+    if (session.kind === "bg" && !job && !transcriptPath) {
+      // Pre-warmed "claude bg-spare" pool processes register a session
+      // but never hold a job or a conversation; they are daemon
+      // infrastructure, not agent runs.
+      continue;
+    }
     let status = statusFromValues(job, session.status);
     const lastSeenMs = Math.max(session.updatedAtMs, job?.updatedAtMs ?? 0);
     if (
@@ -981,11 +1004,6 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
     ) {
       status = "completed";
     }
-    const transcriptPath = await findTranscript(
-      projectsDirectory,
-      session,
-      job,
-    );
     let transcript: TranscriptSummary | null = null;
     if (transcriptPath) {
       try {
@@ -1054,6 +1072,7 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
       );
     }
   }
+  const rootCount = agents.length;
 
   for (const candidate of subagentCandidates
     .sort((left, right) => right.modifiedAtMs - left.modifiedAtMs)
@@ -1120,7 +1139,7 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
     source: {
       provider: "claude",
       connection: running ? "connected" : "idle",
-      detail: `Loaded ${sessions.length} Claude session${sessions.length === 1 ? "" : "s"} and ${agents.length - sessions.length} direct subagent${agents.length - sessions.length === 1 ? "" : "s"}.${warning}`,
+      detail: `Loaded ${rootCount} Claude session${rootCount === 1 ? "" : "s"} and ${agents.length - rootCount} direct subagent${agents.length - rootCount === 1 ? "" : "s"}.${warning}`,
       agentCount: agents.length,
     },
   };

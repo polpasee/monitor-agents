@@ -642,3 +642,122 @@ test("Claude collector closes an unresolved child with its completed parent", as
     await rm(directory, { force: true, recursive: true });
   }
 });
+
+test("Claude collector distinguishes resumed, stalled, and spare sessions", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-claude-status-"));
+  const workspace = "/workspace/repo";
+  const projectDirectory = join(directory, "projects", "-workspace-repo");
+  const previousDirectory = process.env.CLAUDE_CONFIG_DIR;
+  const previousRateLimitsFile = process.env.CLAUDE_RATE_LIMITS_FILE;
+  const previousWorkspace = process.env.MONITOR_WORKSPACE;
+  const now = Date.now();
+
+  try {
+    process.env.CLAUDE_CONFIG_DIR = directory;
+    delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    process.env.MONITOR_WORKSPACE = workspace;
+    await mkdir(join(directory, "sessions"), { recursive: true });
+    await mkdir(join(directory, "jobs", "job-resumed"), { recursive: true });
+    await mkdir(join(directory, "jobs", "job-stalled"), { recursive: true });
+    await mkdir(projectDirectory, { recursive: true });
+
+    // A resumed background job keeps state "done" from its finished turn
+    // while tempo reports the new activity.
+    await writeFile(
+      join(directory, "sessions", "resumed.json"),
+      JSON.stringify({
+        sessionId: "resumed-session",
+        jobId: "job-resumed",
+        kind: "bg",
+        pid: process.pid,
+        cwd: workspace,
+        status: "busy",
+        startedAt: new Date(now - 120_000).toISOString(),
+        updatedAt: new Date(now - 1_000).toISOString(),
+      }),
+    );
+    await writeFile(
+      join(directory, "jobs", "job-resumed", "state.json"),
+      JSON.stringify({
+        state: "done",
+        tempo: "active",
+        createdAt: new Date(now - 120_000).toISOString(),
+        updatedAt: new Date(now - 1_000).toISOString(),
+      }),
+    );
+
+    // An open turn whose tempo settled to idle is waiting, not computing.
+    await writeFile(
+      join(directory, "sessions", "stalled.json"),
+      JSON.stringify({
+        sessionId: "stalled-session",
+        jobId: "job-stalled",
+        kind: "bg",
+        pid: process.pid,
+        cwd: workspace,
+        status: "idle",
+        startedAt: new Date(now - 120_000).toISOString(),
+        updatedAt: new Date(now - 2_000).toISOString(),
+      }),
+    );
+    await writeFile(
+      join(directory, "jobs", "job-stalled", "state.json"),
+      JSON.stringify({
+        state: "working",
+        tempo: "idle",
+        createdAt: new Date(now - 120_000).toISOString(),
+        updatedAt: new Date(now - 2_000).toISOString(),
+      }),
+    );
+
+    // A pre-warmed spare registers a session but has no job state and no
+    // transcript.
+    await writeFile(
+      join(directory, "sessions", "spare.json"),
+      JSON.stringify({
+        sessionId: "spare-session",
+        jobId: "spare-session",
+        kind: "bg",
+        pid: process.pid,
+        cwd: workspace,
+        status: "idle",
+        startedAt: new Date(now - 3_000).toISOString(),
+        updatedAt: new Date(now - 3_000).toISOString(),
+      }),
+    );
+
+    const result = await collectClaudeTelemetry();
+    const resumed = result.agents.find(
+      (agent) => agent.id === "claude:resumed-session",
+    );
+    const stalled = result.agents.find(
+      (agent) => agent.id === "claude:stalled-session",
+    );
+
+    assert.equal(resumed?.status, "running");
+    assert.equal(resumed?.endedAt, null);
+    assert.equal(stalled?.status, "queued");
+    assert.equal(
+      result.agents.some((agent) => agent.id === "claude:spare-session"),
+      false,
+    );
+    assert.match(result.source.detail, /Loaded 2 Claude sessions/u);
+  } finally {
+    if (previousDirectory === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = previousDirectory;
+    }
+    if (previousRateLimitsFile === undefined) {
+      delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    } else {
+      process.env.CLAUDE_RATE_LIMITS_FILE = previousRateLimitsFile;
+    }
+    if (previousWorkspace === undefined) {
+      delete process.env.MONITOR_WORKSPACE;
+    } else {
+      process.env.MONITOR_WORKSPACE = previousWorkspace;
+    }
+    await rm(directory, { force: true, recursive: true });
+  }
+});
