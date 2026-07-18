@@ -31,11 +31,14 @@ tool counts remain blank instead of being estimated.
   lifecycle, topology, model, effort, working-directory, token, context, rate-limit,
   timestamp, and tool-call identifier fields.
 - **Claude Code:** reads `${CLAUDE_CONFIG_DIR:-~/.claude}/sessions`, matching job
-  state, usage rows from the matching transcript, direct depth-one subagent
-  metadata, and fresh rate-limit and effort data captured by
+  state, usage rows from the matching transcript, subagent metadata at any
+  nesting depth (resolved via each subagent's recorded parent, not directory
+  location), and fresh rate-limit and effort data captured by
   `scripts/claude-statusline-bridge.mjs`. It shows the eight newest roots and up
-  to twenty-four direct subagents. Pre-warmed background spare sessions —
-  registry entries with no job state and no transcript — are excluded.
+  to forty-eight subagents; a subagent kept by that cap always keeps its full
+  ancestor chain even if an ancestor falls outside the recency window.
+  Pre-warmed background spare sessions — registry entries with no job state
+  and no transcript — are excluded.
 - **AGY:** remains unconfigured unless `AGY_TELEMETRY_FILE` points to a local JSON
   snapshot. No AGY installation or stable telemetry contract was found, so the
   app does not fabricate one.
