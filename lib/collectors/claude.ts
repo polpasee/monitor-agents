@@ -22,7 +22,7 @@ import type {
 import type { CollectorResult } from "./types";
 
 const MAX_ROOTS = 8;
-const MAX_SUBAGENTS = 24;
+const MAX_SUBAGENTS = 48;
 const MAX_QUOTA_AGE_MS = 15 * 60 * 1_000;
 const MAX_TASK_LENGTH = 160;
 const MAX_NAME_LENGTH = 32;
@@ -99,7 +99,8 @@ interface SubagentCandidate {
   description: string | null;
   fanLabel: string | null;
   workflowId: string | null;
-  parentId: string;
+  rootId: string;
+  parentAgentId: string | null;
   rootStatus: AgentStatus;
   rootEffort: string | null;
   cwd: string;
@@ -750,12 +751,14 @@ async function collectSubagentsInDirectory(
         join(agentDirectory, `agent-${match[1]}.meta.json`),
         diagnostics,
       );
-      // Older Claude Code versions omit spawnDepth from direct-subagent
-      // metadata; only an explicit deeper depth marks a nested spawn.
-      const spawnDepth = meta ? numberValue(meta.spawnDepth) : null;
-      if (!meta || (spawnDepth !== null && spawnDepth !== 1)) {
+      if (!meta) {
         return null;
       }
+      // spawnDepth-2+ subagents (nested Task-tool spawns) live flat
+      // alongside depth-1 ones; parentAgentId (an agentId in this same
+      // pool, or absent for a direct child of the root) is what encodes
+      // the real chain, not directory nesting.
+      const parentAgentId = stringValue(meta.parentAgentId);
 
       try {
         return {
@@ -764,7 +767,8 @@ async function collectSubagentsInDirectory(
           description: truncateName(stringValue(meta.description)),
           fanLabel: labels.get(match[1]) ?? null,
           workflowId,
-          parentId: parent.id,
+          rootId: parent.id,
+          parentAgentId,
           rootStatus: parent.status,
           rootEffort: parent.effort,
           cwd: parent.cwd,
@@ -1074,9 +1078,35 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
   }
   const rootCount = agents.length;
 
-  for (const candidate of subagentCandidates
-    .sort((left, right) => right.modifiedAtMs - left.modifiedAtMs)
-    .slice(0, MAX_SUBAGENTS)) {
+  const sortedCandidates = subagentCandidates
+    .slice()
+    .sort((left, right) => right.modifiedAtMs - left.modifiedAtMs);
+  const candidateKey = (candidate: SubagentCandidate): string =>
+    `${candidate.rootId}:${candidate.agentId}`;
+  const candidatesByKey = new Map(
+    sortedCandidates.map((candidate) => [candidateKey(candidate), candidate]),
+  );
+  const selectedKeys = new Set(
+    sortedCandidates.slice(0, MAX_SUBAGENTS).map(candidateKey),
+  );
+  // Recency-based truncation must not orphan a kept subagent's ancestors:
+  // pull in its full parentAgentId chain even when an ancestor falls
+  // outside the top-N recency window.
+  for (const key of selectedKeys) {
+    let candidate = candidatesByKey.get(key);
+    while (candidate?.parentAgentId) {
+      const parentKey = `${candidate.rootId}:${candidate.parentAgentId}`;
+      if (selectedKeys.has(parentKey)) {
+        break;
+      }
+      selectedKeys.add(parentKey);
+      candidate = candidatesByKey.get(parentKey);
+    }
+  }
+
+  for (const candidate of sortedCandidates.filter((candidate) =>
+    selectedKeys.has(candidateKey(candidate)),
+  )) {
     let transcript: TranscriptSummary;
     try {
       transcript = await summarizeTranscript(candidate.transcriptPath);
@@ -1089,8 +1119,10 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
     const startedAtMs = transcript.firstAtMs ?? candidate.modifiedAtMs;
     const lastActivityAtMs = transcript.lastAtMs ?? candidate.modifiedAtMs;
     agents.push({
-      id: `${candidate.parentId}:${candidate.agentId}`,
-      parentId: candidate.parentId,
+      id: `${candidate.rootId}:${candidate.agentId}`,
+      parentId: candidate.parentAgentId
+        ? `${candidate.rootId}:${candidate.parentAgentId}`
+        : candidate.rootId,
       name:
         candidate.description ??
         candidate.fanLabel ??

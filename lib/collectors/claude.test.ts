@@ -236,7 +236,11 @@ test("Claude collector enriches roots from registry and job state and finds suba
     await writeFile(join(subagentsDirectory, "agent-deep.jsonl"), "");
     await writeFile(
       join(subagentsDirectory, "agent-deep.meta.json"),
-      JSON.stringify({ agentType: "worker", spawnDepth: 2 }),
+      JSON.stringify({
+        agentType: "worker",
+        spawnDepth: 2,
+        parentAgentId: "nodepth",
+      }),
     );
     for (const extra of ["s1", "s2", "s3", "s4", "s5"]) {
       await writeFile(join(subagentsDirectory, `agent-${extra}.jsonl`), "");
@@ -292,6 +296,9 @@ test("Claude collector enriches roots from registry and job state and finds suba
     const emptyChild = result.agents.find(
       (agent) => agent.id === `claude:${sessionId}:wfempty`,
     );
+    const deepChild = result.agents.find(
+      (agent) => agent.id === `claude:${sessionId}:deep`,
+    );
 
     assert.equal(root?.name, "IPPORTAL");
     assert.equal(root?.model, "fable");
@@ -311,10 +318,11 @@ test("Claude collector enriches roots from registry and job state and finds suba
       result.agents.filter((agent) => agent.parentId === root?.id).length,
       9,
     );
-    assert.equal(
-      result.agents.some((agent) => agent.id === `claude:${sessionId}:deep`),
-      false,
-    );
+    // A spawnDepth-2 subagent with parentAgentId "nodepth" is nested under
+    // that direct subagent, not the root — arbitrary-depth chains are
+    // resolved via parentAgentId, not directory nesting or spawnDepth.
+    assert.equal(deepChild?.parentId, direct?.id);
+    assert.equal(deepChild?.effort, "xhigh");
   } finally {
     if (previousDirectory === undefined) {
       delete process.env.CLAUDE_CONFIG_DIR;
@@ -742,6 +750,105 @@ test("Claude collector distinguishes resumed, stalled, and spare sessions", asyn
       false,
     );
     assert.match(result.source.detail, /Loaded 2 Claude sessions/u);
+  } finally {
+    if (previousDirectory === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = previousDirectory;
+    }
+    if (previousRateLimitsFile === undefined) {
+      delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    } else {
+      process.env.CLAUDE_RATE_LIMITS_FILE = previousRateLimitsFile;
+    }
+    if (previousWorkspace === undefined) {
+      delete process.env.MONITOR_WORKSPACE;
+    } else {
+      process.env.MONITOR_WORKSPACE = previousWorkspace;
+    }
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test("Claude collector resolves an arbitrary-depth subagent chain via parentAgentId", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-claude-nested-"));
+  const workspace = "/workspace/nested";
+  const sessionId = "nested-session";
+  const projectDirectory = join(directory, "projects", "-workspace-nested");
+  const subagentsDirectory = join(projectDirectory, sessionId, "subagents");
+  const previousDirectory = process.env.CLAUDE_CONFIG_DIR;
+  const previousRateLimitsFile = process.env.CLAUDE_RATE_LIMITS_FILE;
+  const previousWorkspace = process.env.MONITOR_WORKSPACE;
+  const now = Date.now();
+
+  try {
+    process.env.CLAUDE_CONFIG_DIR = directory;
+    delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    process.env.MONITOR_WORKSPACE = workspace;
+    await mkdir(join(directory, "sessions"), { recursive: true });
+    await mkdir(subagentsDirectory, { recursive: true });
+    await writeFile(
+      join(directory, "sessions", "nested.json"),
+      JSON.stringify({
+        sessionId,
+        cwd: workspace,
+        status: "busy",
+        startedAt: new Date(now - 60_000).toISOString(),
+        updatedAt: new Date(now - 1_000).toISOString(),
+      }),
+    );
+    await writeFile(join(projectDirectory, `${sessionId}.jsonl`), "");
+
+    // Three levels deep: root -> a (depth 1) -> b (depth 2) -> c (depth 3).
+    // All three transcripts live flat in the same subagents/ directory.
+    for (const [id, depth, parentAgentId] of [
+      ["a", 1, null],
+      ["b", 2, "a"],
+      ["c", 3, "b"],
+    ] as const) {
+      await writeFile(join(subagentsDirectory, `agent-${id}.jsonl`), "");
+      await writeFile(
+        join(subagentsDirectory, `agent-${id}.meta.json`),
+        JSON.stringify({
+          agentType: "worker",
+          spawnDepth: depth,
+          ...(parentAgentId ? { parentAgentId } : {}),
+        }),
+      );
+    }
+    // A dangling reference (parent never collected) degrades to a root
+    // child rather than being dropped or crashing the collector.
+    await writeFile(join(subagentsDirectory, "agent-orphan.jsonl"), "");
+    await writeFile(
+      join(subagentsDirectory, "agent-orphan.meta.json"),
+      JSON.stringify({
+        agentType: "worker",
+        spawnDepth: 2,
+        parentAgentId: "missing",
+      }),
+    );
+
+    const result = await collectClaudeTelemetry();
+    const root = result.agents.find(
+      (agent) => agent.id === `claude:${sessionId}`,
+    );
+    const a = result.agents.find(
+      (agent) => agent.id === `claude:${sessionId}:a`,
+    );
+    const b = result.agents.find(
+      (agent) => agent.id === `claude:${sessionId}:b`,
+    );
+    const c = result.agents.find(
+      (agent) => agent.id === `claude:${sessionId}:c`,
+    );
+    const orphan = result.agents.find(
+      (agent) => agent.id === `claude:${sessionId}:orphan`,
+    );
+
+    assert.equal(a?.parentId, root?.id);
+    assert.equal(b?.parentId, a?.id);
+    assert.equal(c?.parentId, b?.id);
+    assert.equal(orphan?.parentId, `${root?.id}:missing`);
   } finally {
     if (previousDirectory === undefined) {
       delete process.env.CLAUDE_CONFIG_DIR;
