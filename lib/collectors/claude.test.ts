@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -323,6 +323,99 @@ test("Claude collector enriches roots from registry and job state and finds suba
     // resolved via parentAgentId, not directory nesting or spawnDepth.
     assert.equal(deepChild?.parentId, direct?.id);
     assert.equal(deepChild?.effort, "xhigh");
+  } finally {
+    if (previousDirectory === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = previousDirectory;
+    }
+    if (previousRateLimitsFile === undefined) {
+      delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    } else {
+      process.env.CLAUDE_RATE_LIMITS_FILE = previousRateLimitsFile;
+    }
+    if (previousWorkspace === undefined) {
+      delete process.env.MONITOR_WORKSPACE;
+    } else {
+      process.env.MONITOR_WORKSPACE = previousWorkspace;
+    }
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test("Claude collector drops subagents stale from a long-finished workflow run", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-claude-stale-"));
+  const workspace = "/workspace/repo";
+  const sessionId = "long-session";
+  const projectDirectory = join(directory, "projects", "-workspace-repo");
+  const subagentsDirectory = join(projectDirectory, sessionId, "subagents");
+  const workflowDirectory = join(subagentsDirectory, "workflows", "wf-old");
+  const previousDirectory = process.env.CLAUDE_CONFIG_DIR;
+  const previousRateLimitsFile = process.env.CLAUDE_RATE_LIMITS_FILE;
+  const previousWorkspace = process.env.MONITOR_WORKSPACE;
+  const now = Date.now();
+  const staleMs = now - 19 * 60 * 60 * 1_000;
+
+  try {
+    process.env.CLAUDE_CONFIG_DIR = directory;
+    delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    process.env.MONITOR_WORKSPACE = workspace;
+    await mkdir(join(directory, "sessions"), { recursive: true });
+    await mkdir(join(directory, "jobs", "job-long"), { recursive: true });
+    await mkdir(workflowDirectory, { recursive: true });
+    await writeFile(
+      join(directory, "sessions", "long.json"),
+      JSON.stringify({
+        sessionId,
+        jobId: "job-long",
+        pid: process.pid,
+        cwd: workspace,
+        status: "busy",
+        startedAt: new Date(now - 2 * 24 * 60 * 60 * 1_000).toISOString(),
+        updatedAt: new Date(now - 1_000).toISOString(),
+      }),
+    );
+    await writeFile(
+      join(directory, "jobs", "job-long", "state.json"),
+      JSON.stringify({
+        state: "working",
+        tempo: "active",
+        detail: "Focused review of final commits",
+        fan: [{ id: "current", kind: "agent", label: "Focused review" }],
+        createdAt: new Date(now - 2 * 24 * 60 * 60 * 1_000).toISOString(),
+        updatedAt: new Date(now - 1_000).toISOString(),
+      }),
+    );
+    await writeFile(join(projectDirectory, `${sessionId}.jsonl`), "");
+
+    // A subagent that is still doing work right now.
+    await writeFile(join(subagentsDirectory, "agent-current.jsonl"), "");
+    await writeFile(
+      join(subagentsDirectory, "agent-current.meta.json"),
+      JSON.stringify({ agentType: "worker", description: "Focused review" }),
+    );
+
+    // A whole workflow's worth of subagents from a run that finished
+    // hours ago — leftover files from earlier in this long-lived session.
+    for (const extra of ["w1", "w2", "w3"]) {
+      const transcript = join(workflowDirectory, `agent-${extra}.jsonl`);
+      await writeFile(transcript, "");
+      await writeFile(
+        join(workflowDirectory, `agent-${extra}.meta.json`),
+        JSON.stringify({ agentType: "workflow-subagent" }),
+      );
+      await utimes(transcript, staleMs / 1_000, staleMs / 1_000);
+    }
+
+    const result = await collectClaudeTelemetry();
+    const root = result.agents.find(
+      (agent) => agent.id === `claude:${sessionId}`,
+    );
+    const subagentIds = result.agents
+      .filter((agent) => agent.parentId === root?.id)
+      .map((agent) => agent.id);
+
+    assert.deepEqual(subagentIds, [`claude:${sessionId}:current`]);
   } finally {
     if (previousDirectory === undefined) {
       delete process.env.CLAUDE_CONFIG_DIR;

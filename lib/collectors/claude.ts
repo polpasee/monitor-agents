@@ -28,6 +28,7 @@ const MAX_TASK_LENGTH = 160;
 const MAX_NAME_LENGTH = 32;
 const SCAN_CONCURRENCY = 8;
 const DEAD_SESSION_GRACE_MS = 2 * 60 * 1_000;
+const MAX_SUBAGENT_AGE_MS = 30 * 60 * 1_000;
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_CONTEXT_LIMIT = 200_000;
@@ -1086,12 +1087,21 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
   const candidatesByKey = new Map(
     sortedCandidates.map((candidate) => [candidateKey(candidate), candidate]),
   );
+  const nowMs = Date.now();
+  // A long-running session's subagents directory accumulates every agent
+  // ever spawned in its lifetime; without an age cutoff, a Workflow run
+  // from hours or days ago stays pinned in the topology forever alongside
+  // whatever is actually running now (only the MAX_SUBAGENTS count caps it,
+  // and that rarely trips for a single workflow burst).
   const selectedKeys = new Set(
-    sortedCandidates.slice(0, MAX_SUBAGENTS).map(candidateKey),
+    sortedCandidates
+      .filter((candidate) => nowMs - candidate.modifiedAtMs <= MAX_SUBAGENT_AGE_MS)
+      .slice(0, MAX_SUBAGENTS)
+      .map(candidateKey),
   );
   // Recency-based truncation must not orphan a kept subagent's ancestors:
   // pull in its full parentAgentId chain even when an ancestor falls
-  // outside the top-N recency window.
+  // outside the top-N recency window or the age cutoff.
   for (const key of selectedKeys) {
     let candidate = candidatesByKey.get(key);
     while (candidate?.parentAgentId) {
