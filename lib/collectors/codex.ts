@@ -14,6 +14,7 @@ import {
 import type { CollectorResult } from "./types.ts";
 
 const DEFAULT_MAX_AGENTS = 24;
+const STALE_RUNNING_GRACE_MS = 2 * 60 * 1_000;
 const TOOL_CALL_TYPES = new Set([
   "custom_tool_call",
   "function_call",
@@ -335,6 +336,10 @@ function deriveLifecycle(
 
   const outcome = rollout.outcomes.get(latestStart.turnId);
   if (outcome === undefined) {
+    const updatedAtMs = rowTimestampMs(row.updated_at_ms, row.updated_at);
+    if (Date.now() - updatedAtMs > STALE_RUNNING_GRACE_MS) {
+      return { status: "idle", endedAt: null };
+    }
     return { status: "running", endedAt: null };
   }
   if (outcome.kind === "aborted") {
@@ -587,6 +592,26 @@ export async function collectCodexTelemetry(): Promise<CollectorResult> {
         ),
       })),
     );
+    const quotaRows = database
+      .prepare(
+        `SELECT rollout_path, created_at, created_at_ms
+         FROM threads
+         WHERE archived = 0
+         ORDER BY COALESCE(NULLIF(updated_at_ms, 0), updated_at * 1000) DESC
+         LIMIT ?`,
+      )
+      .all(maxAgents) as unknown as Pick<
+      ThreadRow,
+      "rollout_path" | "created_at" | "created_at_ms"
+    >[];
+    const quotaRollouts = await Promise.all(
+      quotaRows.map((row) =>
+        parseRollout(
+          row.rollout_path,
+          rowTimestampMs(row.created_at_ms, row.created_at),
+        ),
+      ),
+    );
 
     const agents: AgentRun[] = [];
     const events: Event[] = [];
@@ -597,13 +622,6 @@ export async function collectCodexTelemetry(): Promise<CollectorResult> {
     for (const { row, rollout } of parsedRows) {
       unavailableRollouts += rollout.readError ? 1 : 0;
       malformedLines += rollout.malformedLines;
-      if (
-        rollout.rate !== null &&
-        (latestRate === null || rollout.rate.atMs >= latestRate.atMs)
-      ) {
-        latestRate = rollout.rate;
-      }
-
       const hasParent =
         row.parent_thread_id !== null && includedIds.has(row.parent_thread_id);
       const cwd = rollout.cwd ?? row.cwd;
@@ -644,6 +662,15 @@ export async function collectCodexTelemetry(): Promise<CollectorResult> {
       };
       agents.push(agent);
       events.push(...buildEvents(agent, row.id, rollout));
+    }
+
+    for (const rollout of quotaRollouts) {
+      if (
+        rollout.rate !== null &&
+        (latestRate === null || rollout.rate.atMs >= latestRate.atMs)
+      ) {
+        latestRate = rollout.rate;
+      }
     }
 
     const quotaLimits: QuotaLimit[] = [];

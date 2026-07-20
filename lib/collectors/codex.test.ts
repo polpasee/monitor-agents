@@ -171,3 +171,135 @@ test("Codex collector loads multiple recent native families under one agent cap"
     await rm(directory, { force: true, recursive: true });
   }
 });
+
+test("Codex collector uses account-wide quota outside the selected workspace", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-codex-quota-"));
+  const previousCodexHome = process.env.CODEX_HOME;
+  const previousWorkspace = process.env.MONITOR_WORKSPACE;
+  const workspace = "/workspace/selected";
+  const now = Date.now();
+
+  try {
+    process.env.CODEX_HOME = directory;
+    process.env.MONITOR_WORKSPACE = workspace;
+
+    const selectedRollout = join(directory, "selected.jsonl");
+    const recentRollout = join(directory, "recent.jsonl");
+    await writeFile(
+      selectedRollout,
+      `${[
+        {
+          timestamp: new Date(now - 200_000).toISOString(),
+          type: "event_msg",
+          payload: {
+            type: "task_started",
+            turn_id: "stale-turn",
+            started_at: (now - 200_000) / 1_000,
+          },
+        },
+        {
+          timestamp: new Date(now - 180_000).toISOString(),
+          type: "event_msg",
+          payload: {
+            type: "token_count",
+            rate_limits: {
+              primary: {
+                used_percent: 100,
+                window_minutes: 10_080,
+                resets_at: Math.floor((now + 100_000) / 1_000),
+              },
+            },
+          },
+        },
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n")}\n`,
+    );
+    await writeFile(
+      recentRollout,
+      `${JSON.stringify({
+        timestamp: new Date(now - 5_000).toISOString(),
+        type: "event_msg",
+        payload: {
+          type: "token_count",
+          rate_limits: {
+            primary: {
+              used_percent: 0,
+              window_minutes: 10_080,
+              resets_at: Math.floor((now + 200_000) / 1_000),
+            },
+          },
+        },
+      })}\n`,
+    );
+
+    const database = new DatabaseSync(join(directory, "state_5.sqlite"));
+    database.exec(`
+      CREATE TABLE threads (
+        id TEXT PRIMARY KEY,
+        rollout_path TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        created_at_ms INTEGER,
+        updated_at INTEGER NOT NULL,
+        updated_at_ms INTEGER,
+        cwd TEXT NOT NULL,
+        archived INTEGER NOT NULL DEFAULT 0,
+        agent_nickname TEXT,
+        agent_role TEXT,
+        model TEXT,
+        reasoning_effort TEXT,
+        thread_source TEXT
+      );
+      CREATE TABLE thread_spawn_edges (
+        parent_thread_id TEXT NOT NULL,
+        child_thread_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL
+      );
+    `);
+    const insert = database.prepare(`
+      INSERT INTO threads (
+        id, rollout_path, created_at, created_at_ms, updated_at, updated_at_ms,
+        cwd, thread_source
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    insert.run(
+      "selected",
+      selectedRollout,
+      Math.floor((now - 240_000) / 1_000),
+      now - 240_000,
+      Math.floor((now - 180_000) / 1_000),
+      now - 180_000,
+      workspace,
+      "user",
+    );
+    insert.run(
+      "recent",
+      recentRollout,
+      Math.floor((now - 10_000) / 1_000),
+      now - 10_000,
+      Math.floor((now - 5_000) / 1_000),
+      now - 5_000,
+      "/workspace/other",
+      "user",
+    );
+    database.close();
+
+    const result = await collectCodexTelemetry();
+
+    assert.deepEqual(result.agents.map((agent) => agent.id), ["codex:selected"]);
+    assert.equal(result.agents[0]?.status, "idle");
+    assert.equal(result.quotaLimits[0]?.usedPercent, 0);
+  } finally {
+    if (previousCodexHome === undefined) {
+      delete process.env.CODEX_HOME;
+    } else {
+      process.env.CODEX_HOME = previousCodexHome;
+    }
+    if (previousWorkspace === undefined) {
+      delete process.env.MONITOR_WORKSPACE;
+    } else {
+      process.env.MONITOR_WORKSPACE = previousWorkspace;
+    }
+    await rm(directory, { force: true, recursive: true });
+  }
+});
