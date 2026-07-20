@@ -393,9 +393,8 @@ export function Topology({
 
     function updateDimensions() {
       const width = Math.max(300, Math.round(container!.clientWidth));
-      const baseHeight =
+      const height =
         width < 560 ? 528 : Math.min(672, Math.max(576, width * 0.672));
-      const height = Math.round(baseHeight * 1.2);
 
       setDimensions((current) =>
         current.width === width && current.height === height
