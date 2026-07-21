@@ -57,6 +57,9 @@ interface GraphNode extends SimulationNodeDatum {
   depth: number;
   radius: number;
   color: TopologyNodeColor;
+  // Id of the top-level ancestor (forest root) this node belongs to. Nodes
+  // sharing a groupRootId are painted together in one z-index band.
+  groupRootId: string;
 }
 
 interface GraphLink extends SimulationLinkDatum<GraphNode> {
@@ -426,11 +429,29 @@ export function Topology({
     );
     const childCounts = new Map<string, number>();
     const agentDepths = getAgentDepths(agents);
+    const agentsById = new Map(agents.map((agent) => [agent.id, agent]));
 
     for (const agent of agents) {
       if (agent.parentId) {
         childCounts.set(agent.parentId, (childCounts.get(agent.parentId) ?? 0) + 1);
       }
+    }
+
+    // Walk parentId up to the forest root so every node knows which group's
+    // z-index band it belongs to. The `seen` guard keeps a cyclic parent chain
+    // (defensive — telemetry should be acyclic) from looping forever.
+    function groupRootIdOf(agentId: string): string {
+      let current = agentsById.get(agentId);
+      const seen = new Set<string>();
+      while (
+        current?.parentId &&
+        agentsById.has(current.parentId) &&
+        !seen.has(current.id)
+      ) {
+        seen.add(current.id);
+        current = agentsById.get(current.parentId);
+      }
+      return current?.id ?? agentId;
     }
 
     const orbitalRadius = Math.min(width, height) * (mobile ? 0.24 : 0.28);
@@ -448,6 +469,7 @@ export function Topology({
         childCount: childCounts.get(agent.id) ?? 0,
         color: colorAssignments.get(agent.id)!,
         depth,
+        groupRootId: groupRootIdOf(agent.id),
         radius,
         x: cachedPosition
           ? cachedPosition.normalizedX * width
@@ -550,10 +572,55 @@ export function Topology({
       .attr("class", "force-link__label")
       .text((item) => item.spawnMethod);
 
+    // Bucket nodes by their forest root so each group paints in its own
+    // z-index band. SVG has no z-index — stacking follows DOM order, so a
+    // group that appears later in `orderedGroups` renders on top. The base
+    // order follows each group's first appearance in the node array (stable
+    // across ticks); the selected agent's group is moved last so its whole
+    // subtree stacks above the others.
+    const nodesByGroup = new Map<string, GraphNode[]>();
+    const groupOrder: string[] = [];
+    for (const item of nodes) {
+      const bucket = nodesByGroup.get(item.groupRootId);
+      if (bucket) {
+        bucket.push(item);
+      } else {
+        nodesByGroup.set(item.groupRootId, [item]);
+        groupOrder.push(item.groupRootId);
+      }
+    }
+
+    const selectedGroupRootId = selectedAgentIdRef.current
+      ? nodeById.get(selectedAgentIdRef.current)?.groupRootId
+      : undefined;
+    const orderedGroupIds =
+      selectedGroupRootId && nodesByGroup.has(selectedGroupRootId)
+        ? [
+            ...groupOrder.filter((rootId) => rootId !== selectedGroupRootId),
+            selectedGroupRootId,
+          ]
+        : groupOrder;
+    const orderedGroups = orderedGroupIds.map((rootId, zIndex) => ({
+      rootId,
+      zIndex,
+      nodes: nodesByGroup.get(rootId)!,
+    }));
+
     const nodeLayer = scene.append("g").attr("class", "force-nodes");
     const node = nodeLayer
-      .selectAll<SVGGElement, GraphNode>("g")
-      .data(nodes, (item) => item.id)
+      .selectAll<SVGGElement, (typeof orderedGroups)[number]>(
+        "g.force-node-group",
+      )
+      .data(orderedGroups, (group) => group.rootId)
+      .join("g")
+      .attr("class", "force-node-group")
+      .attr("data-group-id", (group) => group.rootId)
+      .attr("data-group-index", (group) => group.zIndex)
+      .selectAll<SVGGElement, GraphNode>("g.force-node")
+      .data(
+        (group) => group.nodes,
+        (item) => item.id,
+      )
       .join("g")
       .attr("class", "force-node")
       .attr("data-depth", (item) => Math.min(item.depth, 3))
@@ -884,7 +951,16 @@ export function Topology({
         item.id === selectedAgentId ? "true" : null,
       )
       .attr("aria-pressed", (item) => item.id === selectedAgentId);
-    nodes.filter((item) => item.id === selectedAgentId).raise();
+    const selected = nodes.filter((item) => item.id === selectedAgentId);
+    // Lift the selected node's whole group band above the others, then lift
+    // the node within that band, so both the group and the node end up on top.
+    selected.each(function () {
+      const groupBand = (this as SVGGElement).parentNode as SVGGElement | null;
+      if (groupBand) {
+        select(groupBand).raise();
+      }
+    });
+    selected.raise();
   }, [selectedAgentId]);
 
   return (
