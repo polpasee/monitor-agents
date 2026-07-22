@@ -20,13 +20,14 @@ test("Codex collector loads multiple recent native families under one agent cap"
     { id: "root-a", updatedAtMs: now - 3_000, cwd: workspace },
     { id: "root-b", updatedAtMs: now - 4_000, cwd: claudeWorktree },
     { id: "child-a", updatedAtMs: now, cwd: workspace },
+    { id: "grandchild-a", updatedAtMs: now - 500, cwd: workspace },
     { id: "child-b", updatedAtMs: now - 1_000, cwd: claudeWorktree },
     { id: "older-child-a", updatedAtMs: now - 5_000, cwd: workspace },
   ];
 
   try {
     process.env.CODEX_HOME = directory;
-    process.env.MONITOR_MAX_AGENTS = "4";
+    process.env.MONITOR_MAX_AGENTS = "5";
     delete process.env.MONITOR_WORKSPACE;
 
     await Promise.all(
@@ -109,6 +110,7 @@ test("Codex collector loads multiple recent native families under one agent cap"
       ) VALUES (?, ?, ?)
     `);
     insertEdge.run("root-a", "child-a", "open");
+    insertEdge.run("child-a", "grandchild-a", "open");
     insertEdge.run("root-b", "child-b", "open");
     insertEdge.run("root-a", "older-child-a", "open");
     database.close();
@@ -147,11 +149,24 @@ test("Codex collector loads multiple recent native families under one agent cap"
           status: "running",
           spawnMethod: "native",
         },
+        {
+          id: "codex:grandchild-a",
+          parentId: "codex:child-a",
+          status: "running",
+          spawnMethod: "native",
+        },
       ],
     );
     assert.notEqual(result.agents[1].endedAt, null);
-    assert.equal(result.agents.length, 4);
-    assert.match(result.source.detail, /Limited from 5 by MONITOR_MAX_AGENTS/);
+    assert.equal(result.agents.length, 5);
+    assert.match(result.source.detail, /Limited from 6 by MONITOR_MAX_AGENTS/);
+
+    process.env.MONITOR_MAX_AGENTS = "1";
+    const singleCandidate = await collectCodexTelemetry();
+    assert.deepEqual(
+      singleCandidate.agents.map((agent) => agent.id),
+      ["codex:root-a", "codex:child-a"],
+    );
   } finally {
     if (previousCodexHome === undefined) {
       delete process.env.CODEX_HOME;
