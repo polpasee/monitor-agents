@@ -36,7 +36,6 @@ interface ThreadRow {
   model: string | null;
   reasoning_effort: string | null;
   thread_source: string | null;
-  family_count: number;
 }
 
 interface TurnStart {
@@ -503,48 +502,42 @@ export async function collectCodexTelemetry(): Promise<CollectorResult> {
       LIMIT 1
     `;
     const parentStatement = database.prepare(parentSql);
-    const rootIds: string[] = [];
-    const includedRoots = new Set<string>();
+    const selectedIds = new Set<string>();
     for (const candidate of candidates) {
       const visited = new Set<string>();
-      let rootId = candidate.id;
-      while (!visited.has(rootId)) {
-        visited.add(rootId);
+      const ancestry: string[] = [];
+      let currentId = candidate.id;
+      while (!visited.has(currentId)) {
+        visited.add(currentId);
+        ancestry.push(currentId);
         const parent = parentStatement.get(
-          rootId,
+          currentId,
           ...(workspace === null ? [] : [workspace]),
         ) as { parent_thread_id: string } | undefined;
         if (parent === undefined) {
           break;
         }
-        rootId = parent.parent_thread_id;
+        currentId = parent.parent_thread_id;
       }
-      if (!includedRoots.has(rootId)) {
-        includedRoots.add(rootId);
-        rootIds.push(rootId);
+
+      const missingIds = ancestry.filter((id) => !selectedIds.has(id));
+      // A single recent thread can have more ancestors than the configured
+      // cap. Keep that first complete chain instead of returning an empty or
+      // orphaned topology; apply the cap when considering later families.
+      if (
+        selectedIds.size > 0 &&
+        selectedIds.size + missingIds.length > maxAgents
+      ) {
+        continue;
+      }
+      for (const id of missingIds.reverse()) {
+        selectedIds.add(id);
       }
     }
 
-    const rootValues = rootIds.map(() => "(?, ?)").join(", ");
-    const familySql = `
-      WITH RECURSIVE roots(id, root_rank) AS (
-        VALUES ${rootValues}
-      ),
-      family(id, depth, path, root_rank) AS (
-        SELECT roots.id, 0, ',' || roots.id || ',', roots.root_rank
-        FROM roots
-        UNION ALL
-        SELECT edge.child_thread_id,
-               family.depth + 1,
-               family.path || edge.child_thread_id || ',',
-               family.root_rank
-        FROM family
-        JOIN thread_spawn_edges AS edge ON edge.parent_thread_id = family.id
-        JOIN threads AS child ON child.id = edge.child_thread_id
-        WHERE child.archived = 0
-          ${workspace === null ? "" : "AND child.cwd = ?"}
-          AND instr(family.path, ',' || edge.child_thread_id || ',') = 0
-      )
+    const selectedValues = [...selectedIds];
+    const selectedPlaceholders = selectedValues.map(() => "?").join(", ");
+    const selectedSql = `
       SELECT thread.id,
              edge.parent_thread_id,
              thread.rollout_path,
@@ -557,32 +550,48 @@ export async function collectCodexTelemetry(): Promise<CollectorResult> {
              thread.agent_role,
              thread.model,
              thread.reasoning_effort,
-             thread.thread_source,
-             COUNT(*) OVER () AS family_count
-      FROM family
-      JOIN threads AS thread ON thread.id = family.id
+             thread.thread_source
+      FROM threads AS thread
       LEFT JOIN thread_spawn_edges AS edge ON edge.child_thread_id = thread.id
-      ORDER BY family.depth ASC,
-               COALESCE(NULLIF(thread.updated_at_ms, 0), thread.updated_at * 1000) DESC,
-               family.root_rank ASC,
-               thread.id ASC
-      LIMIT ?
+      WHERE thread.id IN (${selectedPlaceholders})
     `;
-    const familyBindings: Array<string | number> = rootIds.flatMap(
-      (rootId, index) => [rootId, index],
-    );
-    if (workspace !== null) {
-      familyBindings.push(workspace);
-    }
-    familyBindings.push(maxAgents);
-    const rows = database.prepare(familySql).all(...familyBindings) as unknown as
-      | ThreadRow[];
+    const rows = database
+      .prepare(selectedSql)
+      .all(...selectedValues) as unknown as ThreadRow[];
 
     if (rows.length === 0) {
       return emptyResult("idle", "The selected Codex thread families are empty.");
     }
 
     const includedIds = new Set(rows.map((row) => row.id));
+    const rowsById = new Map(rows.map((row) => [row.id, row]));
+    const depths = new Map<string, number>();
+    function rowDepth(row: ThreadRow, path = new Set<string>()): number {
+      const known = depths.get(row.id);
+      if (known !== undefined) {
+        return known;
+      }
+      if (
+        row.parent_thread_id === null ||
+        !includedIds.has(row.parent_thread_id) ||
+        path.has(row.id)
+      ) {
+        return 0;
+      }
+      path.add(row.id);
+      const parent = rowsById.get(row.parent_thread_id);
+      const depth = parent === undefined ? 0 : rowDepth(parent, path) + 1;
+      path.delete(row.id);
+      depths.set(row.id, depth);
+      return depth;
+    }
+    rows.sort(
+      (left, right) =>
+        rowDepth(left) - rowDepth(right) ||
+        rowTimestampMs(right.updated_at_ms, right.updated_at) -
+          rowTimestampMs(left.updated_at_ms, left.updated_at) ||
+        left.id.localeCompare(right.id),
+    );
     const parsedRows = await Promise.all(
       rows.map(async (row) => ({
         row,
@@ -682,10 +691,18 @@ export async function collectCodexTelemetry(): Promise<CollectorResult> {
     }
 
     events.sort((left, right) => Date.parse(right.at) - Date.parse(left.at));
-    const familyCount = rows[0]?.family_count ?? rows.length;
+    const totalBindings = workspace === null ? [] : [workspace];
+    const total = database
+      .prepare(
+        `SELECT COUNT(*) AS count
+         FROM threads
+         WHERE archived = 0
+           ${workspace === null ? "" : "AND cwd = ?"}`,
+      )
+      .get(...totalBindings) as { count: number };
     const notes: string[] = [`Loaded ${agents.length} live Codex agents.`];
-    if (familyCount > rows.length) {
-      notes.push(`Limited from ${familyCount} by MONITOR_MAX_AGENTS.`);
+    if (total.count > rows.length) {
+      notes.push(`Limited from ${total.count} by MONITOR_MAX_AGENTS.`);
     }
     if (unavailableRollouts > 0) {
       notes.push(`${unavailableRollouts} rollout files could not be read.`);
