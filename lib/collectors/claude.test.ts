@@ -191,6 +191,7 @@ test("Claude collector enriches roots from registry and job state and finds suba
   const projectDirectory = join(directory, "projects", "-workspace-repo");
   const subagentsDirectory = join(projectDirectory, sessionId, "subagents");
   const workflowDirectory = join(subagentsDirectory, "workflows", "wf-1");
+  const workflowStateDirectory = join(projectDirectory, sessionId, "workflows");
   const previousDirectory = process.env.CLAUDE_CONFIG_DIR;
   const previousRateLimitsFile = process.env.CLAUDE_RATE_LIMITS_FILE;
   const previousWorkspace = process.env.MONITOR_WORKSPACE;
@@ -203,6 +204,7 @@ test("Claude collector enriches roots from registry and job state and finds suba
     await mkdir(join(directory, "sessions"), { recursive: true });
     await mkdir(join(directory, "jobs", "job-rich"), { recursive: true });
     await mkdir(workflowDirectory, { recursive: true });
+    await mkdir(workflowStateDirectory, { recursive: true });
     await writeFile(
       join(directory, "sessions", "rich.json"),
       JSON.stringify({
@@ -227,11 +229,34 @@ test("Claude collector enriches roots from registry and job state and finds suba
         updatedAt: new Date(now - 1_000).toISOString(),
       }),
     );
-    await writeFile(join(projectDirectory, `${sessionId}.jsonl`), "");
+    await writeFile(
+      join(projectDirectory, `${sessionId}.jsonl`),
+      [
+        {
+          type: "queue-operation",
+          timestamp: new Date(now - 30_000).toISOString(),
+          content:
+            "<task-notification><task-id>nodepth</task-id><status>failed</status></task-notification>",
+        },
+        {
+          type: "user",
+          timestamp: new Date(now - 25_000).toISOString(),
+          message: {
+            content:
+              "<task-notification><task-id>nodepth</task-id><status>completed</status></task-notification>",
+          },
+        },
+      ]
+        .map((value) => JSON.stringify(value))
+        .join("\n") + "\n",
+    );
     await writeFile(join(subagentsDirectory, "agent-nodepth.jsonl"), "");
     await writeFile(
       join(subagentsDirectory, "agent-nodepth.meta.json"),
-      JSON.stringify({ agentType: "code-reviewer", description: "Code review" }),
+      JSON.stringify({
+        agentType: "code-reviewer",
+        description: "Code review",
+      }),
     );
     await writeFile(join(subagentsDirectory, "agent-deep.jsonl"), "");
     await writeFile(
@@ -260,6 +285,20 @@ test("Claude collector enriches roots from registry and job state and finds suba
     await writeFile(
       join(workflowDirectory, "agent-wfchild.meta.json"),
       JSON.stringify({ agentType: "workflow-subagent" }),
+    );
+    await writeFile(
+      join(workflowStateDirectory, "wf-1.json"),
+      JSON.stringify({
+        status: "completed",
+        workflowProgress: [
+          {
+            type: "workflow_agent",
+            agentId: "wfchild",
+            state: "done",
+            lastProgressAt: now - 20_000,
+          },
+        ],
+      }),
     );
     const longText =
       "Audit the git branch supersession state in this repository";
@@ -308,9 +347,12 @@ test("Claude collector enriches roots from registry and job state and finds suba
     assert.equal(direct?.name, "Code review");
     assert.equal(direct?.task, "Direct Claude subagent (code-reviewer)");
     assert.equal(direct?.effort, "xhigh");
+    assert.equal(direct?.status, "completed");
     assert.equal(workflowChild?.name, "verify:stash0");
     assert.equal(workflowChild?.task, "Verify the stash entry");
     assert.equal(workflowChild?.effort, "xhigh");
+    assert.equal(workflowChild?.status, "completed");
+    assert.equal(workflowChild?.endedAt, new Date(now - 20_000).toISOString());
     assert.equal(longTextChild?.name, `${longText.slice(0, 31)}…`);
     assert.equal(longTextChild?.task, longText);
     assert.equal(emptyChild?.name, "Claude workflow-subagent");
@@ -506,7 +548,11 @@ test("Claude collector completes dead-process sessions and counts tool calls", a
         updatedAt: new Date(now - 1_000).toISOString(),
       }),
     );
-    const assistantLine = (content: unknown[], model = "claude-fable-5") =>
+    const assistantLine = (
+      content: unknown[],
+      model = "claude-fable-5",
+      usage = { input_tokens: 100, output_tokens: 20 },
+    ) =>
       JSON.stringify({
         type: "assistant",
         timestamp: new Date(now - 30_000).toISOString(),
@@ -515,7 +561,7 @@ test("Claude collector completes dead-process sessions and counts tool calls", a
           id: "msg-1",
           model,
           content,
-          usage: { input_tokens: 100, output_tokens: 20 },
+          usage,
         },
       });
     const userLine = (content: unknown, isMeta?: boolean) =>
@@ -546,6 +592,7 @@ test("Claude collector completes dead-process sessions and counts tool calls", a
       `${assistantLine(
         [{ type: "tool_use", name: "Read" }],
         "claude-sonnet-5",
+        { input_tokens: 250_001, output_tokens: 20 },
       )}\n`,
     );
 
@@ -579,7 +626,8 @@ test("Claude collector completes dead-process sessions and counts tool calls", a
     assert.equal(live?.tokenUsage.output, 20);
     assert.equal(live?.tokenUsage.contextLimit, 1_000_000);
     assert.equal(liveSonnet?.model, "claude-sonnet-5");
-    assert.equal(liveSonnet?.tokenUsage.contextLimit, 200_000);
+    assert.equal(liveSonnet?.tokenUsage.contextUsed, 250_021);
+    assert.equal(liveSonnet?.tokenUsage.contextLimit, 1_000_000);
   } finally {
     if (previousDirectory === undefined) {
       delete process.env.CLAUDE_CONFIG_DIR;
@@ -890,16 +938,37 @@ test("Claude collector resolves an arbitrary-depth subagent chain via parentAgen
         updatedAt: new Date(now - 1_000).toISOString(),
       }),
     );
-    await writeFile(join(projectDirectory, `${sessionId}.jsonl`), "");
+    await writeFile(
+      join(projectDirectory, `${sessionId}.jsonl`),
+      `${JSON.stringify({
+        type: "user",
+        timestamp: new Date(now - 4_000).toISOString(),
+        message: {
+          content:
+            "<task-notification><task-id>a</task-id><status>completed</status></task-notification>",
+        },
+      })}\n`,
+    );
 
     // Three levels deep: root -> a (depth 1) -> b (depth 2) -> c (depth 3).
     // All three transcripts live flat in the same subagents/ directory.
-    for (const [id, depth, parentAgentId] of [
-      ["a", 1, null],
-      ["b", 2, "a"],
-      ["c", 3, "b"],
+    for (const [id, depth, parentAgentId, childAgentId] of [
+      ["a", 1, null, "b"],
+      ["b", 2, "a", "c"],
+      ["c", 3, "b", null],
     ] as const) {
-      await writeFile(join(subagentsDirectory, `agent-${id}.jsonl`), "");
+      await writeFile(
+        join(subagentsDirectory, `agent-${id}.jsonl`),
+        childAgentId
+          ? `${JSON.stringify({
+              type: "user",
+              timestamp: new Date(now - (3 - depth) * 1_000).toISOString(),
+              message: {
+                content: `<task-notification><task-id>${childAgentId}</task-id><status>completed</status></task-notification>`,
+              },
+            })}\n`
+          : "",
+      );
       await writeFile(
         join(subagentsDirectory, `agent-${id}.meta.json`),
         JSON.stringify({
@@ -942,6 +1011,9 @@ test("Claude collector resolves an arbitrary-depth subagent chain via parentAgen
     assert.equal(b?.parentId, a?.id);
     assert.equal(c?.parentId, b?.id);
     assert.equal(orphan?.parentId, `${root?.id}:missing`);
+    assert.equal(a?.status, "completed");
+    assert.equal(b?.status, "completed");
+    assert.equal(c?.status, "completed");
   } finally {
     if (previousDirectory === undefined) {
       delete process.env.CLAUDE_CONFIG_DIR;

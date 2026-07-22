@@ -34,8 +34,11 @@ const execFileAsync = promisify(execFile);
 const DEFAULT_CONTEXT_LIMIT = 200_000;
 const FABLE_CONTEXT_LIMIT = 1_000_000;
 
-function contextLimitForModel(model: string | null): number {
-  return model?.toLowerCase().includes("fable")
+function contextLimitForModel(
+  model: string | null,
+  observedLongContext: boolean,
+): number {
+  return observedLongContext || model?.toLowerCase().includes("fable")
     ? FABLE_CONTEXT_LIMIT
     : DEFAULT_CONTEXT_LIMIT;
 }
@@ -79,6 +82,7 @@ interface TranscriptSummary {
   output: number;
   cached: number;
   contextUsed: number;
+  contextLimit: number;
   toolCalls: number;
   model: string | null;
   stopReason: string | null;
@@ -86,6 +90,7 @@ interface TranscriptSummary {
   firstAtMs: number | null;
   lastAtMs: number | null;
   costUsd: number | null;
+  taskNotifications: Map<string, ProviderAgentState>;
 }
 
 interface StatusLineSnapshot {
@@ -107,6 +112,13 @@ interface SubagentCandidate {
   cwd: string;
   transcriptPath: string;
   modifiedAtMs: number;
+  providerStatus: AgentStatus | null;
+  providerLastActivityAtMs: number | null;
+}
+
+interface ProviderAgentState {
+  status: AgentStatus;
+  lastActivityAtMs: number | null;
 }
 
 function record(value: unknown): JsonRecord | null {
@@ -545,6 +557,67 @@ function statusFromValues(
   return "idle";
 }
 
+function workflowAgentStatus(value: unknown): AgentStatus | null {
+  const state = stringValue(value)?.toLowerCase();
+  if (!state) {
+    return null;
+  }
+  if (
+    [
+      "done",
+      "completed",
+      "complete",
+      "success",
+      "succeeded",
+      "finished",
+    ].includes(state)
+  ) {
+    return "completed";
+  }
+  if (["failed", "error"].includes(state)) {
+    return "failed";
+  }
+  if (["aborted", "cancelled", "canceled", "interrupted"].includes(state)) {
+    return "aborted";
+  }
+  if (["running", "working", "active"].includes(state)) {
+    return "running";
+  }
+  if (["queued", "pending"].includes(state)) {
+    return "queued";
+  }
+  return state === "idle" ? "idle" : null;
+}
+
+async function loadWorkflowAgentStates(
+  path: string,
+  diagnostics: Diagnostics,
+): Promise<Map<string, ProviderAgentState>> {
+  const states = new Map<string, ProviderAgentState>();
+  const value = await readJsonRecord(path, diagnostics);
+  const progress = Array.isArray(value?.workflowProgress)
+    ? value.workflowProgress
+    : [];
+
+  for (const item of progress) {
+    const entry = record(item);
+    if (entry?.type !== "workflow_agent") {
+      continue;
+    }
+    const agentId = stringValue(entry.agentId);
+    const status = workflowAgentStatus(entry.state);
+    if (!agentId || !status) {
+      continue;
+    }
+    states.set(agentId, {
+      status,
+      lastActivityAtMs:
+        timestampMs(entry.lastProgressAt) ?? timestampMs(entry.startedAt),
+    });
+  }
+  return states;
+}
+
 function isInside(baseDirectory: string, candidate: string): boolean {
   const pathFromBase = relative(resolve(baseDirectory), resolve(candidate));
   return (
@@ -613,6 +686,8 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
   let lastAtMs: number | null = null;
   let costUsd: number | null = null;
   let latestContextUsed = 0;
+  const longContextModels = new Set<string>();
+  const taskNotifications = new Map<string, ProviderAgentState>();
 
   const lines = createInterface({
     input: createReadStream(path, { encoding: "utf8" }),
@@ -647,6 +722,45 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
         firstUserText = truncateTask(text.replace(/\s+/gu, " ").trim());
       }
     }
+    const notificationTexts: string[] = [];
+    if (typeof value.content === "string") {
+      notificationTexts.push(value.content);
+    }
+    const messageContent = record(value.message)?.content;
+    if (typeof messageContent === "string") {
+      notificationTexts.push(messageContent);
+    }
+    for (const block of Array.isArray(messageContent) ? messageContent : []) {
+      const text = stringValue(record(block)?.text);
+      if (text) {
+        notificationTexts.push(text);
+      }
+    }
+    for (const text of notificationTexts) {
+      if (!text.includes("<task-notification>")) {
+        continue;
+      }
+      const agentId = text.match(/<task-id>([^<]+)<\/task-id>/u)?.[1]?.trim();
+      const notificationStatus = workflowAgentStatus(
+        text.match(/<status>([^<]+)<\/status>/u)?.[1],
+      );
+      if (!agentId || !notificationStatus) {
+        continue;
+      }
+      const existing = taskNotifications.get(agentId);
+      if (
+        existing?.lastActivityAtMs !== null &&
+        existing?.lastActivityAtMs !== undefined &&
+        atMs !== null &&
+        existing.lastActivityAtMs > atMs
+      ) {
+        continue;
+      }
+      taskNotifications.set(agentId, {
+        status: notificationStatus,
+        lastActivityAtMs: atMs,
+      });
+    }
     if (value.type !== "assistant") {
       continue;
     }
@@ -678,6 +792,9 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
     const cached = numberValue(usage.cache_read_input_tokens) ?? 0;
     const input = uncachedInput + cached;
     const output = numberValue(usage.output_tokens) ?? 0;
+    if (model && input > DEFAULT_CONTEXT_LIMIT) {
+      longContextModels.add(model);
+    }
     const requestKey =
       stringValue(value.requestId) ??
       stringValue(message.id) ??
@@ -711,6 +828,10 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
     output,
     cached,
     contextUsed: latestContextUsed,
+    contextLimit: contextLimitForModel(
+      model,
+      model !== null && longContextModels.has(model),
+    ),
     toolCalls,
     model,
     stopReason,
@@ -718,6 +839,7 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
     firstAtMs,
     lastAtMs,
     costUsd,
+    taskNotifications,
   };
 }
 
@@ -727,6 +849,8 @@ async function collectSubagentsInDirectory(
   parent: AgentRun,
   labels: ReadonlyMap<string, string>,
   diagnostics: Diagnostics,
+  parentTaskNotifications?: ReadonlyMap<string, ProviderAgentState>,
+  workflowStates?: ReadonlyMap<string, ProviderAgentState>,
 ): Promise<SubagentCandidate[]> {
   let entries;
   try {
@@ -760,6 +884,9 @@ async function collectSubagentsInDirectory(
       // pool, or absent for a direct child of the root) is what encodes
       // the real chain, not directory nesting.
       const parentAgentId = stringValue(meta.parentAgentId);
+      const workflowState = workflowStates?.get(match[1]);
+      const providerState =
+        workflowState ?? parentTaskNotifications?.get(match[1]);
 
       try {
         return {
@@ -775,6 +902,9 @@ async function collectSubagentsInDirectory(
           cwd: parent.cwd,
           transcriptPath: transcript,
           modifiedAtMs: (await stat(transcript)).mtimeMs,
+          providerStatus: providerState?.status ?? null,
+          providerLastActivityAtMs:
+            providerState?.lastActivityAtMs ?? null,
         };
       } catch (error) {
         if (!isMissing(error)) {
@@ -794,6 +924,7 @@ async function findDirectSubagents(
   transcriptPath: string,
   parent: AgentRun,
   labels: ReadonlyMap<string, string>,
+  parentTaskNotifications: ReadonlyMap<string, ProviderAgentState>,
   diagnostics: Diagnostics,
 ): Promise<SubagentCandidate[]> {
   const subagentsDirectory = join(
@@ -807,6 +938,7 @@ async function findDirectSubagents(
     parent,
     labels,
     diagnostics,
+    parentTaskNotifications,
   );
 
   const workflowsDirectory = join(subagentsDirectory, "workflows");
@@ -825,14 +957,21 @@ async function findDirectSubagents(
   const workflowCandidates = await mapWithLimit(
     workflowEntries.filter((entry) => entry.isDirectory()),
     SCAN_CONCURRENCY,
-    (entry) =>
-      collectSubagentsInDirectory(
+    async (entry) => {
+      const workflowStates = await loadWorkflowAgentStates(
+        join(dirname(subagentsDirectory), "workflows", `${entry.name}.json`),
+        diagnostics,
+      );
+      return collectSubagentsInDirectory(
         join(workflowsDirectory, entry.name),
         entry.name,
         parent,
         labels,
         diagnostics,
-      ),
+        parentTaskNotifications,
+        workflowStates,
+      );
+    },
   );
 
   return candidates.concat(workflowCandidates.flat());
@@ -841,7 +980,11 @@ async function findDirectSubagents(
 function subagentStatus(
   stopReason: string | null,
   rootStatus: AgentStatus,
+  providerStatus: AgentStatus | null,
 ): AgentStatus {
+  if (providerStatus !== null) {
+    return providerStatus;
+  }
   const reason = stopReason?.toLowerCase() ?? "";
   if (["error", "failed", "refusal"].includes(reason)) {
     return "failed";
@@ -1058,7 +1201,7 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
         contextUsed: transcript?.contextUsed ?? 0,
         contextLimit:
           (transcript?.contextUsed ?? 0) > 0
-            ? contextLimitForModel(resolvedModel)
+            ? (transcript?.contextLimit ?? DEFAULT_CONTEXT_LIMIT)
             : 0,
       },
       costUsd: job?.costUsd ?? transcript?.costUsd ?? null,
@@ -1072,6 +1215,7 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
           transcriptPath,
           root,
           job?.fanLabels ?? new Map(),
+          transcript?.taskNotifications ?? new Map(),
           diagnostics,
         )),
       );
@@ -1114,20 +1258,65 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
     }
   }
 
-  for (const candidate of sortedCandidates.filter((candidate) =>
+  const selectedCandidates = sortedCandidates.filter((candidate) =>
     selectedKeys.has(candidateKey(candidate)),
-  )) {
-    let transcript: TranscriptSummary;
-    try {
-      transcript = await summarizeTranscript(candidate.transcriptPath);
-    } catch {
-      diagnostics.errors += 1;
-      continue;
-    }
+  );
+  const summarizedCandidates = (
+    await mapWithLimit(
+      selectedCandidates,
+      SCAN_CONCURRENCY,
+      async (candidate) => {
+        try {
+          return {
+            candidate,
+            transcript: await summarizeTranscript(candidate.transcriptPath),
+          };
+        } catch {
+          diagnostics.errors += 1;
+          return null;
+        }
+      },
+    )
+  ).filter(
+    (
+      value,
+    ): value is {
+      candidate: SubagentCandidate;
+      transcript: TranscriptSummary;
+    } => value !== null,
+  );
+  const summariesByKey = new Map(
+    summarizedCandidates.map(({ candidate, transcript }) => [
+      candidateKey(candidate),
+      transcript,
+    ]),
+  );
 
-    const status = subagentStatus(transcript.stopReason, candidate.rootStatus);
+  for (const { candidate, transcript } of summarizedCandidates) {
+    const parentNotification =
+      candidate.providerStatus === null &&
+      candidate.parentAgentId
+        ? summariesByKey
+            .get(`${candidate.rootId}:${candidate.parentAgentId}`)
+            ?.taskNotifications.get(candidate.agentId)
+        : undefined;
+    const providerStatus =
+      candidate.providerStatus ?? parentNotification?.status ?? null;
+    const providerLastActivityAtMs =
+      candidate.providerLastActivityAtMs ??
+      parentNotification?.lastActivityAtMs ??
+      null;
+
+    const status = subagentStatus(
+      transcript.stopReason,
+      candidate.rootStatus,
+      providerStatus,
+    );
     const startedAtMs = transcript.firstAtMs ?? candidate.modifiedAtMs;
-    const lastActivityAtMs = transcript.lastAtMs ?? candidate.modifiedAtMs;
+    const lastActivityAtMs = Math.max(
+      transcript.lastAtMs ?? candidate.modifiedAtMs,
+      providerLastActivityAtMs ?? 0,
+    );
     agents.push({
       id: `${candidate.rootId}:${candidate.agentId}`,
       parentId: candidate.parentAgentId
@@ -1161,9 +1350,7 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
         cached: transcript.cached,
         contextUsed: transcript.contextUsed,
         contextLimit:
-          transcript.contextUsed > 0
-            ? contextLimitForModel(transcript.model)
-            : 0,
+          transcript.contextUsed > 0 ? transcript.contextLimit : 0,
       },
       costUsd: transcript.costUsd,
       toolCalls: transcript.toolCalls,
