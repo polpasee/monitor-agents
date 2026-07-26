@@ -37,6 +37,25 @@ import {
   assignTopologyNodeColors,
   type TopologyNodeColor,
 } from "@/lib/topology-colors";
+import {
+  DEFAULT_NODE_STYLE_PARAMS,
+  NODE_STYLE_RANGES,
+  NODE_STYLE_STORAGE_KEY,
+  isUnknownModel,
+  middleEllipsis,
+  nodeLevelOf,
+  nodeLevels,
+  nodeRadius,
+  nodeSubtitleFieldLabels,
+  nodeSubtitleFields,
+  nodeSubtitleText,
+  nodeTextLayout,
+  sanitizeNodeStyleParams,
+  type NodeLevel,
+  type NodeLevelStyle,
+  type NodeStyleParams,
+  type NodeSubtitleField,
+} from "@/lib/topology-node-style";
 
 import { ProviderLimits } from "./provider-limits";
 
@@ -55,6 +74,9 @@ interface GraphNode extends SimulationNodeDatum {
   agent: AgentRun;
   childCount: number;
   depth: number;
+  // Styling bucket for this node: depth, with every deeper layer sharing the
+  // last level's size and label settings.
+  level: NodeLevel;
   radius: number;
   color: TopologyNodeColor;
   // Id of the top-level ancestor (forest root) this node belongs to. Nodes
@@ -144,6 +166,40 @@ const LAYOUT_SLIDER_FIELDS: LayoutSliderField[] = [
   },
 ];
 
+interface NodeStyleSliderField {
+  key: keyof typeof NODE_STYLE_RANGES;
+  label: string;
+  ariaLabel: string;
+}
+
+const NODE_STYLE_SLIDER_FIELDS: NodeStyleSliderField[] = [
+  {
+    key: "radius",
+    label: "Size",
+    ariaLabel: "Node size for the selected depth level",
+  },
+  {
+    key: "titleFontSize",
+    label: "Title size",
+    ariaLabel: "Node title font size for the selected depth level",
+  },
+  {
+    key: "subtitleFontSize",
+    label: "Subtitle size",
+    ariaLabel: "Node subtitle font size for the selected depth level",
+  },
+];
+
+function levelLabel(level: NodeLevel): string {
+  return level === nodeLevels.length - 1 ? `L${level}+` : `L${level}`;
+}
+
+function levelAriaLabel(level: NodeLevel): string {
+  return level === nodeLevels.length - 1
+    ? `Depth level ${level} and deeper`
+    : `Depth level ${level}`;
+}
+
 const CROSS_PROVIDER_LINK_EXTRA = 20;
 const LAYOUT_PARAMS_STORAGE_KEY = "monitor-agents:topology-layout";
 
@@ -197,28 +253,27 @@ function loadStoredLayoutParams(): LayoutParams {
   }
 }
 
+function loadStoredNodeStyleParams(): NodeStyleParams {
+  if (typeof window === "undefined") {
+    return DEFAULT_NODE_STYLE_PARAMS;
+  }
+
+  try {
+    const stored = window.localStorage.getItem(NODE_STYLE_STORAGE_KEY);
+    return stored
+      ? sanitizeNodeStyleParams(JSON.parse(stored))
+      : DEFAULT_NODE_STYLE_PARAMS;
+  } catch {
+    return DEFAULT_NODE_STYLE_PARAMS;
+  }
+}
+
 function labelStatus(status: AgentRun["status"]): string {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
 function clamp(value: number, minimum: number, maximum: number): number {
   return Math.min(maximum, Math.max(minimum, value));
-}
-
-function middleEllipsis(value: string, maximumLength: number): string {
-  if (value.length <= maximumLength) {
-    return value;
-  }
-
-  const available = maximumLength - 1;
-  const startLength = Math.ceil(available / 2);
-  const endLength = Math.floor(available / 2);
-  return `${value.slice(0, startLength)}…${value.slice(-endLength)}`;
-}
-
-function isUnknownModel(model: string): boolean {
-  const normalizedModel = model.trim();
-  return normalizedModel === "" || normalizedModel.toLowerCase() === "unknown";
 }
 
 function shortModelName(model: string, provider: Provider): string {
@@ -247,18 +302,6 @@ function shortModelName(model: string, provider: Provider): string {
   );
 
   return (family ?? tokens[0] ?? normalizedModel).toUpperCase();
-}
-
-function shouldShowEffort(model: string, effort: string | null): boolean {
-  return effort !== null && !isUnknownModel(model);
-}
-
-function effortLabel(effort: string | null): string {
-  if (effort === null) {
-    return "";
-  }
-
-  return middleEllipsis(effort.toLowerCase() === "medium" ? "med" : effort, 8);
 }
 
 function workspaceLabel(cwd: string): string {
@@ -337,10 +380,23 @@ export function Topology({
     loadStoredLayoutParams,
   );
   const deferredLayoutParams = useDeferredValue(layoutParams);
+  const [nodeStyleParams, setNodeStyleParams] = useState<NodeStyleParams>(
+    loadStoredNodeStyleParams,
+  );
+  const deferredNodeStyleParams = useDeferredValue(nodeStyleParams);
+  const [editedLevel, setEditedLevel] = useState<NodeLevel>(0);
   const [showLayoutPanel, setShowLayoutPanel] = useState(false);
 
   actionsRef.current = { onSelectAgent, onToggleCollapsed };
   selectedAgentIdRef.current = selectedAgentId;
+
+  function updateEditedLevel(patch: Partial<NodeLevelStyle>) {
+    setNodeStyleParams((current) =>
+      current.map((style, level) =>
+        level === editedLevel ? { ...style, ...patch } : style,
+      ),
+    );
+  }
 
   useEffect(() => {
     try {
@@ -352,6 +408,17 @@ export function Topology({
       // Ignore unavailable storage (private browsing, quota, etc).
     }
   }, [layoutParams]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(
+        NODE_STYLE_STORAGE_KEY,
+        JSON.stringify(nodeStyleParams),
+      );
+    } catch {
+      // Ignore unavailable storage (private browsing, quota, etc).
+    }
+  }, [nodeStyleParams]);
 
   const agentGroups = useMemo(
     () =>
@@ -455,10 +522,9 @@ export function Topology({
     }
 
     const orbitalRadius = Math.min(width, height) * (mobile ? 0.24 : 0.28);
-    const radiusByDepth = mobile ? [24, 20, 16, 12] : [36, 24, 18, 12];
     const nodes: GraphNode[] = displayedAgents.map((agent, index) => {
       const depth = agentDepths.get(agent.id) ?? 0;
-      const radius = radiusByDepth[Math.min(depth, radiusByDepth.length - 1)];
+      const radius = nodeRadius(deferredNodeStyleParams, depth, mobile);
       const cachedPosition = positionCache.get(agent.id);
       const angle = (index / displayedAgents.length) * Math.PI * 2 - Math.PI / 2;
       const isRoot = depth === 0;
@@ -470,6 +536,7 @@ export function Topology({
         color: colorAssignments.get(agent.id)!,
         depth,
         groupRootId: groupRootIdOf(agent.id),
+        level: nodeLevelOf(depth),
         radius,
         x: cachedPosition
           ? cachedPosition.normalizedX * width
@@ -692,17 +759,31 @@ export function Topology({
       .attr("class", "force-node__inner-ring")
       .attr("points", (item) => hexagonPoints(item.radius - 4));
 
+    function subtitleOf(item: GraphNode): string {
+      return nodeSubtitleText(
+        item.agent,
+        deferredNodeStyleParams[item.level].subtitle,
+      );
+    }
+
+    function textLayoutOf(item: GraphNode) {
+      const { titleFontSize, subtitleFontSize } =
+        deferredNodeStyleParams[item.level];
+      return nodeTextLayout(
+        titleFontSize,
+        subtitleFontSize,
+        subtitleOf(item) !== "",
+      );
+    }
+
     node
       .append("text")
       .attr("class", "force-node__model")
-      .attr("dy", (item) =>
-        shouldShowEffort(item.agent.model, item.agent.effort) ? "0.2em" : null,
-      )
-      .attr("dominant-baseline", (item) =>
-        shouldShowEffort(item.agent.model, item.agent.effort) ? null : "middle",
-      )
-      .attr("y", (item) =>
-        shouldShowEffort(item.agent.model, item.agent.effort) ? -2 : 0,
+      .attr("dominant-baseline", "middle")
+      .attr("y", (item) => textLayoutOf(item).titleY)
+      .style(
+        "font-size",
+        (item) => `${deferredNodeStyleParams[item.level].titleFontSize}px`,
       )
       .text((item) =>
         shortModelName(item.agent.model, item.agent.provider),
@@ -711,13 +792,13 @@ export function Topology({
     node
       .append("text")
       .attr("class", "force-node__effort")
-      .attr("dy", "0.3em")
-      .attr("y", 7)
-      .text((item) =>
-        shouldShowEffort(item.agent.model, item.agent.effort)
-          ? effortLabel(item.agent.effort)
-          : "",
-      );
+      .attr("dominant-baseline", "middle")
+      .attr("y", (item) => textLayoutOf(item).subtitleY)
+      .style(
+        "font-size",
+        (item) => `${deferredNodeStyleParams[item.level].subtitleFontSize}px`,
+      )
+      .text(subtitleOf);
 
     node
       .append("text")
@@ -935,6 +1016,7 @@ export function Topology({
   dimensions,
   displayedAgents,
   deferredLayoutParams,
+  deferredNodeStyleParams,
 ]);
 
   useEffect(() => {
@@ -1057,7 +1139,10 @@ export function Topology({
                   <button
                     aria-label="Reset layout to defaults"
                     className="topology-layout-panel__reset"
-                    onClick={() => setLayoutParams(DEFAULT_LAYOUT_PARAMS)}
+                    onClick={() => {
+                      setLayoutParams(DEFAULT_LAYOUT_PARAMS);
+                      setNodeStyleParams(DEFAULT_NODE_STYLE_PARAMS);
+                    }}
                     type="button"
                   >
                     Reset
@@ -1088,6 +1173,71 @@ export function Topology({
                     />
                   </label>
                 ))}
+                <div className="topology-layout-panel__section">
+                  <span className="topology-layout-panel__section-title">
+                    Nodes
+                  </span>
+                  <div
+                    aria-label="Node depth level to style"
+                    className="topology-layout-panel__levels"
+                    role="group"
+                  >
+                    {nodeLevels.map((level) => (
+                      <button
+                        aria-label={levelAriaLabel(level)}
+                        aria-pressed={editedLevel === level}
+                        className="topology-layout-panel__level"
+                        key={level}
+                        onClick={() => setEditedLevel(level)}
+                        type="button"
+                      >
+                        {levelLabel(level)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {NODE_STYLE_SLIDER_FIELDS.map(({ key, label, ariaLabel }) => (
+                  <label className="topology-layout-panel__row" key={key}>
+                    <span className="topology-layout-panel__label">
+                      <span>{label}</span>
+                      <span className="topology-layout-panel__value">
+                        {nodeStyleParams[editedLevel][key]}
+                      </span>
+                    </span>
+                    <input
+                      aria-label={ariaLabel}
+                      max={NODE_STYLE_RANGES[key].max}
+                      min={NODE_STYLE_RANGES[key].min}
+                      onChange={(event) =>
+                        updateEditedLevel({ [key]: Number(event.target.value) })
+                      }
+                      step={NODE_STYLE_RANGES[key].step}
+                      type="range"
+                      value={nodeStyleParams[editedLevel][key]}
+                    />
+                  </label>
+                ))}
+                <label className="topology-layout-panel__row">
+                  <span className="topology-layout-panel__label">
+                    <span>Subtitle</span>
+                  </span>
+                  <select
+                    aria-label="Value shown on the node subtitle line for the selected depth level"
+                    className="topology-layout-panel__select"
+                    onChange={(event) =>
+                      updateEditedLevel({
+                        subtitle: event.target.value as NodeSubtitleField,
+                      })
+                    }
+                    value={nodeStyleParams[editedLevel].subtitle}
+                  >
+                    {nodeSubtitleFields.map((field) => (
+                      <option key={field} value={field}>
+                        {nodeSubtitleFieldLabels[field]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
               </div>
             ) : null}
             <button
