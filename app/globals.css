@@ -897,40 +897,15 @@ button:focus-visible,
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
+/* Font sizes come from the per-level node settings, applied inline. */
 .force-node__model {
-  font-size: 5px;
   font-weight: 760;
   letter-spacing: -0.025em;
 }
 
 .force-node__effort {
-  font-size: 4.5px;
   font-weight: 400;
   letter-spacing: 0.01em;
-}
-
-.force-node[data-depth="0"] .force-node__model {
-  font-size: 8px;
-}
-
-.force-node[data-depth="0"] .force-node__effort {
-  font-size: 5px;
-}
-
-.force-node[data-depth="1"] .force-node__model {
-  font-size: 7px;
-}
-
-.force-node[data-depth="1"] .force-node__effort {
-  font-size: 5.5px;
-}
-
-.force-node[data-depth="2"] .force-node__model {
-  font-size: 6px;
-}
-
-.force-node[data-depth="2"] .force-node__effort {
-  font-size: 5px;
 }
 
 .force-node__repo {
@@ -1050,6 +1025,81 @@ button:focus-visible,
 
 .topology-layout-panel__reset:hover {
   color: var(--lime);
+}
+
+.topology-layout-panel__section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.topology-layout-panel__section-title {
+  color: var(--text-soft);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.topology-layout-panel__levels {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.topology-layout-panel__level {
+  padding: 2px 5px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 9.5px;
+  font-weight: 650;
+  line-height: 1.2;
+}
+
+.topology-layout-panel__level:hover {
+  color: var(--text-soft);
+}
+
+.topology-layout-panel__level[aria-pressed="true"] {
+  background: color-mix(in oklch, var(--lime) 18%, transparent);
+  color: var(--lime);
+}
+
+.topology-layout-panel__level:focus-visible {
+  outline: 2px solid color-mix(in oklch, var(--lime) 45%, transparent);
+  outline-offset: 1px;
+}
+
+.topology-layout-panel__select {
+  width: 100%;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--color-zinc-950);
+  color: var(--text-soft);
+  cursor: pointer;
+  font-size: 10.5px;
+  font-weight: 650;
+}
+
+.topology-layout-panel__select:hover {
+  border-color: var(--border-strong);
+}
+
+.topology-layout-panel__select:focus-visible {
+  border-color: var(--lime);
+  outline: 2px solid color-mix(in oklch, var(--lime) 45%, transparent);
+  outline-offset: 1px;
 }
 
 .topology-layout-panel__row {
