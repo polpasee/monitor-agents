@@ -38,6 +38,20 @@ import {
   type TopologyNodeColor,
 } from "@/lib/topology-colors";
 import {
+  DEFAULT_TOPOLOGY_LAYOUT,
+  LAYOUT_RANGES,
+  LAYOUT_SLIDER_FIELDS,
+  TOPOLOGY_LAYOUT_STORAGE_KEY,
+  centerPositions,
+  computeLayoutPositions,
+  sanitizeTopologyLayout,
+  topologyLayoutStyleLabels,
+  topologyLayoutStyles,
+  type LayoutRange,
+  type TopologyLayout,
+  type TopologyLayoutStyle,
+} from "@/lib/topology-layout";
+import {
   DEFAULT_NODE_STYLE_PARAMS,
   NODE_STYLE_RANGES,
   NODE_STYLE_STORAGE_KEY,
@@ -118,54 +132,6 @@ const compactNumber = new Intl.NumberFormat("en-US", {
 
 const ALL_AGENT_GROUPS = "";
 
-interface LayoutParams {
-  linkDistance: number;
-  chargeStrength: number;
-  collisionPadding: number;
-}
-
-interface LayoutParamRange {
-  min: number;
-  max: number;
-  step: number;
-}
-
-const DEFAULT_LAYOUT_PARAMS: LayoutParams = {
-  linkDistance: 92,
-  chargeStrength: 260,
-  collisionPadding: 22,
-};
-
-const LAYOUT_PARAM_RANGES: Record<keyof LayoutParams, LayoutParamRange> = {
-  linkDistance: { min: 40, max: 200, step: 4 },
-  chargeStrength: { min: 80, max: 500, step: 10 },
-  collisionPadding: { min: 8, max: 40, step: 2 },
-};
-
-interface LayoutSliderField {
-  key: keyof LayoutParams;
-  label: string;
-  ariaLabel: string;
-}
-
-const LAYOUT_SLIDER_FIELDS: LayoutSliderField[] = [
-  {
-    key: "linkDistance",
-    label: "Distance",
-    ariaLabel: "Distance between a main agent and its sub-agents",
-  },
-  {
-    key: "chargeStrength",
-    label: "Repulsion",
-    ariaLabel: "Repulsion strength between agent nodes",
-  },
-  {
-    key: "collisionPadding",
-    label: "Spacing",
-    ariaLabel: "Minimum spacing between agent nodes",
-  },
-];
-
 interface NodeStyleSliderField {
   key: keyof typeof NODE_STYLE_RANGES;
   label: string;
@@ -201,55 +167,33 @@ function levelAriaLabel(level: NodeLevel): string {
 }
 
 const CROSS_PROVIDER_LINK_EXTRA = 20;
-const LAYOUT_PARAMS_STORAGE_KEY = "monitor-agents:topology-layout";
+// Fan and tree lay out every group side by side, so a many-group topology needs
+// to zoom out further than the force layout ever did to fit on screen.
+const MIN_ZOOM_SCALE = 0.2;
+const MAX_ZOOM_SCALE = 2.5;
 
-function clampLayoutParam(
-  value: unknown,
-  range: LayoutParamRange,
-  fallback: number,
-): number {
-  return typeof value === "number" && Number.isFinite(value)
-    ? clamp(value, range.min, range.max)
-    : fallback;
+// The slider fields for a style are described as plain strings so one block of
+// JSX renders all three styles; these two read the matching range and value.
+function layoutRangeFor(style: TopologyLayoutStyle, key: string): LayoutRange {
+  return (LAYOUT_RANGES[style] as Record<string, LayoutRange>)[key];
 }
 
-function sanitizeLayoutParams(value: unknown): LayoutParams {
-  const record =
-    typeof value === "object" && value !== null
-      ? (value as Record<string, unknown>)
-      : {};
-
-  return {
-    linkDistance: clampLayoutParam(
-      record.linkDistance,
-      LAYOUT_PARAM_RANGES.linkDistance,
-      DEFAULT_LAYOUT_PARAMS.linkDistance,
-    ),
-    chargeStrength: clampLayoutParam(
-      record.chargeStrength,
-      LAYOUT_PARAM_RANGES.chargeStrength,
-      DEFAULT_LAYOUT_PARAMS.chargeStrength,
-    ),
-    collisionPadding: clampLayoutParam(
-      record.collisionPadding,
-      LAYOUT_PARAM_RANGES.collisionPadding,
-      DEFAULT_LAYOUT_PARAMS.collisionPadding,
-    ),
-  };
+function layoutValueFor(layout: TopologyLayout, key: string): number {
+  return (layout[layout.style] as unknown as Record<string, number>)[key];
 }
 
-function loadStoredLayoutParams(): LayoutParams {
+function loadStoredTopologyLayout(): TopologyLayout {
   if (typeof window === "undefined") {
-    return DEFAULT_LAYOUT_PARAMS;
+    return DEFAULT_TOPOLOGY_LAYOUT;
   }
 
   try {
-    const stored = window.localStorage.getItem(LAYOUT_PARAMS_STORAGE_KEY);
+    const stored = window.localStorage.getItem(TOPOLOGY_LAYOUT_STORAGE_KEY);
     return stored
-      ? sanitizeLayoutParams(JSON.parse(stored))
-      : DEFAULT_LAYOUT_PARAMS;
+      ? sanitizeTopologyLayout(JSON.parse(stored))
+      : DEFAULT_TOPOLOGY_LAYOUT;
   } catch {
-    return DEFAULT_LAYOUT_PARAMS;
+    return DEFAULT_TOPOLOGY_LAYOUT;
   }
 }
 
@@ -366,6 +310,11 @@ export function Topology({
   const positionCacheRef = useRef(
     new Map<string, { normalizedX: number; normalizedY: number }>(),
   );
+  // Nodes the user dragged in a deterministic layout. Kept separate from
+  // positionCacheRef so a snapshot refresh recomputes every other node while
+  // these stay where they were dropped.
+  const pinnedPositionsRef = useRef(new Map<string, { x: number; y: number }>());
+  const lastLayoutStyleRef = useRef<TopologyLayoutStyle | null>(null);
   const colorAssignmentsRef = useRef(new Map<string, TopologyNodeColor>());
   const zoomTransformRef = useRef<ZoomTransform>(zoomIdentity);
   const zoomControlsRef = useRef<TopologyZoomControls | null>(null);
@@ -376,10 +325,10 @@ export function Topology({
     height: 778,
   });
   const [selectedGroupId, setSelectedGroupId] = useState(ALL_AGENT_GROUPS);
-  const [layoutParams, setLayoutParams] = useState<LayoutParams>(
-    loadStoredLayoutParams,
+  const [layout, setLayout] = useState<TopologyLayout>(
+    loadStoredTopologyLayout,
   );
-  const deferredLayoutParams = useDeferredValue(layoutParams);
+  const deferredLayout = useDeferredValue(layout);
   const [nodeStyleParams, setNodeStyleParams] = useState<NodeStyleParams>(
     loadStoredNodeStyleParams,
   );
@@ -389,6 +338,20 @@ export function Topology({
 
   actionsRef.current = { onSelectAgent, onToggleCollapsed };
   selectedAgentIdRef.current = selectedAgentId;
+
+  function updateLayoutParam(key: string, value: number) {
+    setLayout((current) => ({
+      ...current,
+      [current.style]: { ...current[current.style], [key]: value },
+    }));
+  }
+
+  function selectLayoutStyle(style: TopologyLayoutStyle) {
+    // Pins belong to the layout they were dropped on, so a style switch starts
+    // from a clean deterministic arrangement.
+    pinnedPositionsRef.current.clear();
+    setLayout((current) => ({ ...current, style }));
+  }
 
   function updateEditedLevel(patch: Partial<NodeLevelStyle>) {
     setNodeStyleParams((current) =>
@@ -401,13 +364,13 @@ export function Topology({
   useEffect(() => {
     try {
       window.localStorage.setItem(
-        LAYOUT_PARAMS_STORAGE_KEY,
-        JSON.stringify(layoutParams),
+        TOPOLOGY_LAYOUT_STORAGE_KEY,
+        JSON.stringify(layout),
       );
     } catch {
       // Ignore unavailable storage (private browsing, quota, etc).
     }
-  }, [layoutParams]);
+  }, [layout]);
 
   useEffect(() => {
     try {
@@ -521,6 +484,26 @@ export function Topology({
       return current?.id ?? agentId;
     }
 
+    // Fan and tree derive every position from the forest shape up front; force
+    // instead seeds nodes and lets the simulation settle them.
+    const layoutStyle = deferredLayout.style;
+    const pinnedPositions = pinnedPositionsRef.current;
+    const plottedPositions =
+      layoutStyle === "force"
+        ? null
+        : centerPositions(
+            computeLayoutPositions(
+              displayedAgents.map((agent) => ({
+                id: agent.id,
+                parentId: agent.parentId,
+              })),
+              layoutStyle,
+              deferredLayout,
+            ),
+            width,
+            height,
+          );
+
     const orbitalRadius = Math.min(width, height) * (mobile ? 0.24 : 0.28);
     const nodes: GraphNode[] = displayedAgents.map((agent, index) => {
       const depth = agentDepths.get(agent.id) ?? 0;
@@ -528,6 +511,7 @@ export function Topology({
       const cachedPosition = positionCache.get(agent.id);
       const angle = (index / displayedAgents.length) * Math.PI * 2 - Math.PI / 2;
       const isRoot = depth === 0;
+      const plotted = pinnedPositions.get(agent.id) ?? plottedPositions?.get(agent.id);
 
       return {
         id: agent.id,
@@ -538,12 +522,16 @@ export function Topology({
         groupRootId: groupRootIdOf(agent.id),
         level: nodeLevelOf(depth),
         radius,
-        x: cachedPosition
-          ? cachedPosition.normalizedX * width
-          : width / 2 + (isRoot ? 0 : Math.cos(angle) * orbitalRadius),
-        y: cachedPosition
-          ? cachedPosition.normalizedY * height
-          : height / 2 + (isRoot ? 0 : Math.sin(angle) * orbitalRadius),
+        x:
+          plotted?.x ??
+          (cachedPosition
+            ? cachedPosition.normalizedX * width
+            : width / 2 + (isRoot ? 0 : Math.cos(angle) * orbitalRadius)),
+        y:
+          plotted?.y ??
+          (cachedPosition
+            ? cachedPosition.normalizedY * height
+            : height / 2 + (isRoot ? 0 : Math.sin(angle) * orbitalRadius)),
       };
     });
     const nodeById = new Map(nodes.map((node) => [node.id, node]));
@@ -578,7 +566,7 @@ export function Topology({
 
     const scene = svg.append("g").attr("class", "force-graph__scene");
     const zoomBehavior = zoom<SVGSVGElement, unknown>()
-      .scaleExtent([0.5, 2.5])
+      .scaleExtent([MIN_ZOOM_SCALE, MAX_ZOOM_SCALE])
       .extent([
         [0, 0],
         [width, height],
@@ -819,47 +807,43 @@ export function Topology({
           `${item.agent.name}\n${item.agent.task}\n${labelStatus(item.agent.status)} · ${item.agent.model}\nEffort: ${item.agent.effort ?? "not reported"}\nWorktree/repo: ${item.agent.cwd}`,
       );
 
-    const simulation = forceSimulation<GraphNode>(nodes)
-      .force(
-        "link",
-        forceLink<GraphNode, GraphLink>(links)
-          .id((item) => item.id)
-          .distance((item) =>
-            item.crossProvider
-              ? deferredLayoutParams.linkDistance + CROSS_PROVIDER_LINK_EXTRA
-              : deferredLayoutParams.linkDistance,
-          )
-          .strength(0.7),
-      )
-      .force(
-        "charge",
-        forceManyBody().strength(-deferredLayoutParams.chargeStrength),
-      )
-      .force(
-        "collide",
-        forceCollide<GraphNode>()
-          .radius((item) => item.radius + deferredLayoutParams.collisionPadding)
-          .strength(0.95)
-          .iterations(2),
-      )
-      .force("center", forceCenter(width / 2, height / 2))
-      .force("x", forceX<GraphNode>(width / 2).strength(0.035))
-      .force("y", forceY<GraphNode>(height / 2).strength(0.045))
-      .stop();
+    const forceParams = deferredLayout.force;
+    const simulation =
+      layoutStyle === "force"
+        ? forceSimulation<GraphNode>(nodes)
+            .force(
+              "link",
+              forceLink<GraphNode, GraphLink>(links)
+                .id((item) => item.id)
+                .distance((item) =>
+                  item.crossProvider
+                    ? forceParams.linkDistance + CROSS_PROVIDER_LINK_EXTRA
+                    : forceParams.linkDistance,
+                )
+                .strength(0.7),
+            )
+            .force(
+              "charge",
+              forceManyBody().strength(-forceParams.chargeStrength),
+            )
+            .force(
+              "collide",
+              forceCollide<GraphNode>()
+                .radius((item) => item.radius + forceParams.collisionPadding)
+                .strength(0.95)
+                .iterations(2),
+            )
+            .force("center", forceCenter(width / 2, height / 2))
+            .force("x", forceX<GraphNode>(width / 2).strength(0.035))
+            .force("y", forceY<GraphNode>(height / 2).strength(0.045))
+            .stop()
+        : null;
 
     function resolvedNode(value: string | GraphNode): GraphNode {
       return typeof value === "string" ? nodeById.get(value)! : value;
     }
 
-    function ticked() {
-      const horizontalPadding = mobile ? 60 : 64;
-      const verticalPadding = mobile ? 48 : 62;
-
-      for (const item of nodes) {
-        item.x = clamp(item.x ?? width / 2, horizontalPadding, width - horizontalPadding);
-        item.y = clamp(item.y ?? height / 2, verticalPadding, height - verticalPadding);
-      }
-
+    function renderPositions() {
       link
         .attr("x1", (item) => resolvedNode(item.source).x ?? 0)
         .attr("y1", (item) => resolvedNode(item.source).y ?? 0)
@@ -889,10 +873,28 @@ export function Topology({
       );
     }
 
-    for (let index = 0; index < 140; index += 1) {
-      simulation.tick();
+    // Only the simulation needs corralling; a computed layout is allowed to
+    // exceed the viewport and relies on Fit/zoom instead.
+    function ticked() {
+      const horizontalPadding = mobile ? 60 : 64;
+      const verticalPadding = mobile ? 48 : 62;
+
+      for (const item of nodes) {
+        item.x = clamp(item.x ?? width / 2, horizontalPadding, width - horizontalPadding);
+        item.y = clamp(item.y ?? height / 2, verticalPadding, height - verticalPadding);
+      }
+
+      renderPositions();
     }
-    ticked();
+
+    if (simulation) {
+      for (let index = 0; index < 140; index += 1) {
+        simulation.tick();
+      }
+      ticked();
+    } else {
+      renderPositions();
+    }
 
     const reducedMotion = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
@@ -910,8 +912,8 @@ export function Topology({
           (width - padding * 2) / bounds.width,
           (height - padding * 2) / bounds.height,
         ),
-        0.5,
-        2.5,
+        MIN_ZOOM_SCALE,
+        MAX_ZOOM_SCALE,
       );
       const centerX = bounds.x + bounds.width / 2;
       const centerY = bounds.y + bounds.height / 2;
@@ -954,6 +956,10 @@ export function Topology({
     ) {
       event.sourceEvent.stopPropagation();
       select(this).classed("is-dragging", true);
+      if (!simulation) {
+        return;
+      }
+
       if (!event.active) {
         simulation.alphaTarget(0.28).restart();
       }
@@ -965,6 +971,15 @@ export function Topology({
       event: D3DragEvent<SVGGElement, GraphNode, GraphNode>,
       item: GraphNode,
     ) {
+      if (!simulation) {
+        // A computed layout can extend past the viewport, so dropped nodes are
+        // placed freely rather than clamped into it.
+        item.x = event.x;
+        item.y = event.y;
+        renderPositions();
+        return;
+      }
+
       const horizontalPadding = mobile ? 60 : 64;
       const verticalPadding = mobile ? 48 : 62;
       item.fx = clamp(event.x, horizontalPadding, width - horizontalPadding);
@@ -977,6 +992,11 @@ export function Topology({
       item: GraphNode,
     ) {
       select(this).classed("is-dragging", false);
+      if (!simulation) {
+        pinnedPositions.set(item.id, { x: item.x ?? 0, y: item.y ?? 0 });
+        return;
+      }
+
       if (!event.active) {
         simulation.alphaTarget(0);
       }
@@ -992,7 +1012,17 @@ export function Topology({
         .on("end", dragEnded),
     );
 
-    simulation.alpha(0.22).on("tick", ticked).restart();
+    simulation?.alpha(0.22).on("tick", ticked).restart();
+
+    // Switching style rearranges everything, so refit the view to the new shape
+    // rather than leaving the user panned over empty space.
+    if (
+      lastLayoutStyleRef.current !== null &&
+      lastLayoutStyleRef.current !== layoutStyle
+    ) {
+      fitTopology();
+    }
+    lastLayoutStyleRef.current = layoutStyle;
 
     return () => {
       if (zoomControlsRef.current === controls) {
@@ -1005,7 +1035,7 @@ export function Topology({
           normalizedY: clamp((item.y ?? height / 2) / height, 0, 1),
         });
       }
-      simulation.stop();
+      simulation?.stop();
       node.on(".drag", null);
       svg.on(".zoom", null);
       svg.selectAll("*").remove();
@@ -1015,7 +1045,7 @@ export function Topology({
   collapsedAgentIds,
   dimensions,
   displayedAgents,
-  deferredLayoutParams,
+  deferredLayout,
   deferredNodeStyleParams,
 ]);
 
@@ -1140,7 +1170,8 @@ export function Topology({
                     aria-label="Reset layout to defaults"
                     className="topology-layout-panel__reset"
                     onClick={() => {
-                      setLayoutParams(DEFAULT_LAYOUT_PARAMS);
+                      pinnedPositionsRef.current.clear();
+                      setLayout(DEFAULT_TOPOLOGY_LAYOUT);
                       setNodeStyleParams(DEFAULT_NODE_STYLE_PARAMS);
                     }}
                     type="button"
@@ -1148,31 +1179,56 @@ export function Topology({
                     Reset
                   </button>
                 </div>
-                {LAYOUT_SLIDER_FIELDS.map(({ key, label, ariaLabel }) => (
-                  <label className="topology-layout-panel__row" key={key}>
-                    <span className="topology-layout-panel__label">
-                      <span>{label}</span>
-                      <span className="topology-layout-panel__value">
-                        {layoutParams[key]}
-                      </span>
-                    </span>
-                    <input
-                      aria-label={ariaLabel}
-                      max={LAYOUT_PARAM_RANGES[key].max}
-                      min={LAYOUT_PARAM_RANGES[key].min}
-                      onChange={(event) => {
-                        const value = Number(event.target.value);
-                        setLayoutParams((current) => ({
-                          ...current,
-                          [key]: value,
-                        }));
-                      }}
-                      step={LAYOUT_PARAM_RANGES[key].step}
-                      type="range"
-                      value={layoutParams[key]}
-                    />
-                  </label>
-                ))}
+                <label className="topology-layout-panel__row">
+                  <span className="topology-layout-panel__label">
+                    <span>Style</span>
+                  </span>
+                  <select
+                    aria-label="Topology layout style"
+                    className="topology-layout-panel__select"
+                    onChange={(event) =>
+                      selectLayoutStyle(
+                        event.target.value as TopologyLayoutStyle,
+                      )
+                    }
+                    value={layout.style}
+                  >
+                    {topologyLayoutStyles.map((style) => (
+                      <option key={style} value={style}>
+                        {topologyLayoutStyleLabels[style]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {LAYOUT_SLIDER_FIELDS[layout.style].map(
+                  ({ key, label, ariaLabel, suffix }) => {
+                    const range = layoutRangeFor(layout.style, key);
+                    const value = layoutValueFor(layout, key);
+
+                    return (
+                      <label className="topology-layout-panel__row" key={key}>
+                        <span className="topology-layout-panel__label">
+                          <span>{label}</span>
+                          <span className="topology-layout-panel__value">
+                            {value}
+                            {suffix ?? ""}
+                          </span>
+                        </span>
+                        <input
+                          aria-label={ariaLabel}
+                          max={range.max}
+                          min={range.min}
+                          onChange={(event) =>
+                            updateLayoutParam(key, Number(event.target.value))
+                          }
+                          step={range.step}
+                          type="range"
+                          value={value}
+                        />
+                      </label>
+                    );
+                  },
+                )}
                 <div className="topology-layout-panel__section">
                   <span className="topology-layout-panel__section-title">
                     Nodes
