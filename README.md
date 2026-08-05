@@ -163,6 +163,49 @@ If an Agent stops heartbeating, its expired `in-progress` task returns to
 to execute arbitrary shell commands; each Agent must independently enforce its
 repository and command policy.
 
+## Claude task runner
+
+`scripts/kanban-runner.mjs` is a local worker that replaces the manual loop of
+opening a repository directory, starting `claude`, and typing the task. It polls
+the queue, and for each claimed task it creates a dedicated git worktree, runs
+Claude Code headless inside it, commits the result, pushes the branch, and opens
+a pull request.
+
+```bash
+export MONITOR_AGENT_TOKEN="the-same-token-the-dashboard-uses"
+npm run runner                      # poll forever
+npm run runner -- --once            # handle at most one task, then exit
+npm run runner -- --once --dry-run  # claim and report without running Claude
+```
+
+Runner environment variables:
+
+```bash
+MONITOR_API_URL="http://127.0.0.1:5000"     # dashboard base URL
+MONITOR_WORKSPACE_ROOT="$HOME/Github"       # where repository checkouts live
+KANBAN_RUNNER_ID="kanban-runner@$(hostname)" # agent id recorded on each claim
+KANBAN_REPOSITORIES=""                      # comma list; empty means every accessible repo
+KANBAN_POLL_SECONDS=10
+KANBAN_LEASE_SECONDS=300                    # heartbeat renews at half this interval
+KANBAN_TASK_TIMEOUT_SECONDS=3600            # Claude is terminated past this
+KANBAN_COMMIT_EXCLUDE=".serena,.claude"     # paths never committed
+KANBAN_LOG_DIR="$HOME/.claude/kanban-runner"
+```
+
+A repository is only claimable when `MONITOR_WORKSPACE_ROOT/<name>` is a git
+checkout, so the runner never accepts work it cannot open. `owner/name` maps to
+the trailing `name` directory.
+
+Claude runs with `--dangerously-skip-permissions` so tasks finish unattended.
+Only queue tasks you would run yourself: task text reaching this runner executes
+with your full local privileges.
+
+The runner owns git, and the prompt tells Claude not to commit or push. Each
+attempt gets its own branch and worktree (`task/<slug>`, then `task/<slug>-a2`
+on retry). Successful tasks move to `review` with the pull request URL in the
+result and their worktree removed; failed tasks move to `failed` and keep the
+worktree for inspection. Move a failed task back to `todo` to retry it.
+
 ## Quality checks
 
 ```bash
