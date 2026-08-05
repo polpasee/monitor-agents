@@ -16,6 +16,7 @@ seconds.
 - Agent run inspector with timing, token, context, cost, and execution details
 - Reported quota-window progress by provider
 - Session KPIs and a recent telemetry event stream
+- Shared multi-repository Kanban tasks with atomic Agent claims and leases
 - Read-only live collectors with explicit source health
 - Responsive desktop and mobile layouts
 
@@ -87,12 +88,72 @@ MONITOR_WORKSPACE="/absolute/path/to/workspace" # exact Codex and Claude cwd fil
 MONITOR_MAX_AGENTS=24                           # Codex agent cap across recent families
 AGY_TELEMETRY_FILE="/absolute/path/to/agy.json"
 ANTIGRAVITY_CLI_DIR="$HOME/.gemini/antigravity-cli" # optional non-default location
+MONITOR_TASK_DB="/absolute/path/to/monitor-tasks.sqlite"
+MONITOR_AGENT_TOKEN="replace-with-a-long-random-token"
 ```
 
 `AGY_TELEMETRY_FILE` accepts the `agents`, `events`, and `quotaLimits` arrays from
 the provider-neutral contract in `lib/telemetry.ts`. Values must identify AGY
 when a `provider` field is supplied. IDs are automatically namespaced with
 `agy:`; unavailable numeric values may be `null`.
+
+## Kanban Agent tasks
+
+Kanban tasks are stored in SQLite so the dashboard and local Agents share one
+queue. `MONITOR_TASK_DB` defaults to `.data/monitor-tasks.sqlite`. Use this
+SQLite mode with one Next.js server instance; use an external transactional
+database before scaling the dashboard to multiple server instances.
+
+The dashboard can create tasks and move them between `todo`, `in-progress`,
+`review`, `done`, and `failed`. An Agent must claim a task before working on it.
+The claim is atomic, so two Agents cannot receive the same task. Agents only
+receive tasks matching the repository names they send in the claim request.
+
+Agent endpoints fail closed unless `MONITOR_AGENT_TOKEN` is configured. The
+token belongs only in the Agent process environment and must not be exposed to
+browser code.
+
+Claim the highest-priority available task:
+
+```bash
+curl -sS http://127.0.0.1:5000/api/agent/tasks/claim \
+  -H "Authorization: Bearer $MONITOR_AGENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"agentId":"codex-worker-1","repositories":["monitor-agents"],"leaseSeconds":60}'
+```
+
+An empty queue returns HTTP `204`. While working, renew the lease before it
+expires:
+
+```bash
+curl -sS http://127.0.0.1:5000/api/agent/tasks/TASK_ID/heartbeat \
+  -H "Authorization: Bearer $MONITOR_AGENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"agentId":"codex-worker-1","leaseSeconds":60}'
+```
+
+Successful work moves to `review` for a human decision:
+
+```bash
+curl -sS http://127.0.0.1:5000/api/agent/tasks/TASK_ID/complete \
+  -H "Authorization: Bearer $MONITOR_AGENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"agentId":"codex-worker-1","result":"Commit abc123; tests passed."}'
+```
+
+Failed work moves to `failed` and records the error:
+
+```bash
+curl -sS http://127.0.0.1:5000/api/agent/tasks/TASK_ID/fail \
+  -H "Authorization: Bearer $MONITOR_AGENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"agentId":"codex-worker-1","error":"Required repository was unavailable."}'
+```
+
+If an Agent stops heartbeating, its expired `in-progress` task returns to
+`todo` automatically on the next claim. The task text is data, not permission
+to execute arbitrary shell commands; each Agent must independently enforce its
+repository and command policy.
 
 ## Quality checks
 
@@ -110,6 +171,7 @@ app/                    Next.js App Router entry and global styles
 components/             Interactive dashboard, topology, and inspector
 lib/telemetry.ts        Provider-neutral telemetry contract and derivations
 lib/live-snapshot.ts    Live collector orchestration
+lib/task-store.ts       SQLite Kanban queue and atomic Agent leases
 lib/collectors/         Codex, Claude Code, Gemini usage, and AGY adapters
 lib/demo-data.ts        Synthetic fixture used only by unit tests
 lib/telemetry.test.ts   Domain derivation tests
