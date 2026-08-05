@@ -3,6 +3,10 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  mergeRepositoryNames,
+  type RepositoryList,
+} from "@/lib/repository-list";
+import {
   kanbanRepositories,
   kanbanStatuses,
   type KanbanStatus,
@@ -11,6 +15,8 @@ import {
 
 export function KanbanBoard() {
   const [tasks, setTasks] = useState<KanbanTask[]>([]);
+  const [githubRepositories, setGithubRepositories] = useState<string[]>([]);
+  const [repositoryNotice, setRepositoryNotice] = useState<string | null>(null);
   const [repositoryFilter, setRepositoryFilter] = useState("all");
   const [title, setTitle] = useState("");
   const [repository, setRepository] = useState("");
@@ -18,7 +24,10 @@ export function KanbanBoard() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const repositories = useMemo(() => kanbanRepositories(tasks), [tasks]);
+  const repositories = useMemo(
+    () => mergeRepositoryNames(kanbanRepositories(tasks), githubRepositories),
+    [githubRepositories, tasks],
+  );
   const visibleTasks = useMemo(
     () =>
       repositoryFilter === "all"
@@ -58,6 +67,32 @@ export function KanbanBoard() {
     return () => {
       stopped = true;
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
+    };
+  }, []);
+
+  useEffect(() => {
+    let stopped = false;
+
+    async function loadRepositories() {
+      try {
+        const response = await fetch("/api/repositories", { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`Repository request failed with ${response.status}`);
+        }
+        const payload = (await response.json()) as RepositoryList;
+        if (stopped) return;
+        setGithubRepositories(payload.repositories);
+        setRepositoryNotice(payload.error ?? null);
+      } catch {
+        if (!stopped) {
+          setRepositoryNotice("Unable to load GitHub repositories.");
+        }
+      }
+    }
+
+    void loadRepositories();
+    return () => {
+      stopped = true;
     };
   }, []);
 
@@ -141,6 +176,9 @@ export function KanbanBoard() {
       </header>
 
       {error && <p className="kanban-error" role="alert">{error}</p>}
+      {repositoryNotice && (
+        <p className="kanban-notice">{repositoryNotice}</p>
+      )}
 
       <form className="kanban-task-form" onSubmit={addTask}>
         <label>

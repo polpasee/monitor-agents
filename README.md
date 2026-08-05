@@ -90,6 +90,7 @@ AGY_TELEMETRY_FILE="/absolute/path/to/agy.json"
 ANTIGRAVITY_CLI_DIR="$HOME/.gemini/antigravity-cli" # optional non-default location
 MONITOR_TASK_DB="/absolute/path/to/monitor-tasks.sqlite"
 MONITOR_AGENT_TOKEN="replace-with-a-long-random-token"
+GITHUB_TOKEN="ghp_..."                          # repository list; falls back to `gh auth token`
 ```
 
 `AGY_TELEMETRY_FILE` accepts the `agents`, `events`, and `quotaLimits` arrays from
@@ -108,6 +109,13 @@ The dashboard can create tasks and move them between `todo`, `in-progress`,
 `review`, `done`, and `failed`. An Agent must claim a task before working on it.
 The claim is atomic, so two Agents cannot receive the same task. Agents only
 receive tasks matching the repository names they send in the claim request.
+
+The repository filter and the new-task repository field list every repository the
+GitHub account can access (owner, collaborator, and organization member), merged
+with the repositories already used by existing tasks. `GET /api/repositories`
+reads `GITHUB_TOKEN` or `GH_TOKEN`, falling back to `gh auth token`, and caches
+the result for five minutes. Without credentials the dashboard still works and
+falls back to the repositories seen on existing tasks.
 
 Agent endpoints fail closed unless `MONITOR_AGENT_TOKEN` is configured. The
 token belongs only in the Agent process environment and must not be exposed to
