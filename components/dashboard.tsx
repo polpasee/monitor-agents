@@ -11,6 +11,7 @@ import {
 } from "@/lib/telemetry";
 
 import { AgentInspector } from "./agent-inspector";
+import { KanbanBoard } from "./kanban-board";
 import { Topology } from "./topology";
 
 interface DashboardProps {
@@ -18,6 +19,7 @@ interface DashboardProps {
 }
 
 type MetricIconName = "agents" | "tokens" | "cost" | "health";
+type DashboardView = "topology" | "kanban";
 
 const compactNumber = new Intl.NumberFormat("en-US", {
   notation: "compact",
@@ -201,6 +203,7 @@ function ActivityPanel({ snapshot }: { snapshot: DashboardSnapshot }) {
 
 export function Dashboard({ snapshot: initialSnapshot }: DashboardProps) {
   const [snapshot, setSnapshot] = useState(initialSnapshot);
+  const [view, setView] = useState<DashboardView>("topology");
   const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
   const [collapsedAgentIds, setCollapsedAgentIds] = useState<Set<string>>(
     () => new Set(),
@@ -369,29 +372,49 @@ export function Dashboard({ snapshot: initialSnapshot }: DashboardProps) {
             <h1 className="dashboard-header__title">Agent Observatory</h1>
           </div>
         </div>
+        <nav className="dashboard-nav" aria-label="Dashboard views">
+          <button
+            aria-current={view === "topology" ? "page" : undefined}
+            onClick={() => setView("topology")}
+            type="button"
+          >
+            Topology
+          </button>
+          <button
+            aria-current={view === "kanban" ? "page" : undefined}
+            onClick={() => setView("kanban")}
+            type="button"
+          >
+            Kanban
+          </button>
+        </nav>
       </header>
 
-      <div className="dashboard-workspace">
-        <div className="dashboard-workspace__main">
-          <Topology
-            agents={topologyAgents}
-            capturedAt={snapshot.capturedAt}
-            collapsedAgentIds={collapsedAgentIds}
-            onSelectAgent={selectAgent}
-            onToggleCollapsed={toggleCollapsed}
-            quotaLimits={snapshot.quotaLimits}
-            selectedAgentId={selectedAgentId}
-          />
-          <ActivityPanel snapshot={snapshot} />
-        </div>
+      {view === "topology" ? (
+        <div className="dashboard-workspace">
+          <div className="dashboard-workspace__main">
+            <Topology
+              agents={topologyAgents}
+              capturedAt={snapshot.capturedAt}
+              collapsedAgentIds={collapsedAgentIds}
+              onSelectAgent={selectAgent}
+              onToggleCollapsed={toggleCollapsed}
+              quotaLimits={snapshot.quotaLimits}
+              selectedAgentId={selectedAgentId}
+            />
+            <ActivityPanel snapshot={snapshot} />
+          </div>
 
-        <AgentInspector
-          agent={selectedAgent}
-          agents={snapshot.agents}
-          capturedAt={snapshot.capturedAt}
-          onSelectAgent={selectAgent}
-        />
-      </div>
+          <AgentInspector
+            agent={selectedAgent}
+            agents={snapshot.agents}
+            capturedAt={snapshot.capturedAt}
+            onSelectAgent={selectAgent}
+          />
+        </div>
+      ) : (
+        <KanbanBoard />
+      )}
 
       <section className="metric-grid" aria-label="Session summary">
         {metrics.map((metric) => (
