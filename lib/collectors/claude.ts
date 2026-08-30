@@ -1384,9 +1384,15 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
     );
     agents.push({
       id: `${candidate.rootId}:${candidate.agentId}`,
-      parentId: candidate.parentAgentId
-        ? `${candidate.rootId}:${candidate.parentAgentId}`
-        : candidate.rootId,
+      // A parent whose own meta or transcript could not be read never
+      // becomes an agent, and a child pointing at a missing parent is
+      // dropped from the topology instead of drawn. Fall back to the
+      // session, which is the one ancestor that always exists.
+      parentId:
+        candidate.parentAgentId &&
+        summariesByKey.has(`${candidate.rootId}:${candidate.parentAgentId}`)
+          ? `${candidate.rootId}:${candidate.parentAgentId}`
+          : candidate.rootId,
       name:
         candidate.description ??
         candidate.fanLabel ??

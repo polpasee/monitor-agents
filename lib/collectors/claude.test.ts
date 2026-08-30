@@ -1182,7 +1182,11 @@ test("Claude collector resolves an arbitrary-depth subagent chain via parentAgen
     assert.equal(a?.parentId, root?.id);
     assert.equal(b?.parentId, a?.id);
     assert.equal(c?.parentId, b?.id);
-    assert.equal(orphan?.parentId, `${root?.id}:missing`);
+    assert.equal(orphan?.parentId, root?.id);
+    assert.ok(
+      result.agents.some((agent) => agent.id === orphan?.parentId),
+      "a subagent must never point at a parent the snapshot omits",
+    );
     assert.equal(a?.status, "completed");
     assert.equal(b?.status, "completed");
     assert.equal(c?.status, "completed");
