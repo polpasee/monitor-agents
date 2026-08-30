@@ -385,7 +385,7 @@ test("Claude collector enriches roots from registry and job state and finds suba
   }
 });
 
-test("Claude collector drops subagents stale from a long-finished workflow run", async () => {
+test("Claude collector drops stale subagents once the session has finished", async () => {
   const directory = await mkdtemp(join(tmpdir(), "monitor-claude-stale-"));
   const workspace = "/workspace/repo";
   const sessionId = "long-session";
@@ -412,7 +412,7 @@ test("Claude collector drops subagents stale from a long-finished workflow run",
         jobId: "job-long",
         pid: process.pid,
         cwd: workspace,
-        status: "busy",
+        status: "closed",
         startedAt: new Date(now - 2 * 24 * 60 * 60 * 1_000).toISOString(),
         updatedAt: new Date(now - 1_000).toISOString(),
       }),
@@ -420,8 +420,8 @@ test("Claude collector drops subagents stale from a long-finished workflow run",
     await writeFile(
       join(directory, "jobs", "job-long", "state.json"),
       JSON.stringify({
-        state: "working",
-        tempo: "active",
+        state: "done",
+        tempo: "idle",
         detail: "Focused review of final commits",
         fan: [{ id: "current", kind: "agent", label: "Focused review" }],
         createdAt: new Date(now - 2 * 24 * 60 * 60 * 1_000).toISOString(),
@@ -458,6 +458,103 @@ test("Claude collector drops subagents stale from a long-finished workflow run",
       .map((agent) => agent.id);
 
     assert.deepEqual(subagentIds, [`claude:${sessionId}:current`]);
+    assert.ok(result.source.detail.includes("3 older subagents are hidden."));
+  } finally {
+    if (previousDirectory === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = previousDirectory;
+    }
+    if (previousRateLimitsFile === undefined) {
+      delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    } else {
+      process.env.CLAUDE_RATE_LIMITS_FILE = previousRateLimitsFile;
+    }
+    if (previousWorkspace === undefined) {
+      delete process.env.MONITOR_WORKSPACE;
+    } else {
+      process.env.MONITOR_WORKSPACE = previousWorkspace;
+    }
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test("Claude collector keeps every subagent of a session that is still open", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-claude-open-"));
+  const workspace = "/workspace/repo";
+  const sessionId = "open-session";
+  const projectDirectory = join(directory, "projects", "-workspace-repo");
+  const subagentsDirectory = join(projectDirectory, sessionId, "subagents");
+  const previousDirectory = process.env.CLAUDE_CONFIG_DIR;
+  const previousRateLimitsFile = process.env.CLAUDE_RATE_LIMITS_FILE;
+  const previousWorkspace = process.env.MONITOR_WORKSPACE;
+  const now = Date.now();
+  const staleMs = now - 3 * 24 * 60 * 60 * 1_000;
+
+  try {
+    process.env.CLAUDE_CONFIG_DIR = directory;
+    delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    process.env.MONITOR_WORKSPACE = workspace;
+    await mkdir(join(directory, "sessions"), { recursive: true });
+    await mkdir(join(directory, "jobs", "job-open"), { recursive: true });
+    await mkdir(subagentsDirectory, { recursive: true });
+    await writeFile(
+      join(directory, "sessions", "open.json"),
+      JSON.stringify({
+        sessionId,
+        jobId: "job-open",
+        pid: process.pid,
+        cwd: workspace,
+        status: "busy",
+        startedAt: new Date(now - 4 * 24 * 60 * 60 * 1_000).toISOString(),
+        updatedAt: new Date(now - 1_000).toISOString(),
+      }),
+    );
+    await writeFile(
+      join(directory, "jobs", "job-open", "state.json"),
+      JSON.stringify({
+        state: "working",
+        tempo: "active",
+        detail: "Long fan-out",
+        createdAt: new Date(now - 4 * 24 * 60 * 60 * 1_000).toISOString(),
+        updatedAt: new Date(now - 1_000).toISOString(),
+      }),
+    );
+    await writeFile(join(projectDirectory, `${sessionId}.jsonl`), "");
+
+    await writeFile(join(subagentsDirectory, "agent-current.jsonl"), "");
+    await writeFile(
+      join(subagentsDirectory, "agent-current.meta.json"),
+      JSON.stringify({ agentType: "general-purpose" }),
+    );
+
+    // Subagents this same session ran days ago. They are finished, but the
+    // session that spawned them is still open, so the topology has to keep
+    // showing them or its subagent count disagrees with the session's.
+    for (const extra of ["e1", "e2", "e3"]) {
+      const transcript = join(subagentsDirectory, `agent-${extra}.jsonl`);
+      await writeFile(transcript, "");
+      await writeFile(
+        join(subagentsDirectory, `agent-${extra}.meta.json`),
+        JSON.stringify({ agentType: "general-purpose" }),
+      );
+      await utimes(transcript, staleMs / 1_000, staleMs / 1_000);
+    }
+
+    const result = await collectClaudeTelemetry();
+    const rootId = `claude:${sessionId}`;
+    const subagentIds = result.agents
+      .filter((agent) => agent.parentId === rootId)
+      .map((agent) => agent.id)
+      .sort();
+
+    assert.deepEqual(subagentIds, [
+      `${rootId}:current`,
+      `${rootId}:e1`,
+      `${rootId}:e2`,
+      `${rootId}:e3`,
+    ]);
+    assert.ok(!result.source.detail.includes("hidden"));
   } finally {
     if (previousDirectory === undefined) {
       delete process.env.CLAUDE_CONFIG_DIR;
