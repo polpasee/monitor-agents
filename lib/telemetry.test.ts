@@ -332,7 +332,7 @@ test("linkExternalRootsToClaudeSpawns links one uniquely timed Codex root", () =
   const tooLate = {
     ...codex,
     id: "codex:too-late",
-    startedAt: "2026-07-11T04:59:46.000Z",
+    startedAt: "2026-07-11T05:00:10.000Z",
   };
 
   const linked = linkExternalRootsToClaudeSpawns(

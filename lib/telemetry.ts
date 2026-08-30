@@ -266,7 +266,15 @@ export function linkCodexRootsToClaudeWorktrees(
   });
 }
 
-const EXTERNAL_SPAWN_LINK_WINDOW_MS = 15_000;
+// Qwen has been measured starting up to 17s after the Bash call that spawned
+// it, so the window covers a slower cold start than codex needs. Ambiguity is
+// safe: a root matching more than one spawn is left unlinked rather than
+// guessed. A spawn that resumes an existing session (`qwen -r`) is never
+// linked, because that session started before the command that resumed it.
+// One spawn keeps several children on purpose, so that a command looping over
+// a fan-out attaches all of them; the cost is that an unrelated root starting
+// inside the window of some other spawn can attach to it too.
+const EXTERNAL_SPAWN_LINK_WINDOW_MS = 30_000;
 
 export function linkExternalRootsToClaudeSpawns(
   agents: readonly AgentRun[],
