@@ -333,15 +333,34 @@ export function retainTopologyAgents(
   const capturedAtMs = Date.parse(capturedAt);
   const agentsById = new Map(agents.map((agent) => [agent.id, agent]));
   const retainedIds = new Set<string>();
+  const isExpirableAgent = (agent: AgentRun): boolean =>
+    isTerminalStatus(agent.status) ||
+    (agent.provider === "codex" && agent.status === "idle");
+  const branchRootOf = (agent: AgentRun): AgentRun => {
+    const seen = new Set([agent.id]);
+    let current = agent;
+    while (current.parentId) {
+      const parent = agentsById.get(current.parentId);
+      if (!parent || seen.has(parent.id)) {
+        break;
+      }
+      seen.add(parent.id);
+      current = parent;
+    }
+    return current;
+  };
 
   for (const agent of agents) {
     const inactiveAtMs = Date.parse(agent.endedAt ?? agent.lastActivityAt);
-    const isExpirable =
-      isTerminalStatus(agent.status) ||
-      (agent.provider === "codex" && agent.status === "idle");
+    const isExpirable = isExpirableAgent(agent);
+    // A finished subagent stays on the topology for as long as the run that
+    // spawned it is still going: it is part of that run's fan-out, and
+    // expiring it leaves the graph showing fewer subagents than the session
+    // actually spawned.
     const isSeed =
       !isExpirable ||
-      capturedAtMs - inactiveAtMs < TERMINAL_TOPOLOGY_GRACE_MS;
+      capturedAtMs - inactiveAtMs < TERMINAL_TOPOLOGY_GRACE_MS ||
+      !isExpirableAgent(branchRootOf(agent));
 
     if (!isSeed) {
       continue;

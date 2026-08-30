@@ -1105,7 +1105,7 @@ export function Topology({
           value={effectiveGroupId}
         >
           <option value={ALL_AGENT_GROUPS}>
-            All groups ({agents.length})
+            All groups ({agentGroups.length})
           </option>
           {agentGroups.map((group) => (
             <option key={group.root.id} value={group.root.id}>

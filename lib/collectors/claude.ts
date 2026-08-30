@@ -1048,6 +1048,10 @@ function subagentStatus(
   return "idle";
 }
 
+function isLiveStatus(status: AgentStatus): boolean {
+  return status === "running" || status === "idle" || status === "queued";
+}
+
 function eventsFor(agents: AgentRun[]): Event[] {
   const events: Event[] = [];
   for (const agent of agents) {
@@ -1285,14 +1289,20 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
     sortedCandidates.map((candidate) => [candidateKey(candidate), candidate]),
   );
   const nowMs = Date.now();
-  // A long-running session's subagents directory accumulates every agent
-  // ever spawned in its lifetime; without an age cutoff, a Workflow run
-  // from hours or days ago stays pinned in the topology forever alongside
-  // whatever is actually running now (only the MAX_SUBAGENTS count caps it,
-  // and that rarely trips for a single workflow burst).
+  // A finished session's subagents directory still holds every agent it
+  // ever spawned; without an age cutoff those stay pinned in the topology
+  // forever (only the MAX_SUBAGENTS count caps it, and that rarely trips
+  // for a single workflow burst). A session that is still open is the
+  // opposite case: its subagents are that session's own fan-out, so
+  // dropping the ones that have gone quiet makes the topology show fewer
+  // subagents than the session actually ran.
   const selectedKeys = new Set(
     sortedCandidates
-      .filter((candidate) => nowMs - candidate.modifiedAtMs <= MAX_SUBAGENT_AGE_MS)
+      .filter(
+        (candidate) =>
+          isLiveStatus(candidate.rootStatus) ||
+          nowMs - candidate.modifiedAtMs <= MAX_SUBAGENT_AGE_MS,
+      )
       .slice(0, MAX_SUBAGENTS)
       .map(candidateKey),
   );
@@ -1314,6 +1324,8 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
   const selectedCandidates = sortedCandidates.filter((candidate) =>
     selectedKeys.has(candidateKey(candidate)),
   );
+  const prunedSubagentCount =
+    subagentCandidates.length - selectedCandidates.length;
   const summarizedCandidates = (
     await mapWithLimit(
       selectedCandidates,
@@ -1372,9 +1384,15 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
     );
     agents.push({
       id: `${candidate.rootId}:${candidate.agentId}`,
-      parentId: candidate.parentAgentId
-        ? `${candidate.rootId}:${candidate.parentAgentId}`
-        : candidate.rootId,
+      // A parent whose own meta or transcript could not be read never
+      // becomes an agent, and a child pointing at a missing parent is
+      // dropped from the topology instead of drawn. Fall back to the
+      // session, which is the one ancestor that always exists.
+      parentId:
+        candidate.parentAgentId &&
+        summariesByKey.has(`${candidate.rootId}:${candidate.parentAgentId}`)
+          ? `${candidate.rootId}:${candidate.parentAgentId}`
+          : candidate.rootId,
       name:
         candidate.description ??
         candidate.fanLabel ??
@@ -1411,6 +1429,9 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
   }
 
   const running = agents.some((agent) => agent.status === "running");
+  const pruned = prunedSubagentCount > 0
+    ? ` ${prunedSubagentCount} older subagent${prunedSubagentCount === 1 ? " is" : "s are"} hidden.`
+    : "";
   const warning = diagnostics.errors > 0
     ? ` ${diagnostics.errors} optional telemetry file${diagnostics.errors === 1 ? " was" : "s were"} unreadable.`
     : "";
@@ -1422,7 +1443,7 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
     source: {
       provider: "claude",
       connection: running ? "connected" : "idle",
-      detail: `Loaded ${rootCount} Claude session${rootCount === 1 ? "" : "s"} and ${agents.length - rootCount} direct subagent${agents.length - rootCount === 1 ? "" : "s"}.${warning}`,
+      detail: `Loaded ${rootCount} Claude session${rootCount === 1 ? "" : "s"} and ${agents.length - rootCount} direct subagent${agents.length - rootCount === 1 ? "" : "s"}.${pruned}${warning}`,
       agentCount: agents.length,
     },
   };
