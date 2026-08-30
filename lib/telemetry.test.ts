@@ -11,6 +11,7 @@ import {
   getAgentDepths,
   getAgentGroup,
   getProviderQuota,
+  linkExternalRootsToClaudeSpawns,
   linkCodexRootsToClaudeWorktrees,
   percent,
   retainTopologyAgents,
@@ -303,6 +304,191 @@ test("linkCodexRootsToClaudeWorktrees leaves ambiguous matches unchanged", () =>
 
   assert.equal(linked[2].parentId, null);
   assert.equal(linked[2].spawnMethod, "root");
+});
+
+test("linkExternalRootsToClaudeSpawns links one uniquely timed Codex root", () => {
+  const spawnAt = "2026-07-11T04:59:30.000Z";
+  const claude = {
+    ...demoSnapshot.agents[0],
+    id: "claude:session",
+    parentId: null,
+    provider: "claude" as const,
+  };
+  const codex = {
+    ...demoSnapshot.agents[1],
+    id: "codex:external-root",
+    parentId: null,
+    provider: "codex" as const,
+    spawnMethod: "root" as const,
+    startedAt: "2026-07-11T04:59:33.000Z",
+  };
+  const nativeChild = {
+    ...demoSnapshot.agents[1],
+    id: "codex:native-child",
+    parentId: codex.id,
+    provider: "codex" as const,
+    spawnMethod: "native" as const,
+  };
+  const tooLate = {
+    ...codex,
+    id: "codex:too-late",
+    startedAt: "2026-07-11T05:00:10.000Z",
+  };
+
+  const linked = linkExternalRootsToClaudeSpawns(
+    [claude, codex, nativeChild, tooLate],
+    [
+      {
+        parentId: claude.id,
+        childProvider: "codex",
+        spawnMethod: "bash",
+        at: spawnAt,
+      },
+    ],
+  );
+
+  assert.deepEqual(
+    linked.map(({ id, parentId, spawnMethod }) => ({
+      id,
+      parentId,
+      spawnMethod,
+    })),
+    [
+      { id: claude.id, parentId: null, spawnMethod: claude.spawnMethod },
+      { id: codex.id, parentId: claude.id, spawnMethod: "bash" },
+      { id: nativeChild.id, parentId: codex.id, spawnMethod: "native" },
+      { id: tooLate.id, parentId: null, spawnMethod: "root" },
+    ],
+  );
+  assert.equal(codex.parentId, null);
+  assert.equal(codex.spawnMethod, "root");
+});
+
+test("linkExternalRootsToClaudeSpawns matches a root to a spawn of its own provider", () => {
+  const spawnAt = "2026-07-11T04:59:30.000Z";
+  const claude = {
+    ...demoSnapshot.agents[0],
+    id: "claude:session",
+    parentId: null,
+    provider: "claude" as const,
+  };
+  const qwen = {
+    ...demoSnapshot.agents[1],
+    id: "qwen:external-root",
+    parentId: null,
+    provider: "qwen" as const,
+    spawnMethod: "root" as const,
+    startedAt: "2026-07-11T04:59:33.000Z",
+  };
+  // Started in the same window, but the spawn that Claude recorded was a Qwen one.
+  const codex = {
+    ...qwen,
+    id: "codex:external-root",
+    provider: "codex" as const,
+  };
+
+  const linked = linkExternalRootsToClaudeSpawns(
+    [claude, qwen, codex],
+    [
+      {
+        parentId: claude.id,
+        childProvider: "qwen",
+        spawnMethod: "bash",
+        at: spawnAt,
+      },
+    ],
+  );
+
+  assert.deepEqual(
+    linked.map(({ id, parentId, spawnMethod }) => ({
+      id,
+      parentId,
+      spawnMethod,
+    })),
+    [
+      { id: claude.id, parentId: null, spawnMethod: claude.spawnMethod },
+      { id: qwen.id, parentId: claude.id, spawnMethod: "bash" },
+      { id: codex.id, parentId: null, spawnMethod: "root" },
+    ],
+  );
+});
+
+test("linkExternalRootsToClaudeSpawns links fan-out roots from one Claude spawn", () => {
+  const claude = {
+    ...demoSnapshot.agents[0],
+    id: "claude:session",
+    parentId: null,
+    provider: "claude" as const,
+  };
+  const agents: AgentRun[] = [
+    claude,
+    {
+      ...demoSnapshot.agents[1],
+      id: "codex:first",
+      parentId: null,
+      provider: "codex",
+      spawnMethod: "root",
+      startedAt: "2026-07-11T04:59:33.000Z",
+    },
+    {
+      ...demoSnapshot.agents[1],
+      id: "codex:second",
+      parentId: null,
+      provider: "codex",
+      spawnMethod: "root",
+      startedAt: "2026-07-11T04:59:34.000Z",
+    },
+  ];
+
+  const linked = linkExternalRootsToClaudeSpawns(agents, [
+    {
+      parentId: claude.id,
+      childProvider: "codex",
+      spawnMethod: "bash",
+      at: "2026-07-11T04:59:30.000Z",
+    },
+  ]);
+
+  assert.equal(linked[1].parentId, claude.id);
+  assert.equal(linked[2].parentId, claude.id);
+});
+
+test("linkExternalRootsToClaudeSpawns leaves multi-parent matches unchanged", () => {
+  const claude = {
+    ...demoSnapshot.agents[0],
+    id: "claude:first",
+    parentId: null,
+    provider: "claude" as const,
+  };
+  const secondClaude = { ...claude, id: "claude:second" };
+  const codex = {
+    ...demoSnapshot.agents[1],
+    id: "codex:ambiguous",
+    parentId: null,
+    provider: "codex" as const,
+    spawnMethod: "root" as const,
+    startedAt: "2026-07-11T04:59:33.000Z",
+  };
+
+  const linkedByTwoSpawns = linkExternalRootsToClaudeSpawns(
+    [claude, secondClaude, codex],
+    [
+      {
+        parentId: claude.id,
+        childProvider: "codex",
+        spawnMethod: "bash",
+        at: "2026-07-11T04:59:30.000Z",
+      },
+      {
+        parentId: secondClaude.id,
+        childProvider: "codex",
+        spawnMethod: "bash",
+        at: "2026-07-11T04:59:31.000Z",
+      },
+    ],
+  );
+
+  assert.equal(linkedByTwoSpawns[2].parentId, null);
 });
 
 test("retainTopologyAgents keeps active and recently inactive agents", () => {

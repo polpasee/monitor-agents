@@ -1,4 +1,4 @@
-export type Provider = "codex" | "claude" | "agy" | "gemini";
+export type Provider = "codex" | "claude" | "agy" | "gemini" | "qwen";
 
 export type AgentStatus =
   | "queued"
@@ -36,6 +36,13 @@ export interface AgentRun {
   tokenUsage: TokenUsage;
   costUsd: number | null;
   toolCalls: number | null;
+}
+
+export interface ExternalSpawn {
+  parentId: string;
+  childProvider: Provider;
+  spawnMethod: Exclude<SpawnMethod, "root" | "native">;
+  at: string;
 }
 
 export type EventKind =
@@ -256,6 +263,60 @@ export function linkCodexRootsToClaudeWorktrees(
     return parents.length === 1
       ? { ...agent, parentId: parents[0].id, spawnMethod: "bash" }
       : agent;
+  });
+}
+
+// Qwen has been measured starting up to 17s after the Bash call that spawned
+// it, so the window covers a slower cold start than codex needs. Ambiguity is
+// safe: a root matching more than one spawn is left unlinked rather than
+// guessed. A spawn that resumes an existing session (`qwen -r`) is never
+// linked, because that session started before the command that resumed it.
+// One spawn keeps several children on purpose, so that a command looping over
+// a fan-out attaches all of them; the cost is that an unrelated root starting
+// inside the window of some other spawn can attach to it too.
+const EXTERNAL_SPAWN_LINK_WINDOW_MS = 30_000;
+
+export function linkExternalRootsToClaudeSpawns(
+  agents: readonly AgentRun[],
+  externalSpawns: readonly ExternalSpawn[],
+): AgentRun[] {
+  const agentsById = new Map(agents.map((agent) => [agent.id, agent]));
+  const spawns = externalSpawns.filter((spawn) => {
+    const parent = agentsById.get(spawn.parentId);
+    return (
+      parent?.provider === "claude" && Number.isFinite(Date.parse(spawn.at))
+    );
+  });
+  function matches(child: AgentRun, spawn: ExternalSpawn): boolean {
+    if (spawn.childProvider !== child.provider) {
+      return false;
+    }
+
+    const startedAtMs = Date.parse(child.startedAt);
+    const delayMs = startedAtMs - Date.parse(spawn.at);
+    return delayMs >= 0 && delayMs <= EXTERNAL_SPAWN_LINK_WINDOW_MS;
+  }
+
+  return agents.map((agent) => {
+    if (agent.provider === "claude" || agent.parentId !== null) {
+      return agent;
+    }
+
+    const matchingSpawns = spawns.filter((spawn) => matches(agent, spawn));
+    if (matchingSpawns.length !== 1) {
+      return agent;
+    }
+
+    const parentIds = new Set(matchingSpawns.map((spawn) => spawn.parentId));
+    if (parentIds.size !== 1) {
+      return agent;
+    }
+
+    return {
+      ...agent,
+      parentId: matchingSpawns[0].parentId,
+      spawnMethod: matchingSpawns[0].spawnMethod,
+    };
   });
 }
 

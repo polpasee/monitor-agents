@@ -1,4 +1,5 @@
 import {
+  linkExternalRootsToClaudeSpawns,
   linkCodexRootsToClaudeWorktrees,
   type DashboardSnapshot,
 } from "./telemetry";
@@ -6,6 +7,7 @@ import { collectAgyTelemetry } from "./collectors/agy";
 import { collectClaudeTelemetry } from "./collectors/claude";
 import { collectCodexTelemetry } from "./collectors/codex";
 import { collectGeminiTelemetry } from "./collectors/gemini";
+import { collectQwenTelemetry } from "./collectors/qwen";
 
 export async function collectLiveSnapshot(): Promise<DashboardSnapshot> {
   const results = await Promise.all([
@@ -13,9 +15,14 @@ export async function collectLiveSnapshot(): Promise<DashboardSnapshot> {
     collectClaudeTelemetry(),
     collectAgyTelemetry(),
     collectGeminiTelemetry(),
+    collectQwenTelemetry(),
   ]);
-  const agents = linkCodexRootsToClaudeWorktrees(
+  const worktreeLinkedAgents = linkCodexRootsToClaudeWorktrees(
     results.flatMap((result) => result.agents),
+  );
+  const agents = linkExternalRootsToClaudeSpawns(
+    worktreeLinkedAgents,
+    results.flatMap((result) => result.externalSpawns ?? []),
   );
 
   return {

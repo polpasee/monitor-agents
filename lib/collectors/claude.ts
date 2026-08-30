@@ -17,6 +17,8 @@ import type {
   AgentRun,
   AgentStatus,
   Event,
+  ExternalSpawn,
+  Provider,
   QuotaLimit,
 } from "../telemetry";
 import type { CollectorResult } from "./types";
@@ -29,6 +31,22 @@ const MAX_NAME_LENGTH = 32;
 const SCAN_CONCURRENCY = 8;
 const DEAD_SESSION_GRACE_MS = 2 * 60 * 1_000;
 const MAX_SUBAGENT_AGE_MS = 30 * 60 * 1_000;
+const CODEX_EXEC_COMMAND_PATTERN =
+  /(?:^|[\n;&|])[\t ]*(?:nohup[\t ]+)?codex[\t ]+exec(?:[\t \\]|$)/u;
+// Qwen runs headless when given a prompt flag, which may follow other flags
+// (`qwen -y -s -o stream-json -p "..."`). Interactive `qwen`, `qwen --help`
+// and `qwen --version` are not spawns. Prompt text quoted inside a heredoc
+// can still read as a command here, the same limitation the codex pattern has.
+const QWEN_PROMPT_COMMAND_PATTERN =
+  /(?:^|[\n;&|(){}])[\t ]*(?:nohup[\t ]+)?qwen[\t ]+(?:[^\n;&|]*[\t ])?-(?:p|-prompt)(?:[\t \\="']|$)/u;
+
+const EXTERNAL_SPAWN_COMMAND_PATTERNS: ReadonlyArray<{
+  provider: Provider;
+  pattern: RegExp;
+}> = [
+  { provider: "codex", pattern: CODEX_EXEC_COMMAND_PATTERN },
+  { provider: "qwen", pattern: QWEN_PROMPT_COMMAND_PATTERN },
+];
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_CONTEXT_LIMIT = 200_000;
@@ -90,7 +108,13 @@ interface TranscriptSummary {
   firstAtMs: number | null;
   lastAtMs: number | null;
   costUsd: number | null;
+  externalSpawns: ExternalSpawnMark[];
   taskNotifications: Map<string, ProviderAgentState>;
+}
+
+interface ExternalSpawnMark {
+  provider: Provider;
+  atMs: number;
 }
 
 interface StatusLineSnapshot {
@@ -687,6 +711,7 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
   let costUsd: number | null = null;
   let latestContextUsed = 0;
   const longContextModels = new Set<string>();
+  const externalSpawns: ExternalSpawnMark[] = [];
   const taskNotifications = new Map<string, ProviderAgentState>();
 
   const lines = createInterface({
@@ -780,6 +805,24 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
     const toolCalls = content.filter(
       (block) => record(block)?.type === "tool_use",
     ).length;
+    if (atMs !== null) {
+      for (const block of content) {
+        const toolUse = record(block);
+        const input = record(toolUse?.input);
+        const command = stringValue(input?.command);
+        if (
+          toolUse?.type === "tool_use" &&
+          toolUse.name === "Bash" &&
+          command !== null
+        ) {
+          for (const { provider, pattern } of EXTERNAL_SPAWN_COMMAND_PATTERNS) {
+            if (pattern.test(command)) {
+              externalSpawns.push({ provider, atMs });
+            }
+          }
+        }
+      }
+    }
 
     const usage = record(message.usage);
     if (!usage) {
@@ -839,6 +882,7 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
     firstAtMs,
     lastAtMs,
     costUsd,
+    externalSpawns,
     taskNotifications,
   };
 }
@@ -1125,6 +1169,7 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
     });
   const projectsDirectory = join(claudeDirectory, "projects");
   const agents: AgentRun[] = [];
+  const externalSpawns: ExternalSpawn[] = [];
   const subagentCandidates: SubagentCandidate[] = [];
 
   for (const session of sessions) {
@@ -1208,6 +1253,14 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
       toolCalls: transcript?.toolCalls ?? null,
     };
     agents.push(root);
+    for (const mark of transcript?.externalSpawns ?? []) {
+      externalSpawns.push({
+        parentId: root.id,
+        childProvider: mark.provider,
+        spawnMethod: "bash",
+        at: isoTime(mark.atMs),
+      });
+    }
 
     if (transcriptPath) {
       subagentCandidates.push(
@@ -1364,6 +1417,7 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
   return {
     agents,
     events: eventsFor(agents),
+    externalSpawns,
     quotaLimits,
     source: {
       provider: "claude",
