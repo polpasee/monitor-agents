@@ -1083,7 +1083,7 @@ test("Claude collector distinguishes resumed, stalled, and spare sessions", asyn
   }
 });
 
-test("Claude collector reads a killed subagent as aborted, not as running", async () => {
+test("Claude collector reads a killed or stopped subagent as aborted", async () => {
   const directory = await mkdtemp(join(tmpdir(), "monitor-claude-killed-"));
   const workspace = "/workspace/killed";
   const sessionId = "killed-session";
@@ -1113,32 +1113,46 @@ test("Claude collector reads a killed subagent as aborted, not as running", asyn
     );
     await writeFile(
       join(projectDirectory, `${sessionId}.jsonl`),
-      `${JSON.stringify({
-        type: "user",
-        timestamp: new Date(now - 4_000).toISOString(),
-        message: {
-          content:
-            "<task-notification><task-id>stopped</task-id><status>killed</status></task-notification>",
-        },
-      })}\n`,
+      ["killed", "stopped"]
+        .map(
+          (state) =>
+            `${JSON.stringify({
+              type: "user",
+              timestamp: new Date(now - 4_000).toISOString(),
+              message: {
+                content: `<task-notification><task-id>${state}-one</task-id><status>${state}</status></task-notification>`,
+              },
+            })}\n`,
+        )
+        .join(""),
     );
 
-    // The subagent's own transcript records no stop reason, so without the
-    // notification it would inherit "running" from the live session and
-    // never leave the topology.
-    await writeFile(join(subagentsDirectory, "agent-stopped.jsonl"), "");
-    await writeFile(
-      join(subagentsDirectory, "agent-stopped.meta.json"),
-      JSON.stringify({ agentType: "worker" }),
-    );
+    // Neither subagent's own transcript records a stop reason, so without
+    // the notification each would inherit "running" from the live session
+    // and never leave the topology.
+    for (const state of ["killed", "stopped"]) {
+      await writeFile(
+        join(subagentsDirectory, `agent-${state}-one.jsonl`),
+        "",
+      );
+      await writeFile(
+        join(subagentsDirectory, `agent-${state}-one.meta.json`),
+        JSON.stringify({ agentType: "worker" }),
+      );
+    }
 
     const result = await collectClaudeTelemetry();
-    const stopped = result.agents.find(
-      (agent) => agent.id === `claude:${sessionId}:stopped`,
-    );
+    const statuses = ["killed", "stopped"].map((state) => {
+      const agent = result.agents.find(
+        (candidate) => candidate.id === `claude:${sessionId}:${state}-one`,
+      );
+      return [agent?.status, agent?.endedAt === null];
+    });
 
-    assert.equal(stopped?.status, "aborted");
-    assert.notEqual(stopped?.endedAt, null);
+    assert.deepEqual(statuses, [
+      ["aborted", false],
+      ["aborted", false],
+    ]);
   } finally {
     if (previousDirectory === undefined) {
       delete process.env.CLAUDE_CONFIG_DIR;
