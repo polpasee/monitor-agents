@@ -606,6 +606,37 @@ test("Claude collector completes dead-process sessions and counts tool calls", a
           },
         },
       ]),
+      assistantLine([
+        {
+          type: "tool_use",
+          name: "Bash",
+          input: { command: "qwen --help 2>&1 | head -3" },
+        },
+      ]),
+      assistantLine([
+        {
+          type: "tool_use",
+          name: "Bash",
+          input: { command: "qwen --version" },
+        },
+      ]),
+      assistantLine([
+        {
+          type: "tool_use",
+          name: "Bash",
+          input: { command: 'qwen -p "Reply with exactly: ok"' },
+        },
+      ]),
+      assistantLine([
+        {
+          type: "tool_use",
+          name: "Bash",
+          input: {
+            command:
+              '{ qwen -y -s -o stream-json -p "$(cat "$S/task.md")" ; } > out.log',
+          },
+        },
+      ]),
     ];
     await writeFile(
       join(projectDirectory, "live-session.jsonl"),
@@ -645,7 +676,7 @@ test("Claude collector completes dead-process sessions and counts tool calls", a
     assert.equal(live?.name, "Claude session live-ses");
     assert.equal(live?.model, "claude-fable-5");
     assert.equal(live?.task, "Fix the login bug");
-    assert.equal(live?.toolCalls, 5);
+    assert.equal(live?.toolCalls, 9);
     assert.equal(live?.tokenUsage.input, 100);
     assert.equal(live?.tokenUsage.output, 20);
     assert.equal(live?.tokenUsage.contextLimit, 1_000_000);
@@ -656,6 +687,18 @@ test("Claude collector completes dead-process sessions and counts tool calls", a
       {
         parentId: "claude:live-session",
         childProvider: "codex",
+        spawnMethod: "bash",
+        at: new Date(now - 30_000).toISOString(),
+      },
+      {
+        parentId: "claude:live-session",
+        childProvider: "qwen",
+        spawnMethod: "bash",
+        at: new Date(now - 30_000).toISOString(),
+      },
+      {
+        parentId: "claude:live-session",
+        childProvider: "qwen",
         spawnMethod: "bash",
         at: new Date(now - 30_000).toISOString(),
       },

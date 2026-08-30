@@ -364,6 +364,55 @@ test("linkExternalRootsToClaudeSpawns links one uniquely timed Codex root", () =
   assert.equal(codex.spawnMethod, "root");
 });
 
+test("linkExternalRootsToClaudeSpawns matches a root to a spawn of its own provider", () => {
+  const spawnAt = "2026-07-11T04:59:30.000Z";
+  const claude = {
+    ...demoSnapshot.agents[0],
+    id: "claude:session",
+    parentId: null,
+    provider: "claude" as const,
+  };
+  const qwen = {
+    ...demoSnapshot.agents[1],
+    id: "qwen:external-root",
+    parentId: null,
+    provider: "qwen" as const,
+    spawnMethod: "root" as const,
+    startedAt: "2026-07-11T04:59:33.000Z",
+  };
+  // Started in the same window, but the spawn that Claude recorded was a Qwen one.
+  const codex = {
+    ...qwen,
+    id: "codex:external-root",
+    provider: "codex" as const,
+  };
+
+  const linked = linkExternalRootsToClaudeSpawns(
+    [claude, qwen, codex],
+    [
+      {
+        parentId: claude.id,
+        childProvider: "qwen",
+        spawnMethod: "bash",
+        at: spawnAt,
+      },
+    ],
+  );
+
+  assert.deepEqual(
+    linked.map(({ id, parentId, spawnMethod }) => ({
+      id,
+      parentId,
+      spawnMethod,
+    })),
+    [
+      { id: claude.id, parentId: null, spawnMethod: claude.spawnMethod },
+      { id: qwen.id, parentId: claude.id, spawnMethod: "bash" },
+      { id: codex.id, parentId: null, spawnMethod: "root" },
+    ],
+  );
+});
+
 test("linkExternalRootsToClaudeSpawns links fan-out roots from one Claude spawn", () => {
   const claude = {
     ...demoSnapshot.agents[0],

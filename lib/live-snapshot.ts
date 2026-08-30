@@ -7,6 +7,7 @@ import { collectAgyTelemetry } from "./collectors/agy";
 import { collectClaudeTelemetry } from "./collectors/claude";
 import { collectCodexTelemetry } from "./collectors/codex";
 import { collectGeminiTelemetry } from "./collectors/gemini";
+import { collectQwenTelemetry } from "./collectors/qwen";
 
 export async function collectLiveSnapshot(): Promise<DashboardSnapshot> {
   const results = await Promise.all([
@@ -14,6 +15,7 @@ export async function collectLiveSnapshot(): Promise<DashboardSnapshot> {
     collectClaudeTelemetry(),
     collectAgyTelemetry(),
     collectGeminiTelemetry(),
+    collectQwenTelemetry(),
   ]);
   const worktreeLinkedAgents = linkCodexRootsToClaudeWorktrees(
     results.flatMap((result) => result.agents),
