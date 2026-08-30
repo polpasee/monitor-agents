@@ -4,7 +4,7 @@ YOU MUST FOLLOW 4 RULES BELOW
 
 ## 1. Think Before Coding
 
-**Don't assume. Don't hide confusion. Surface tradeoffs.**
+**Don't assume. Don't hide confusion. Surface tradeoffs.** if you not sure, please ask advisor
 
 Before implementing:
 
@@ -53,13 +53,41 @@ Transform tasks into verifiable goals:
 - "Fix the bug" → "Write a test that reproduces it, then make it pass"
 - "Refactor X" → "Ensure tests pass before and after"
 
-For multi-step tasks, state a brief plan:
+# Workflow Step:
 
-```
-1. [Step] → verify: [check]
-2. [Step] → verify: [check]
-3. [Step] → verify: [check]
-```
+- This is the mandatory step for support any request for edit this codebase. No need to get approve on each step. Prefer Autonomous Mode: No human approval
+- on each Working Task
+  - Create Branch/worktree for everytime for Edit code. Port for Dev will change form 3000 to random between 3001-3010 per Branch/worktree.
+  - Commit on every sub-task after it completed
+  - After they completed, created PR
+  - use "/loop 30 Min : report time with current status of workflow"
+
+## Step 1 Explore:
+
+- `Spawn new subagents` to support Explore Codebase.
+- Reads files and answers questions without making changes.
+
+## Step 2 Plan:
+
+- Create a detailed of implementation plan.
+
+## Step 3 Implement/execute:
+
+- `Spawn new subagents` to implement each tasks.
+- After Completed, Subagent doesn't close until get notify from Test & Verification in step4.
+
+## Step 4 Test & Verification
+
+- Any code edit : must to Test & Verification
+- `Spwan new subagent` to Test & Verification and send it's back to subagent owner's tasks to fix them or It's OK
+- Ignore CI on Github if we have billing issues.
+
+## Step 5 Merge and Clean:
+
+- `Spwan new subagent` to suupport this task
+- Merge all {PR, branch and worktree} and verify the git tree is in sync. then delete and clean all.
+
+
 
 # Project Overview
 Web Portal : Monitor Agent/Sub-agents that can support multi LLM (CODEX, CLAUDE, AGY)
