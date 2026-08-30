@@ -601,7 +601,11 @@ function workflowAgentStatus(value: unknown): AgentStatus | null {
   if (["failed", "error"].includes(state)) {
     return "failed";
   }
-  if (["aborted", "cancelled", "canceled", "interrupted"].includes(state)) {
+  if (
+    ["aborted", "cancelled", "canceled", "interrupted", "killed"].includes(
+      state,
+    )
+  ) {
     return "aborted";
   }
   if (["running", "working", "active"].includes(state)) {
