@@ -17,6 +17,7 @@ import type {
   AgentRun,
   AgentStatus,
   Event,
+  ExternalSpawn,
   QuotaLimit,
 } from "../telemetry";
 import type { CollectorResult } from "./types";
@@ -29,6 +30,8 @@ const MAX_NAME_LENGTH = 32;
 const SCAN_CONCURRENCY = 8;
 const DEAD_SESSION_GRACE_MS = 2 * 60 * 1_000;
 const MAX_SUBAGENT_AGE_MS = 30 * 60 * 1_000;
+const CODEX_EXEC_COMMAND_PATTERN =
+  /(?:^|[\n;&|])[\t ]*(?:nohup[\t ]+)?codex[\t ]+exec(?:[\t \\]|$)/u;
 
 const execFileAsync = promisify(execFile);
 const DEFAULT_CONTEXT_LIMIT = 200_000;
@@ -90,6 +93,7 @@ interface TranscriptSummary {
   firstAtMs: number | null;
   lastAtMs: number | null;
   costUsd: number | null;
+  codexSpawnAtMs: number[];
   taskNotifications: Map<string, ProviderAgentState>;
 }
 
@@ -687,6 +691,7 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
   let costUsd: number | null = null;
   let latestContextUsed = 0;
   const longContextModels = new Set<string>();
+  const codexSpawnAtMs: number[] = [];
   const taskNotifications = new Map<string, ProviderAgentState>();
 
   const lines = createInterface({
@@ -780,6 +785,21 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
     const toolCalls = content.filter(
       (block) => record(block)?.type === "tool_use",
     ).length;
+    if (atMs !== null) {
+      for (const block of content) {
+        const toolUse = record(block);
+        const input = record(toolUse?.input);
+        const command = stringValue(input?.command);
+        if (
+          toolUse?.type === "tool_use" &&
+          toolUse.name === "Bash" &&
+          command !== null &&
+          CODEX_EXEC_COMMAND_PATTERN.test(command)
+        ) {
+          codexSpawnAtMs.push(atMs);
+        }
+      }
+    }
 
     const usage = record(message.usage);
     if (!usage) {
@@ -839,6 +859,7 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
     firstAtMs,
     lastAtMs,
     costUsd,
+    codexSpawnAtMs,
     taskNotifications,
   };
 }
@@ -1125,6 +1146,7 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
     });
   const projectsDirectory = join(claudeDirectory, "projects");
   const agents: AgentRun[] = [];
+  const externalSpawns: ExternalSpawn[] = [];
   const subagentCandidates: SubagentCandidate[] = [];
 
   for (const session of sessions) {
@@ -1208,6 +1230,14 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
       toolCalls: transcript?.toolCalls ?? null,
     };
     agents.push(root);
+    for (const atMs of transcript?.codexSpawnAtMs ?? []) {
+      externalSpawns.push({
+        parentId: root.id,
+        childProvider: "codex",
+        spawnMethod: "bash",
+        at: isoTime(atMs),
+      });
+    }
 
     if (transcriptPath) {
       subagentCandidates.push(
@@ -1364,6 +1394,7 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
   return {
     agents,
     events: eventsFor(agents),
+    externalSpawns,
     quotaLimits,
     source: {
       provider: "claude",

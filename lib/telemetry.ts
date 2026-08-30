@@ -38,6 +38,13 @@ export interface AgentRun {
   toolCalls: number | null;
 }
 
+export interface ExternalSpawn {
+  parentId: string;
+  childProvider: Provider;
+  spawnMethod: Exclude<SpawnMethod, "root" | "native">;
+  at: string;
+}
+
 export type EventKind =
   | "agent.started"
   | "agent.completed"
@@ -256,6 +263,50 @@ export function linkCodexRootsToClaudeWorktrees(
     return parents.length === 1
       ? { ...agent, parentId: parents[0].id, spawnMethod: "bash" }
       : agent;
+  });
+}
+
+const EXTERNAL_SPAWN_LINK_WINDOW_MS = 15_000;
+
+export function linkCodexRootsToClaudeSpawns(
+  agents: readonly AgentRun[],
+  externalSpawns: readonly ExternalSpawn[],
+): AgentRun[] {
+  const agentsById = new Map(agents.map((agent) => [agent.id, agent]));
+  const spawns = externalSpawns.filter((spawn) => {
+    const parent = agentsById.get(spawn.parentId);
+    return (
+      parent?.provider === "claude" &&
+      spawn.childProvider === "codex" &&
+      Number.isFinite(Date.parse(spawn.at))
+    );
+  });
+  function matches(codex: AgentRun, spawn: ExternalSpawn): boolean {
+    const startedAtMs = Date.parse(codex.startedAt);
+    const delayMs = startedAtMs - Date.parse(spawn.at);
+    return delayMs >= 0 && delayMs <= EXTERNAL_SPAWN_LINK_WINDOW_MS;
+  }
+
+  return agents.map((agent) => {
+    if (agent.provider !== "codex" || agent.parentId !== null) {
+      return agent;
+    }
+
+    const matchingSpawns = spawns.filter((spawn) => matches(agent, spawn));
+    if (matchingSpawns.length !== 1) {
+      return agent;
+    }
+
+    const parentIds = new Set(matchingSpawns.map((spawn) => spawn.parentId));
+    if (parentIds.size !== 1) {
+      return agent;
+    }
+
+    return {
+      ...agent,
+      parentId: matchingSpawns[0].parentId,
+      spawnMethod: matchingSpawns[0].spawnMethod,
+    };
   });
 }
 
