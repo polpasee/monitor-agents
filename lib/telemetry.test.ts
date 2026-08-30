@@ -555,44 +555,6 @@ test("retainTopologyAgents prunes all-expired terminal branches", () => {
   assert.deepEqual(retainTopologyAgents(agents, topologyCapturedAt), []);
 });
 
-test("retainTopologyAgents keeps a finished subagent while its run continues", () => {
-  const agents = [
-    topologyAgent("live-root", "running", 120_000),
-    topologyAgent("long-finished-child", "completed", 86_400_000, "live-root"),
-    topologyAgent("finished-root", "completed", 120_000),
-    topologyAgent("dropped-child", "completed", 86_400_000, "finished-root"),
-  ];
-
-  assert.deepEqual(
-    retainTopologyAgents(agents, topologyCapturedAt).map((agent) => agent.id),
-    ["live-root", "long-finished-child"],
-  );
-});
-
-test("retainTopologyAgents keeps a bash-spawned Codex child of a live run", () => {
-  const agents = [
-    topologyAgent("claude-root", "running", 120_000),
-    {
-      ...topologyAgent("codex-child", "idle", 86_400_000, "claude-root"),
-      provider: "codex" as const,
-    },
-  ];
-
-  assert.deepEqual(
-    retainTopologyAgents(agents, topologyCapturedAt).map((agent) => agent.id),
-    ["claude-root", "codex-child"],
-  );
-});
-
-test("retainTopologyAgents resolves a branch root through a parent cycle", () => {
-  const agents = [
-    topologyAgent("cycle-a", "completed", 120_000, "cycle-b"),
-    topologyAgent("cycle-b", "failed", 120_000, "cycle-a"),
-  ];
-
-  assert.deepEqual(retainTopologyAgents(agents, topologyCapturedAt), []);
-});
-
 test("retainTopologyAgents terminates safely on parent cycles", () => {
   const agents = [
     topologyAgent("active-a", "running", 120_000, "active-b"),

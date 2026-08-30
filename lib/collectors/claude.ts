@@ -601,13 +601,22 @@ function workflowAgentStatus(value: unknown): AgentStatus | null {
   if (["failed", "error"].includes(state)) {
     return "failed";
   }
-  if (["aborted", "cancelled", "canceled", "interrupted"].includes(state)) {
+  if (
+    [
+      "aborted",
+      "cancelled",
+      "canceled",
+      "interrupted",
+      "killed",
+      "stopped",
+    ].includes(state)
+  ) {
     return "aborted";
   }
-  if (["running", "working", "active"].includes(state)) {
+  if (["running", "working", "active", "progress"].includes(state)) {
     return "running";
   }
-  if (["queued", "pending"].includes(state)) {
+  if (["queued", "pending", "paused"].includes(state)) {
     return "queued";
   }
   return state === "idle" ? "idle" : null;
