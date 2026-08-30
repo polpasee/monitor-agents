@@ -11,7 +11,7 @@ import {
   getAgentDepths,
   getAgentGroup,
   getProviderQuota,
-  linkCodexRootsToClaudeSpawns,
+  linkExternalRootsToClaudeSpawns,
   linkCodexRootsToClaudeWorktrees,
   percent,
   retainTopologyAgents,
@@ -306,7 +306,7 @@ test("linkCodexRootsToClaudeWorktrees leaves ambiguous matches unchanged", () =>
   assert.equal(linked[2].spawnMethod, "root");
 });
 
-test("linkCodexRootsToClaudeSpawns links one uniquely timed Codex root", () => {
+test("linkExternalRootsToClaudeSpawns links one uniquely timed Codex root", () => {
   const spawnAt = "2026-07-11T04:59:30.000Z";
   const claude = {
     ...demoSnapshot.agents[0],
@@ -335,7 +335,7 @@ test("linkCodexRootsToClaudeSpawns links one uniquely timed Codex root", () => {
     startedAt: "2026-07-11T04:59:46.000Z",
   };
 
-  const linked = linkCodexRootsToClaudeSpawns(
+  const linked = linkExternalRootsToClaudeSpawns(
     [claude, codex, nativeChild, tooLate],
     [
       {
@@ -364,7 +364,7 @@ test("linkCodexRootsToClaudeSpawns links one uniquely timed Codex root", () => {
   assert.equal(codex.spawnMethod, "root");
 });
 
-test("linkCodexRootsToClaudeSpawns links fan-out roots from one Claude spawn", () => {
+test("linkExternalRootsToClaudeSpawns links fan-out roots from one Claude spawn", () => {
   const claude = {
     ...demoSnapshot.agents[0],
     id: "claude:session",
@@ -391,7 +391,7 @@ test("linkCodexRootsToClaudeSpawns links fan-out roots from one Claude spawn", (
     },
   ];
 
-  const linked = linkCodexRootsToClaudeSpawns(agents, [
+  const linked = linkExternalRootsToClaudeSpawns(agents, [
     {
       parentId: claude.id,
       childProvider: "codex",
@@ -404,7 +404,7 @@ test("linkCodexRootsToClaudeSpawns links fan-out roots from one Claude spawn", (
   assert.equal(linked[2].parentId, claude.id);
 });
 
-test("linkCodexRootsToClaudeSpawns leaves multi-parent matches unchanged", () => {
+test("linkExternalRootsToClaudeSpawns leaves multi-parent matches unchanged", () => {
   const claude = {
     ...demoSnapshot.agents[0],
     id: "claude:first",
@@ -421,7 +421,7 @@ test("linkCodexRootsToClaudeSpawns leaves multi-parent matches unchanged", () =>
     startedAt: "2026-07-11T04:59:33.000Z",
   };
 
-  const linkedByTwoSpawns = linkCodexRootsToClaudeSpawns(
+  const linkedByTwoSpawns = linkExternalRootsToClaudeSpawns(
     [claude, secondClaude, codex],
     [
       {

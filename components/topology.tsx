@@ -123,6 +123,7 @@ const providerLabels: Record<Provider, string> = {
   claude: "Claude",
   agy: "AGY",
   gemini: "Gemini",
+  qwen: "Qwen",
 };
 
 const compactNumber = new Intl.NumberFormat("en-US", {

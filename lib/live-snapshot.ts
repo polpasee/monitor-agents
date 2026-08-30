@@ -1,5 +1,5 @@
 import {
-  linkCodexRootsToClaudeSpawns,
+  linkExternalRootsToClaudeSpawns,
   linkCodexRootsToClaudeWorktrees,
   type DashboardSnapshot,
 } from "./telemetry";
@@ -18,7 +18,7 @@ export async function collectLiveSnapshot(): Promise<DashboardSnapshot> {
   const worktreeLinkedAgents = linkCodexRootsToClaudeWorktrees(
     results.flatMap((result) => result.agents),
   );
-  const agents = linkCodexRootsToClaudeSpawns(
+  const agents = linkExternalRootsToClaudeSpawns(
     worktreeLinkedAgents,
     results.flatMap((result) => result.externalSpawns ?? []),
   );

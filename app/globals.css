@@ -797,6 +797,13 @@ button:focus-visible,
   --provider-color: var(--provider-color-400);
 }
 
+[data-provider="qwen"] {
+  --provider-color-300: var(--color-emerald-300);
+  --provider-color-400: var(--color-emerald-400);
+  --provider-color-700: var(--color-emerald-700);
+  --provider-color: var(--provider-color-400);
+}
+
 .force-node {
   --provider-color-300: color-mix(in oklch, var(--node-color) 78%, white);
   --provider-color-400: var(--node-color);

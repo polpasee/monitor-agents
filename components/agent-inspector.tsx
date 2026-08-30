@@ -44,6 +44,7 @@ const providerLabels: Record<Provider, string> = {
   claude: "Claude",
   agy: "AGY",
   gemini: "Gemini",
+  qwen: "Qwen",
 };
 
 function labelStatus(status: AgentRun["status"]): string {

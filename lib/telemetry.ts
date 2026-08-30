@@ -1,4 +1,4 @@
-export type Provider = "codex" | "claude" | "agy" | "gemini";
+export type Provider = "codex" | "claude" | "agy" | "gemini" | "qwen";
 
 export type AgentStatus =
   | "queued"
@@ -268,7 +268,7 @@ export function linkCodexRootsToClaudeWorktrees(
 
 const EXTERNAL_SPAWN_LINK_WINDOW_MS = 15_000;
 
-export function linkCodexRootsToClaudeSpawns(
+export function linkExternalRootsToClaudeSpawns(
   agents: readonly AgentRun[],
   externalSpawns: readonly ExternalSpawn[],
 ): AgentRun[] {
@@ -276,19 +276,21 @@ export function linkCodexRootsToClaudeSpawns(
   const spawns = externalSpawns.filter((spawn) => {
     const parent = agentsById.get(spawn.parentId);
     return (
-      parent?.provider === "claude" &&
-      spawn.childProvider === "codex" &&
-      Number.isFinite(Date.parse(spawn.at))
+      parent?.provider === "claude" && Number.isFinite(Date.parse(spawn.at))
     );
   });
-  function matches(codex: AgentRun, spawn: ExternalSpawn): boolean {
-    const startedAtMs = Date.parse(codex.startedAt);
+  function matches(child: AgentRun, spawn: ExternalSpawn): boolean {
+    if (spawn.childProvider !== child.provider) {
+      return false;
+    }
+
+    const startedAtMs = Date.parse(child.startedAt);
     const delayMs = startedAtMs - Date.parse(spawn.at);
     return delayMs >= 0 && delayMs <= EXTERNAL_SPAWN_LINK_WINDOW_MS;
   }
 
   return agents.map((agent) => {
-    if (agent.provider !== "codex" || agent.parentId !== null) {
+    if (agent.provider === "claude" || agent.parentId !== null) {
       return agent;
     }
 
