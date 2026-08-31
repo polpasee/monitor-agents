@@ -12,8 +12,10 @@ import {
   getAgentGroup,
   getProviderQuota,
   linkExternalRootsToClaudeSpawns,
+  applyDeclaredSpawnLinks,
   linkCodexRootsToClaudeWorktrees,
   linkWorktreeRootsToClaudeRepos,
+  parseSpawnLinks,
   percent,
   retainTopologyAgents,
   type AgentRun,
@@ -490,6 +492,134 @@ test("linkExternalRootsToClaudeSpawns leaves multi-parent matches unchanged", ()
   );
 
   assert.equal(linkedByTwoSpawns[2].parentId, null);
+});
+
+test("parseSpawnLinks keeps well-formed records and drops the rest", () => {
+  const ledger = [
+    '{"childId":"qwen:one","parentId":"claude:session","spawnMethod":"bash","at":"2026-07-11T04:59:33.000Z"}',
+    "",
+    "not json at all",
+    '{"childId":"qwen:two","parentId":"claude:session","spawnMethod":"api"}',
+    '{"childId":"qwen:no-parent"}',
+    '{"childId":42,"parentId":"claude:session"}',
+    '["qwen:three","claude:session"]',
+    // An unknown spawn method is recorded as the Bash launch it describes.
+    '{"childId":"qwen:four","parentId":"claude:session","spawnMethod":"native"}',
+  ].join("\n");
+
+  assert.deepEqual(parseSpawnLinks(ledger), [
+    { childId: "qwen:one", parentId: "claude:session", spawnMethod: "bash" },
+    { childId: "qwen:two", parentId: "claude:session", spawnMethod: "api" },
+    { childId: "qwen:four", parentId: "claude:session", spawnMethod: "bash" },
+  ]);
+  assert.deepEqual(parseSpawnLinks(""), []);
+});
+
+test("applyDeclaredSpawnLinks links a declared child to a visible parent", () => {
+  const claude = {
+    ...demoSnapshot.agents[0],
+    id: "claude:session",
+    parentId: null,
+    provider: "claude" as const,
+  };
+  const declared = {
+    ...demoSnapshot.agents[0],
+    id: "qwen:declared",
+    parentId: null,
+    provider: "qwen" as const,
+    spawnMethod: "root" as const,
+  };
+  const alreadyLinked = {
+    ...declared,
+    id: "qwen:already-linked",
+    parentId: "claude:session",
+    spawnMethod: "bash" as const,
+  };
+
+  const linked = applyDeclaredSpawnLinks(
+    [claude, declared, alreadyLinked],
+    [
+      {
+        childId: "qwen:declared",
+        parentId: "claude:session",
+        spawnMethod: "bash",
+      },
+      {
+        childId: "qwen:already-linked",
+        parentId: "claude:other",
+        spawnMethod: "bash",
+      },
+    ],
+  );
+
+  assert.equal(linked[1].parentId, "claude:session");
+  assert.equal(linked[1].spawnMethod, "bash");
+  assert.equal(linked[2].parentId, "claude:session");
+});
+
+test("applyDeclaredSpawnLinks drops edges that name nothing visible", () => {
+  const orphan = {
+    ...demoSnapshot.agents[0],
+    id: "qwen:orphan",
+    parentId: null,
+    provider: "qwen" as const,
+    spawnMethod: "root" as const,
+  };
+  const selfParent = { ...orphan, id: "qwen:self" };
+
+  const linked = applyDeclaredSpawnLinks(
+    [orphan, selfParent],
+    [
+      {
+        childId: "qwen:orphan",
+        parentId: "claude:not-in-this-snapshot",
+        spawnMethod: "bash",
+      },
+      { childId: "qwen:self", parentId: "qwen:self", spawnMethod: "bash" },
+    ],
+  );
+
+  assert.deepEqual(
+    linked.map(({ parentId, spawnMethod }) => ({ parentId, spawnMethod })),
+    [
+      { parentId: null, spawnMethod: "root" },
+      { parentId: null, spawnMethod: "root" },
+    ],
+  );
+});
+
+test("applyDeclaredSpawnLinks lets a retried launch replace an older record", () => {
+  const claude = {
+    ...demoSnapshot.agents[0],
+    id: "claude:session",
+    parentId: null,
+    provider: "claude" as const,
+  };
+  const retried = {
+    ...demoSnapshot.agents[0],
+    id: "qwen:attempt-two",
+    parentId: null,
+    provider: "qwen" as const,
+    spawnMethod: "root" as const,
+  };
+
+  const linked = applyDeclaredSpawnLinks(
+    [claude, retried],
+    [
+      {
+        childId: "qwen:attempt-two",
+        parentId: "claude:stale",
+        spawnMethod: "bash",
+      },
+      {
+        childId: "qwen:attempt-two",
+        parentId: "claude:session",
+        spawnMethod: "bash",
+      },
+    ],
+  );
+
+  assert.equal(linked[1].parentId, "claude:session");
 });
 
 const worktreeClaudeRoot = {

@@ -45,6 +45,12 @@ export interface ExternalSpawn {
   at: string;
 }
 
+export interface SpawnLink {
+  childId: string;
+  parentId: string;
+  spawnMethod: Exclude<SpawnMethod, "root" | "native">;
+}
+
 export type EventKind =
   | "agent.started"
   | "agent.completed"
@@ -230,6 +236,72 @@ export function getAgentDepths(
   }
 
   return depths;
+}
+
+// A spawn that declares its own parentage does not have to be inferred at all.
+// `scripts/spawn-link.mjs` appends one JSON line per launch naming both ends of
+// the edge, so a wrapper script that would otherwise leave no trace produces an
+// exact link. The ledger is a plain file a person can edit, so every record is
+// validated and an edge is dropped unless its parent is a visible agent: an id
+// that means nothing here fails to no edge, never to a wrong one.
+export function parseSpawnLinks(ledger: string): SpawnLink[] {
+  const links: SpawnLink[] = [];
+  for (const line of ledger.split("\n")) {
+    if (line.trim() === "") {
+      continue;
+    }
+
+    let value: unknown;
+    try {
+      value = JSON.parse(line);
+    } catch {
+      continue;
+    }
+
+    const record =
+      typeof value === "object" && value !== null && !Array.isArray(value)
+        ? (value as Record<string, unknown>)
+        : null;
+    const childId = record?.childId;
+    const parentId = record?.parentId;
+    if (typeof childId !== "string" || typeof parentId !== "string") {
+      continue;
+    }
+
+    links.push({
+      childId,
+      parentId,
+      spawnMethod: record?.spawnMethod === "api" ? "api" : "bash",
+    });
+  }
+
+  return links;
+}
+
+export function applyDeclaredSpawnLinks(
+  agents: readonly AgentRun[],
+  links: readonly SpawnLink[],
+): AgentRun[] {
+  // A retried launch appends a fresh record; the newest one wins.
+  const linkByChildId = new Map(links.map((link) => [link.childId, link]));
+  const agentIds = new Set(agents.map((agent) => agent.id));
+
+  return agents.map((agent) => {
+    if (agent.parentId !== null) {
+      return agent;
+    }
+
+    const link = linkByChildId.get(agent.id);
+    if (!link || link.parentId === agent.id || !agentIds.has(link.parentId)) {
+      return agent;
+    }
+
+    return {
+      ...agent,
+      parentId: link.parentId,
+      spawnMethod: link.spawnMethod,
+    };
+  });
 }
 
 const CLAUDE_WORKTREE_PATTERN =
