@@ -13,6 +13,7 @@ import {
   getProviderQuota,
   linkExternalRootsToClaudeSpawns,
   linkCodexRootsToClaudeWorktrees,
+  linkWorktreeRootsToClaudeRepos,
   percent,
   retainTopologyAgents,
   type AgentRun,
@@ -489,6 +490,119 @@ test("linkExternalRootsToClaudeSpawns leaves multi-parent matches unchanged", ()
   );
 
   assert.equal(linkedByTwoSpawns[2].parentId, null);
+});
+
+const worktreeClaudeRoot = {
+  ...demoSnapshot.agents[0],
+  id: "claude:session",
+  parentId: null,
+  provider: "claude" as const,
+  cwd: "/Users/tester/Project/ipportal",
+  startedAt: "2026-07-10T00:00:00.000Z",
+  endedAt: null,
+};
+
+function worktreeQwenRoot(suffix: string): AgentRun {
+  return {
+    ...demoSnapshot.agents[0],
+    id: `qwen:${suffix}`,
+    parentId: null,
+    provider: "qwen",
+    spawnMethod: "root",
+    cwd: `/Users/tester/Project/ipportal-r6-${suffix}`,
+    startedAt: "2026-07-11T04:59:33.000Z",
+  };
+}
+
+const worktreeMainRepos = new Map([
+  ["/Users/tester/Project/ipportal-r6-f1", "/Users/tester/Project/ipportal"],
+  ["/Users/tester/Project/ipportal-r6-f2", "/Users/tester/Project/ipportal"],
+]);
+
+test("linkWorktreeRootsToClaudeRepos links a fan-out of worktree roots", () => {
+  // Subagents share their session's cwd; they must not make the repo ambiguous.
+  const subagent = {
+    ...worktreeClaudeRoot,
+    id: "claude:session:child",
+    parentId: worktreeClaudeRoot.id,
+  };
+  const outsideWorktree = {
+    ...worktreeQwenRoot("f1"),
+    id: "qwen:same-repo",
+    cwd: worktreeClaudeRoot.cwd,
+  };
+
+  const linked = linkWorktreeRootsToClaudeRepos(
+    [
+      worktreeClaudeRoot,
+      subagent,
+      worktreeQwenRoot("f1"),
+      worktreeQwenRoot("f2"),
+      outsideWorktree,
+    ],
+    worktreeMainRepos,
+    topologyCapturedAt,
+  );
+
+  assert.deepEqual(
+    linked.map(({ id, parentId, spawnMethod }) => ({
+      id,
+      parentId,
+      spawnMethod,
+    })),
+    [
+      {
+        id: "claude:session",
+        parentId: null,
+        spawnMethod: worktreeClaudeRoot.spawnMethod,
+      },
+      {
+        id: "claude:session:child",
+        parentId: "claude:session",
+        spawnMethod: worktreeClaudeRoot.spawnMethod,
+      },
+      { id: "qwen:f1", parentId: "claude:session", spawnMethod: "bash" },
+      { id: "qwen:f2", parentId: "claude:session", spawnMethod: "bash" },
+      { id: "qwen:same-repo", parentId: null, spawnMethod: "root" },
+    ],
+  );
+});
+
+test("linkWorktreeRootsToClaudeRepos leaves ambiguous repositories unchanged", () => {
+  const linked = linkWorktreeRootsToClaudeRepos(
+    [
+      worktreeClaudeRoot,
+      { ...worktreeClaudeRoot, id: "claude:second" },
+      worktreeQwenRoot("f1"),
+    ],
+    worktreeMainRepos,
+    topologyCapturedAt,
+  );
+
+  assert.equal(linked[2].parentId, null);
+  assert.equal(linked[2].spawnMethod, "root");
+});
+
+test("linkWorktreeRootsToClaudeRepos ignores sessions that were not live", () => {
+  const endedBefore = {
+    ...worktreeClaudeRoot,
+    status: "completed" as const,
+    endedAt: "2026-07-11T04:00:00.000Z",
+  };
+  const startedAfter = {
+    ...worktreeClaudeRoot,
+    startedAt: "2026-07-11T05:00:00.000Z",
+  };
+
+  for (const claude of [endedBefore, startedAfter]) {
+    const linked = linkWorktreeRootsToClaudeRepos(
+      [claude, worktreeQwenRoot("f1")],
+      worktreeMainRepos,
+      topologyCapturedAt,
+    );
+
+    assert.equal(linked[1].parentId, null);
+  }
 });
 
 test("retainTopologyAgents keeps active and recently inactive agents", () => {
