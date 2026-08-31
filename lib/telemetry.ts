@@ -320,6 +320,45 @@ export function linkExternalRootsToClaudeSpawns(
   });
 }
 
+// A spawn launched through a wrapper script (`nohup ./run-qwen.sh f1 &`)
+// leaves no `qwen -p` text in the Bash command, so no ExternalSpawn mark is
+// ever recorded for it. The worktree the child runs in is the evidence that
+// survives: its `.git` file points back at the repository the parent session
+// owns. Only Claude roots are candidates, because subagents share their
+// session's cwd and would leave every repository ambiguous.
+export function linkWorktreeRootsToClaudeRepos(
+  agents: readonly AgentRun[],
+  mainRepoByCwd: ReadonlyMap<string, string>,
+  capturedAt: string,
+): AgentRun[] {
+  const claudeRoots = agents.filter(
+    (agent) => agent.provider === "claude" && agent.parentId === null,
+  );
+
+  return agents.map((agent) => {
+    if (agent.provider === "claude" || agent.parentId !== null) {
+      return agent;
+    }
+
+    const mainRepo = mainRepoByCwd.get(agent.cwd);
+    if (mainRepo === undefined) {
+      return agent;
+    }
+
+    const startedAtMs = Date.parse(agent.startedAt);
+    const parents = claudeRoots.filter(
+      (candidate) =>
+        candidate.cwd === mainRepo &&
+        Date.parse(candidate.startedAt) <= startedAtMs &&
+        startedAtMs <= Date.parse(candidate.endedAt ?? capturedAt),
+    );
+
+    return parents.length === 1
+      ? { ...agent, parentId: parents[0].id, spawnMethod: "bash" }
+      : agent;
+  });
+}
+
 const TERMINAL_TOPOLOGY_GRACE_MS = 60_000;
 
 function isTerminalStatus(status: AgentStatus): boolean {
