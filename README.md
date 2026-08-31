@@ -55,6 +55,36 @@ Monetary cost is shown only when a source records an explicit numeric USD value.
 Codex roots launched inside `.claude/worktrees/agent-<id>` are linked to a
 visible Claude subagent only when that `<id>` identifies exactly one candidate.
 
+## How a spawn finds its parent
+
+Four rules run in order, and each one leaves an agent that already has a parent
+alone.
+
+1. **Declared links.** `~/.monitor-agents/spawn-links.jsonl` names both ends of
+   an edge outright; see below.
+2. **Claude worktrees.** A Codex root inside `.claude/worktrees/agent-<id>`.
+3. **Spawn marks.** A Bash command in a Claude transcript that reads as an agent
+   launch (`codex exec`, `qwen -p`) adopts a root of that provider which starts
+   within 30 seconds.
+4. **Repository worktrees.** A root whose `cwd` is a linked git worktree is
+   adopted by the single live Claude root working in that repository.
+
+Rules 2–4 infer, so each of them declines to guess when more than one candidate
+fits. Rule 1 does not infer at all, which matters for a launch a script wraps:
+
+```sh
+node scripts/spawn-link.mjs qwen -y -s -o stream-json -p "$(cat brief.md)"
+```
+
+`spawn-link.mjs` runs the agent unchanged — same stdout, same exit code — and
+appends one line naming `$CLAUDE_CODE_SESSION_ID` as the parent and the
+`session_id` the agent prints on its first streaming line as the child. Without
+that flag, or outside Claude Code, it records nothing and simply runs the
+command. Retries append a record each, and a declared edge is dropped unless its
+parent is an agent the dashboard can already see, so an id that means nothing
+here costs a missing edge rather than a wrong one. The ledger is append-only;
+the dashboard reads the newest 500 records.
+
 ## Run locally
 
 Requires Node.js 24 or newer.

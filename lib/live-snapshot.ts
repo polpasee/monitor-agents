@@ -1,11 +1,15 @@
 import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import {
+  applyDeclaredSpawnLinks,
   linkExternalRootsToClaudeSpawns,
   linkCodexRootsToClaudeWorktrees,
   linkWorktreeRootsToClaudeRepos,
+  parseSpawnLinks,
   type AgentRun,
   type DashboardSnapshot,
+  type SpawnLink,
 } from "./telemetry";
 import { collectAgyTelemetry } from "./collectors/agy";
 import { collectClaudeTelemetry } from "./collectors/claude";
@@ -48,6 +52,25 @@ async function resolveWorktreeMainRepos(
   return mainRepoByCwd;
 }
 
+// Only the newest records can still describe a visible agent, and the ledger is
+// append-only so that parallel launches never overwrite each other's lines.
+const MAX_SPAWN_LINK_RECORDS = 500;
+
+async function readSpawnLinks(): Promise<SpawnLink[]> {
+  let ledger: string;
+  try {
+    ledger = await readFile(
+      join(homedir(), ".monitor-agents", "spawn-links.jsonl"),
+      "utf8",
+    );
+  } catch {
+    // No wrapper has ever declared a spawn on this machine.
+    return [];
+  }
+
+  return parseSpawnLinks(ledger).slice(-MAX_SPAWN_LINK_RECORDS);
+}
+
 export async function collectLiveSnapshot(): Promise<DashboardSnapshot> {
   const results = await Promise.all([
     collectCodexTelemetry(),
@@ -56,9 +79,14 @@ export async function collectLiveSnapshot(): Promise<DashboardSnapshot> {
     collectGeminiTelemetry(),
     collectQwenTelemetry(),
   ]);
-  const worktreeLinkedAgents = linkCodexRootsToClaudeWorktrees(
+  // Declared links are exact, so they run before every inference below; each
+  // linker leaves an agent that already has a parent alone.
+  const declaredLinkedAgents = applyDeclaredSpawnLinks(
     results.flatMap((result) => result.agents),
+    await readSpawnLinks(),
   );
+  const worktreeLinkedAgents =
+    linkCodexRootsToClaudeWorktrees(declaredLinkedAgents);
   const spawnLinkedAgents = linkExternalRootsToClaudeSpawns(
     worktreeLinkedAgents,
     results.flatMap((result) => result.externalSpawns ?? []),
