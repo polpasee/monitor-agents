@@ -38,3 +38,20 @@ export async function PATCH(
       )
     : Response.json({ error: "Task not found." }, { status: 404 });
 }
+
+export async function DELETE(
+  _request: Request,
+  context: { params: Promise<{ id: string }> },
+) {
+  const { id } = await context.params;
+  const store = getTaskStore();
+  const task = store.deleteTodoTask(id);
+  if (task) return new Response(null, { status: 204 });
+  const currentTask = store.getTask(id);
+  return currentTask
+    ? Response.json(
+        { error: "Only Todo tasks can be deleted.", task: currentTask },
+        { status: 409 },
+      )
+    : Response.json({ error: "Task not found." }, { status: 404 });
+}

@@ -698,6 +698,17 @@ button:focus-visible,
   background: color-mix(in oklch, var(--lime) 88%, white);
 }
 
+.kanban-task-dialog__actions .kanban-task-dialog__delete {
+  margin-right: auto;
+  border-color: color-mix(in oklch, var(--red) 45%, var(--border));
+  background: color-mix(in oklch, var(--red) 10%, var(--surface-2));
+  color: var(--red);
+}
+
+.kanban-task-dialog__actions .kanban-task-dialog__delete:hover {
+  background: color-mix(in oklch, var(--red) 18%, var(--surface-2));
+}
+
 .kanban-task-dialog__header > button:disabled,
 .kanban-task-dialog__actions button:disabled {
   cursor: wait;
