@@ -30,9 +30,10 @@ export async function PATCH(
 
   const task = store.updateTodoTaskDetails(id, patch);
   if (task) return Response.json(task);
-  return store.getTask(id)
+  const currentTask = store.getTask(id);
+  return currentTask
     ? Response.json(
-        { error: "Only Todo tasks can be edited." },
+        { error: "Only Todo tasks can be edited.", task: currentTask },
         { status: 409 },
       )
     : Response.json({ error: "Task not found." }, { status: 404 });

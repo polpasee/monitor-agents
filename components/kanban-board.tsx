@@ -177,6 +177,12 @@ export function KanbanBoard() {
         }),
       });
       if (response.status === 409) {
+        const conflict = (await response.json()) as { task: KanbanTask };
+        setTasks((current) =>
+          current.map((candidate) =>
+            candidate.id === conflict.task.id ? conflict.task : candidate,
+          ),
+        );
         setEditingTaskId(null);
         setError("This task is no longer Todo and cannot be edited.");
         return;
@@ -332,6 +338,7 @@ export function KanbanBoard() {
                           <label>
                             <span>Task title</span>
                             <input
+                              autoFocus
                               maxLength={200}
                               onChange={(event) => setEditTitle(event.target.value)}
                               required
@@ -387,6 +394,7 @@ export function KanbanBoard() {
                           )}
                           {task.status === "todo" && (
                             <button
+                              aria-label={`Edit ${task.title}`}
                               className="kanban-card__edit-button"
                               onClick={() => editTask(task)}
                               type="button"
