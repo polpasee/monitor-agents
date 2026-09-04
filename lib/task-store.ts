@@ -199,6 +199,17 @@ export class TaskStore {
     return row ? taskFromRow(row) : null;
   }
 
+  deleteTodoTask(id: string): KanbanTask | null {
+    const row = this.database
+      .prepare(`
+        DELETE FROM tasks
+        WHERE id = ? AND status = 'todo'
+        RETURNING *
+      `)
+      .get(id) as unknown as TaskRow | undefined;
+    return row ? taskFromRow(row) : null;
+  }
+
   claimTask(input: ClaimTaskInput): KanbanTask | null {
     const repositories = [...new Set(input.repositories.map((repo) => repo.trim()))]
       .filter(Boolean);

@@ -103,6 +103,89 @@ test("TaskStore rejects a stale Todo edit after another connection claims it", a
   }
 });
 
+test("TaskStore deletes a Todo task", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-delete-"));
+  const store = new TaskStore(join(directory, "tasks.sqlite"));
+
+  try {
+    const task = store.createTask({
+      title: "Delete this task",
+      repository: "monitor-agents",
+    });
+
+    assert.deepEqual(store.deleteTodoTask(task.id), task);
+    assert.equal(store.getTask(task.id), null);
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("TaskStore returns null when deleting a missing task", async () => {
+  const directory = await mkdtemp(
+    join(tmpdir(), "monitor-task-delete-missing-"),
+  );
+  const store = new TaskStore(join(directory, "tasks.sqlite"));
+
+  try {
+    assert.equal(store.deleteTodoTask("missing-task"), null);
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("TaskStore does not delete a task outside Todo", async () => {
+  const directory = await mkdtemp(
+    join(tmpdir(), "monitor-task-delete-status-"),
+  );
+  const store = new TaskStore(join(directory, "tasks.sqlite"));
+
+  try {
+    const task = store.createTask({
+      title: "Keep completed task",
+      repository: "monitor-agents",
+    });
+    store.updateTaskStatus(task.id, "done");
+
+    assert.equal(store.deleteTodoTask(task.id), null);
+    assert.equal(store.getTask(task.id)?.status, "done");
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test(
+  "TaskStore rejects a stale Todo delete after another connection claims it",
+  async () => {
+    const directory = await mkdtemp(join(tmpdir(), "monitor-task-delete-race-"));
+    const path = join(directory, "tasks.sqlite");
+    const editorStore = new TaskStore(path);
+    const agentStore = new TaskStore(path);
+
+    try {
+      const task = editorStore.createTask({
+        title: "Agent is claiming this task",
+        repository: "monitor-agents",
+      });
+      const claimed = agentStore.claimTask({
+        agentId: "agent-1",
+        repositories: ["monitor-agents"],
+        now: new Date("2026-09-05T01:00:00.000Z"),
+      });
+
+      assert.equal(claimed?.id, task.id);
+      assert.equal(editorStore.deleteTodoTask(task.id), null);
+      assert.equal(editorStore.getTask(task.id)?.status, "in-progress");
+    } finally {
+      agentStore.close();
+      editorStore.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
 test("TaskStore claims a task once and completes it into review", async () => {
   const directory = await mkdtemp(join(tmpdir(), "monitor-task-claim-"));
   const store = new TaskStore(join(directory, "tasks.sqlite"));
