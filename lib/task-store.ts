@@ -29,6 +29,12 @@ export interface CreateTaskInput {
   priority?: number;
 }
 
+export interface UpdateTaskDetailsInput {
+  title: string;
+  description: string;
+  repository: string;
+}
+
 export interface ClaimTaskInput {
   agentId: string;
   repositories: string[];
@@ -169,6 +175,28 @@ export class TaskStore {
         id,
       );
     return this.getTask(id);
+  }
+
+  updateTodoTaskDetails(
+    id: string,
+    input: UpdateTaskDetailsInput,
+    now = new Date(),
+  ): KanbanTask | null {
+    const row = this.database
+      .prepare(`
+        UPDATE tasks
+        SET title = ?, description = ?, repository = ?, updated_at = ?
+        WHERE id = ? AND status = 'todo'
+        RETURNING *
+      `)
+      .get(
+        input.title.trim(),
+        input.description.trim(),
+        input.repository.trim(),
+        now.toISOString(),
+        id,
+      ) as unknown as TaskRow | undefined;
+    return row ? taskFromRow(row) : null;
   }
 
   claimTask(input: ClaimTaskInput): KanbanTask | null {

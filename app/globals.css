@@ -529,13 +529,15 @@ button:focus-visible,
 }
 
 .kanban-filter,
-.kanban-task-form label {
+.kanban-task-form label,
+.kanban-card__edit label {
   display: grid;
   gap: 6px;
 }
 
 .kanban-filter span,
-.kanban-task-form label > span {
+.kanban-task-form label > span,
+.kanban-card__edit label > span {
   color: var(--muted);
   font-size: 9px;
   font-weight: 700;
@@ -546,6 +548,8 @@ button:focus-visible,
 .kanban-filter select,
 .kanban-task-form input,
 .kanban-task-form textarea,
+.kanban-card__edit input,
+.kanban-card__edit textarea,
 .kanban-card select {
   height: 34px;
   border: 1px solid var(--border);
@@ -570,12 +574,14 @@ button:focus-visible,
   border-bottom: 1px solid var(--border);
 }
 
-.kanban-task-form input {
+.kanban-task-form input,
+.kanban-card__edit input {
   width: 100%;
   padding: 0 11px;
 }
 
-.kanban-task-form textarea {
+.kanban-task-form textarea,
+.kanban-card__edit textarea {
   width: 100%;
   min-height: 54px;
   padding: 8px 11px;
@@ -590,6 +596,8 @@ button:focus-visible,
 .kanban-filter select:focus-visible,
 .kanban-task-form input:focus-visible,
 .kanban-task-form textarea:focus-visible,
+.kanban-card__edit input:focus-visible,
+.kanban-card__edit textarea:focus-visible,
 .kanban-card select:focus-visible {
   border-color: var(--lime);
   outline: 2px solid color-mix(in oklch, var(--lime) 38%, transparent);
@@ -705,6 +713,43 @@ button:focus-visible,
   white-space: nowrap;
 }
 
+.kanban-card__edit {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.kanban-card__edit-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.kanban-card__edit-button,
+.kanban-card__edit-actions button {
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text-soft);
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.kanban-card__edit-button {
+  margin-bottom: 10px;
+}
+
+.kanban-card__edit-actions button:first-child {
+  background: var(--lime);
+  color: var(--color-zinc-950);
+}
+
+.kanban-card__edit-actions button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
 .kanban-card h4 {
   margin: 9px 0;
   color: var(--text);
@@ -743,6 +788,11 @@ button:focus-visible,
 .kanban-card select {
   width: 100%;
   padding: 0 9px;
+}
+
+.kanban-card select:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 
 .kanban-column__empty {
