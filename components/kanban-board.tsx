@@ -520,11 +520,6 @@ export function KanbanBoard() {
                             {task.repository}
                           </span>
                           <span className="kanban-card__title">{task.title}</span>
-                          {task.description && (
-                            <span className="kanban-card__description">
-                              {task.description}
-                            </span>
-                          )}
                         </button>
                       ) : (
                         <div className="kanban-card__details">
@@ -532,44 +527,8 @@ export function KanbanBoard() {
                             {task.repository}
                           </span>
                           <span className="kanban-card__title">{task.title}</span>
-                          {task.description && (
-                            <span className="kanban-card__description">
-                              {task.description}
-                            </span>
-                          )}
                         </div>
                       )}
-                      {task.claimedBy && (
-                        <p className="kanban-card__agent">
-                          Claimed by {task.claimedBy}
-                        </p>
-                      )}
-                      {task.lastError && (
-                        <p className="kanban-card__error">{task.lastError}</p>
-                      )}
-                      {task.result && (
-                        <p className="kanban-card__result">{task.result}</p>
-                      )}
-                      <label>
-                        <span className="sr-only">Status for {task.title}</span>
-                        <select
-                          aria-label={`Status for ${task.title}`}
-                          disabled={isEditing || isSaving}
-                          onChange={(event) =>
-                            void moveTask(
-                              task.id,
-                              event.target.value as KanbanStatus,
-                            )
-                          }
-                          value={task.status}
-                        >
-                          {kanbanStatuses.map((nextStatus) => (
-                            <option key={nextStatus.id} value={nextStatus.id}>
-                              {nextStatus.label}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
                     </article>
                   );
                 })}
