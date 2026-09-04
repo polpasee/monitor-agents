@@ -553,15 +553,13 @@ button:focus-visible,
 }
 
 .kanban-filter,
-.kanban-task-dialog__form label,
-.kanban-card__edit label {
+.kanban-task-dialog__form label {
   display: grid;
   gap: 6px;
 }
 
 .kanban-filter span,
-.kanban-task-dialog__form label > span,
-.kanban-card__edit label > span {
+.kanban-task-dialog__form label > span {
   color: var(--muted);
   font-size: 9px;
   font-weight: 700;
@@ -572,8 +570,6 @@ button:focus-visible,
 .kanban-filter select,
 .kanban-task-dialog__form input,
 .kanban-task-dialog__form textarea,
-.kanban-card__edit input,
-.kanban-card__edit textarea,
 .kanban-card select {
   height: 34px;
   border: 1px solid var(--border);
@@ -640,14 +636,12 @@ button:focus-visible,
   padding: 18px;
 }
 
-.kanban-task-dialog__form input,
-.kanban-card__edit input {
+.kanban-task-dialog__form input {
   width: 100%;
   padding: 0 11px;
 }
 
-.kanban-task-dialog__form textarea,
-.kanban-card__edit textarea {
+.kanban-task-dialog__form textarea {
   width: 100%;
   min-height: 54px;
   padding: 8px 11px;
@@ -666,8 +660,6 @@ button:focus-visible,
 .kanban-filter select:focus-visible,
 .kanban-task-dialog__form input:focus-visible,
 .kanban-task-dialog__form textarea:focus-visible,
-.kanban-card__edit input:focus-visible,
-.kanban-card__edit textarea:focus-visible,
 .kanban-card select:focus-visible {
   border-color: var(--lime);
   outline: 2px solid color-mix(in oklch, var(--lime) 38%, transparent);
@@ -803,44 +795,28 @@ button:focus-visible,
   white-space: nowrap;
 }
 
-.kanban-card__edit {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 10px;
+.kanban-card__details {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
 }
 
-.kanban-card__edit-actions {
-  display: flex;
-  gap: 6px;
-}
-
-.kanban-card__edit-button,
-.kanban-card__edit-actions button {
-  height: 30px;
-  padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--surface-2);
-  color: var(--text-soft);
+.kanban-card__details-button {
   cursor: pointer;
-  font-size: 10px;
 }
 
-.kanban-card__edit-button {
-  margin-bottom: 10px;
+.kanban-card__details-button:focus-visible {
+  border-radius: 4px;
+  outline: 2px solid color-mix(in oklch, var(--lime) 38%, transparent);
+  outline-offset: 3px;
 }
 
-.kanban-card__edit-actions button:first-child {
-  background: var(--lime);
-  color: var(--color-zinc-950);
-}
-
-.kanban-card__edit-actions button:disabled {
-  cursor: wait;
-  opacity: 0.65;
-}
-
-.kanban-card h4 {
+.kanban-card__title {
+  display: block;
   margin: 9px 0;
   color: var(--text);
   font-size: 12px;
@@ -858,6 +834,7 @@ button:focus-visible,
 }
 
 .kanban-card__description {
+  display: block;
   color: var(--muted);
   white-space: pre-wrap;
 }
