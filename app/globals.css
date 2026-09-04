@@ -569,8 +569,7 @@ button:focus-visible,
 
 .kanban-filter select,
 .kanban-task-dialog__form input,
-.kanban-task-dialog__form textarea,
-.kanban-card select {
+.kanban-task-dialog__form textarea {
   height: 34px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -659,8 +658,7 @@ button:focus-visible,
 
 .kanban-filter select:focus-visible,
 .kanban-task-dialog__form input:focus-visible,
-.kanban-task-dialog__form textarea:focus-visible,
-.kanban-card select:focus-visible {
+.kanban-task-dialog__form textarea:focus-visible {
   border-color: var(--lime);
   outline: 2px solid color-mix(in oklch, var(--lime) 38%, transparent);
   outline-offset: 1px;
@@ -822,44 +820,6 @@ button:focus-visible,
   font-size: 12px;
   font-weight: 620;
   line-height: 1.45;
-}
-
-.kanban-card__description,
-.kanban-card__agent,
-.kanban-card__error,
-.kanban-card__result {
-  margin: 0 0 10px;
-  font-size: 10px;
-  line-height: 1.45;
-}
-
-.kanban-card__description {
-  display: block;
-  color: var(--muted);
-  white-space: pre-wrap;
-}
-
-.kanban-card__agent {
-  color: var(--cyan);
-}
-
-.kanban-card__error {
-  color: var(--red);
-}
-
-.kanban-card__result {
-  color: var(--green);
-  white-space: pre-wrap;
-}
-
-.kanban-card select {
-  width: 100%;
-  padding: 0 9px;
-}
-
-.kanban-card select:disabled {
-  cursor: not-allowed;
-  opacity: 0.65;
 }
 
 .kanban-column__empty {
