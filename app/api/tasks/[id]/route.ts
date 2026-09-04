@@ -1,5 +1,5 @@
 import { readJsonObject } from "@/lib/api-input";
-import { isKanbanStatus } from "@/lib/kanban";
+import { parseKanbanTaskPatch } from "@/lib/kanban";
 import { getTaskStore } from "@/lib/task-store";
 
 export const dynamic = "force-dynamic";
@@ -10,13 +10,30 @@ export async function PATCH(
   context: { params: Promise<{ id: string }> },
 ) {
   const body = await readJsonObject(request);
-  if (!body || !isKanbanStatus(body.status)) {
-    return Response.json({ error: "Invalid task status." }, { status: 400 });
+  const patch = parseKanbanTaskPatch(body);
+  if (!patch) {
+    const error =
+      body && Object.keys(body).length === 1 && Object.hasOwn(body, "status")
+        ? "Invalid task status."
+        : "Invalid task update.";
+    return Response.json({ error }, { status: 400 });
   }
 
   const { id } = await context.params;
-  const task = getTaskStore().updateTaskStatus(id, body.status);
-  return task
-    ? Response.json(task)
+  const store = getTaskStore();
+  if ("status" in patch) {
+    const task = store.updateTaskStatus(id, patch.status);
+    return task
+      ? Response.json(task)
+      : Response.json({ error: "Task not found." }, { status: 404 });
+  }
+
+  const task = store.updateTodoTaskDetails(id, patch);
+  if (task) return Response.json(task);
+  return store.getTask(id)
+    ? Response.json(
+        { error: "Only Todo tasks can be edited." },
+        { status: 409 },
+      )
     : Response.json({ error: "Task not found." }, { status: 404 });
 }

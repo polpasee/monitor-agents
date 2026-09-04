@@ -28,6 +28,81 @@ test("TaskStore creates, lists, and updates shared tasks", async () => {
   }
 });
 
+test("TaskStore updates editable details while a task is Todo", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-edit-"));
+  const store = new TaskStore(join(directory, "tasks.sqlite"));
+
+  try {
+    const task = store.createTask({
+      title: "Old title",
+      description: "Old description",
+      repository: "monitor-agents",
+    });
+    const updatedAt = new Date("2026-09-04T01:00:00.000Z");
+    const updated = store.updateTodoTaskDetails(
+      task.id,
+      {
+        title: "  New title  ",
+        description: "  New description  ",
+        repository: "  cacti-api  ",
+      },
+      updatedAt,
+    );
+
+    assert.deepEqual(updated, {
+      ...task,
+      title: "New title",
+      description: "New description",
+      repository: "cacti-api",
+      updatedAt: updatedAt.toISOString(),
+    });
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("TaskStore rejects a stale Todo edit after another connection claims it", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-edit-race-"));
+  const path = join(directory, "tasks.sqlite");
+  const editorStore = new TaskStore(path);
+  const agentStore = new TaskStore(path);
+
+  try {
+    const task = editorStore.createTask({
+      title: "Keep this title",
+      description: "Keep this description",
+      repository: "monitor-agents",
+    });
+    assert.equal(editorStore.getTask(task.id)?.status, "todo");
+
+    const claimed = agentStore.claimTask({
+      agentId: "agent-1",
+      repositories: ["monitor-agents"],
+      now: new Date("2026-09-04T01:00:00.000Z"),
+    });
+    const staleUpdate = editorStore.updateTodoTaskDetails(task.id, {
+      title: "Stale title",
+      description: "Stale description",
+      repository: "cacti-api",
+    });
+
+    assert.equal(claimed?.id, task.id);
+    assert.equal(staleUpdate, null);
+    assert.equal(editorStore.getTask(task.id)?.status, "in-progress");
+    assert.equal(editorStore.getTask(task.id)?.title, "Keep this title");
+    assert.equal(
+      editorStore.getTask(task.id)?.description,
+      "Keep this description",
+    );
+    assert.equal(editorStore.getTask(task.id)?.repository, "monitor-agents");
+  } finally {
+    agentStore.close();
+    editorStore.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("TaskStore claims a task once and completes it into review", async () => {
   const directory = await mkdtemp(join(tmpdir(), "monitor-task-claim-"));
   const store = new TaskStore(join(directory, "tasks.sqlite"));

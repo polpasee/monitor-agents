@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   isKanbanStatus,
   kanbanRepositories,
+  parseKanbanTaskPatch,
   type KanbanTask,
 } from "./kanban.ts";
 
@@ -46,6 +47,66 @@ test("isKanbanStatus accepts only board states", () => {
   assert.equal(isKanbanStatus("in-progress"), true);
   assert.equal(isKanbanStatus("failed"), true);
   assert.equal(isKanbanStatus("unknown"), false);
+});
+
+test("parseKanbanTaskPatch preserves the exact status payload", () => {
+  assert.deepEqual(parseKanbanTaskPatch({ status: "review" }), {
+    status: "review",
+  });
+  assert.equal(parseKanbanTaskPatch({ status: "unknown" }), null);
+  assert.equal(parseKanbanTaskPatch({ status: "todo", title: "Extra" }), null);
+});
+
+test("parseKanbanTaskPatch validates exact editable task details", () => {
+  assert.deepEqual(
+    parseKanbanTaskPatch({
+      title: "  Update the board  ",
+      repository: "  monitor-agents  ",
+      description: "  Keep Todo editable.  ",
+    }),
+    {
+      title: "Update the board",
+      repository: "monitor-agents",
+      description: "Keep Todo editable.",
+    },
+  );
+  assert.equal(
+    parseKanbanTaskPatch({ title: "Partial", repository: "monitor-agents" }),
+    null,
+  );
+  assert.equal(
+    parseKanbanTaskPatch({
+      title: "Extra",
+      repository: "monitor-agents",
+      description: "",
+      priority: 1,
+    }),
+    null,
+  );
+  assert.equal(
+    parseKanbanTaskPatch({
+      title: " ",
+      repository: "monitor-agents",
+      description: "",
+    }),
+    null,
+  );
+  assert.equal(
+    parseKanbanTaskPatch({
+      title: "x".repeat(201),
+      repository: "monitor-agents",
+      description: "",
+    }),
+    null,
+  );
+  assert.equal(
+    parseKanbanTaskPatch({
+      title: "Too long description",
+      repository: "monitor-agents",
+      description: "x".repeat(5_001),
+    }),
+    null,
+  );
 });
 
 test("kanbanRepositories returns sorted unique repository names", () => {
