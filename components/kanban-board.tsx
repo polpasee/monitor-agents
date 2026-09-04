@@ -16,6 +16,9 @@ import {
 export function KanbanBoard() {
   const addTaskButtonRef = useRef<HTMLButtonElement>(null);
   const addTaskDialogRef = useRef<HTMLDialogElement>(null);
+  const editTaskButtonRef = useRef<HTMLButtonElement>(null);
+  const editTaskDialogRef = useRef<HTMLDialogElement>(null);
+  const editTitleInputRef = useRef<HTMLInputElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const [tasks, setTasks] = useState<KanbanTask[]>([]);
   const [githubRepositories, setGithubRepositories] = useState<string[]>([]);
@@ -28,6 +31,7 @@ export function KanbanBoard() {
   const [editTitle, setEditTitle] = useState("");
   const [editRepository, setEditRepository] = useState("");
   const [editDescription, setEditDescription] = useState("");
+  const [editError, setEditError] = useState<string | null>(null);
   const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -58,14 +62,6 @@ export function KanbanBoard() {
         const nextTasks = (await response.json()) as KanbanTask[];
         if (!stopped) {
           setTasks(nextTasks);
-          setEditingTaskId((taskId) =>
-            taskId &&
-            !nextTasks.some(
-              (task) => task.id === taskId && task.status === "todo",
-            )
-              ? null
-              : taskId,
-          );
           setError(null);
         }
       } catch {
@@ -86,6 +82,21 @@ export function KanbanBoard() {
       if (timeoutId !== undefined) window.clearTimeout(timeoutId);
     };
   }, []);
+
+  useEffect(() => {
+    if (
+      !editingTaskId ||
+      tasks.some(
+        (task) => task.id === editingTaskId && task.status === "todo",
+      )
+    ) {
+      return;
+    }
+
+    if (editTaskDialogRef.current?.open) {
+      editTaskDialogRef.current.close();
+    }
+  }, [editingTaskId, tasks]);
 
   useEffect(() => {
     let stopped = false;
@@ -160,29 +171,51 @@ export function KanbanBoard() {
     addTaskDialogRef.current?.close();
   }
 
-  function editTask(task: KanbanTask) {
+  function editTask(task: KanbanTask, trigger: HTMLButtonElement) {
     if (task.status !== "todo") return;
+    editTaskButtonRef.current = trigger;
     setEditingTaskId(task.id);
     setEditTitle(task.title);
     setEditRepository(task.repository);
     setEditDescription(task.description);
+    setEditError(null);
+    editTaskDialogRef.current?.showModal();
+    editTitleInputRef.current?.focus();
   }
 
-  function cancelTaskEdit() {
+  function closeTaskEditDialog() {
+    setEditError(null);
+    editTaskDialogRef.current?.close();
+  }
+
+  function handleTaskEditDialogClose() {
     setEditingTaskId(null);
+    setEditTitle("");
+    setEditRepository("");
+    setEditDescription("");
+    setEditError(null);
+
+    const trigger = editTaskButtonRef.current;
+    editTaskButtonRef.current = null;
+    window.requestAnimationFrame(() => {
+      if (trigger?.isConnected) {
+        trigger.focus();
+      } else {
+        addTaskButtonRef.current?.focus();
+      }
+    });
   }
 
-  async function saveTask(
-    event: React.FormEvent<HTMLFormElement>,
-    taskId: string,
-  ) {
+  async function saveTask(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const taskId = editingTaskId;
     const nextTitle = editTitle.trim();
     const nextRepository = editRepository.trim();
     const nextDescription = editDescription.trim();
-    if (!nextTitle || !nextRepository) return;
+    if (!taskId || !nextTitle || !nextRepository) return;
 
     setSavingTaskId(taskId);
+    setEditError(null);
     try {
       const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
         method: "PATCH",
@@ -200,7 +233,8 @@ export function KanbanBoard() {
             candidate.id === conflict.task.id ? conflict.task : candidate,
           ),
         );
-        setEditingTaskId(null);
+        editTaskButtonRef.current = null;
+        editTaskDialogRef.current?.close();
         setError("This task is no longer Todo and cannot be edited.");
         return;
       }
@@ -211,10 +245,10 @@ export function KanbanBoard() {
       setTasks((current) =>
         current.map((candidate) => (candidate.id === task.id ? task : candidate)),
       );
-      setEditingTaskId(null);
+      editTaskDialogRef.current?.close();
       setError(null);
     } catch {
-      setError("Unable to update the task details.");
+      setEditError("Unable to update the task details.");
     } finally {
       setSavingTaskId(null);
     }
@@ -356,6 +390,80 @@ export function KanbanBoard() {
         </form>
       </dialog>
 
+      <dialog
+        aria-labelledby="edit-task-dialog-title"
+        className="kanban-task-dialog"
+        id="edit-task-dialog"
+        onCancel={(event) => {
+          if (savingTaskId) event.preventDefault();
+        }}
+        onClose={handleTaskEditDialogClose}
+        ref={editTaskDialogRef}
+      >
+        <header className="kanban-task-dialog__header">
+          <div>
+            <p className="panel-header__eyebrow">Repository work</p>
+            <h3 id="edit-task-dialog-title">Edit task</h3>
+          </div>
+          <button
+            aria-label="Close edit task dialog"
+            disabled={Boolean(savingTaskId)}
+            onClick={closeTaskEditDialog}
+            type="button"
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <form className="kanban-task-dialog__form" onSubmit={saveTask}>
+          <label>
+            <span>Task title</span>
+            <input
+              maxLength={200}
+              onChange={(event) => setEditTitle(event.target.value)}
+              ref={editTitleInputRef}
+              required
+              value={editTitle}
+            />
+          </label>
+          <label>
+            <span>Repository</span>
+            <input
+              list="kanban-repositories"
+              maxLength={200}
+              onChange={(event) => setEditRepository(event.target.value)}
+              required
+              value={editRepository}
+            />
+          </label>
+          <label>
+            <span>Description for agent</span>
+            <textarea
+              maxLength={5_000}
+              onChange={(event) => setEditDescription(event.target.value)}
+              rows={4}
+              value={editDescription}
+            />
+          </label>
+          {editError && (
+            <p className="kanban-task-dialog__error" role="alert">
+              {editError}
+            </p>
+          )}
+          <div className="kanban-task-dialog__actions">
+            <button
+              disabled={Boolean(savingTaskId)}
+              onClick={closeTaskEditDialog}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button disabled={Boolean(savingTaskId)} type="submit">
+              {savingTaskId ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </form>
+      </dialog>
+
       <datalist id="kanban-repositories">
         {repositories.map((name) => (
           <option key={name} value={name} />
@@ -399,79 +507,37 @@ export function KanbanBoard() {
                         event.dataTransfer.setData("text/plain", task.id)
                       }
                     >
-                      {isEditing ? (
-                        <form
-                          className="kanban-card__edit"
-                          onSubmit={(event) => void saveTask(event, task.id)}
+                      {task.status === "todo" ? (
+                        <button
+                          aria-controls="edit-task-dialog"
+                          aria-haspopup="dialog"
+                          aria-label={`Edit ${task.title}`}
+                          className="kanban-card__details kanban-card__details-button"
+                          onClick={(event) => editTask(task, event.currentTarget)}
+                          type="button"
                         >
-                          <label>
-                            <span>Task title</span>
-                            <input
-                              autoFocus
-                              maxLength={200}
-                              onChange={(event) => setEditTitle(event.target.value)}
-                              required
-                              value={editTitle}
-                            />
-                          </label>
-                          <label>
-                            <span>Repository</span>
-                            <input
-                              list="kanban-repositories"
-                              maxLength={200}
-                              onChange={(event) =>
-                                setEditRepository(event.target.value)
-                              }
-                              required
-                              value={editRepository}
-                            />
-                          </label>
-                          <label>
-                            <span>Description for agent</span>
-                            <textarea
-                              maxLength={5_000}
-                              onChange={(event) =>
-                                setEditDescription(event.target.value)
-                              }
-                              rows={3}
-                              value={editDescription}
-                            />
-                          </label>
-                          <div className="kanban-card__edit-actions">
-                            <button disabled={isSaving} type="submit">
-                              {isSaving ? "Saving…" : "Save"}
-                            </button>
-                            <button
-                              disabled={isSaving}
-                              onClick={cancelTaskEdit}
-                              type="button"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </form>
-                      ) : (
-                        <>
                           <span className="kanban-card__repository">
                             {task.repository}
                           </span>
-                          <h4>{task.title}</h4>
+                          <span className="kanban-card__title">{task.title}</span>
                           {task.description && (
-                            <p className="kanban-card__description">
+                            <span className="kanban-card__description">
                               {task.description}
-                            </p>
+                            </span>
                           )}
-                          {task.status === "todo" && (
-                            <button
-                              aria-label={`Edit ${task.title}`}
-                              className="kanban-card__edit-button"
-                              onClick={() => editTask(task)}
-                              type="button"
-                            >
-                              Edit
-                            </button>
+                        </button>
+                      ) : (
+                        <div className="kanban-card__details">
+                          <span className="kanban-card__repository">
+                            {task.repository}
+                          </span>
+                          <span className="kanban-card__title">{task.title}</span>
+                          {task.description && (
+                            <span className="kanban-card__description">
+                              {task.description}
+                            </span>
                           )}
-                        </>
+                        </div>
                       )}
                       {task.claimedBy && (
                         <p className="kanban-card__agent">
