@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import {
   mergeRepositoryNames,
@@ -14,6 +14,9 @@ import {
 } from "@/lib/kanban";
 
 export function KanbanBoard() {
+  const addTaskButtonRef = useRef<HTMLButtonElement>(null);
+  const addTaskDialogRef = useRef<HTMLDialogElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
   const [tasks, setTasks] = useState<KanbanTask[]>([]);
   const [githubRepositories, setGithubRepositories] = useState<string[]>([]);
   const [repositoryNotice, setRepositoryNotice] = useState<string | null>(null);
@@ -29,6 +32,7 @@ export function KanbanBoard() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
   const repositories = useMemo(
     () => mergeRepositoryNames(kanbanRepositories(tasks), githubRepositories),
     [githubRepositories, tasks],
@@ -117,6 +121,7 @@ export function KanbanBoard() {
     if (!nextTitle || !nextRepository) return;
 
     setSubmitting(true);
+    setCreateError(null);
     try {
       const response = await fetch("/api/tasks", {
         method: "POST",
@@ -136,11 +141,23 @@ export function KanbanBoard() {
       setDescription("");
       setRepository(nextRepository);
       setError(null);
+      addTaskDialogRef.current?.close();
     } catch {
-      setError("Unable to create the task.");
+      setCreateError("Unable to create the task.");
     } finally {
       setSubmitting(false);
     }
+  }
+
+  function openAddTaskDialog() {
+    setCreateError(null);
+    addTaskDialogRef.current?.showModal();
+    titleInputRef.current?.focus();
+  }
+
+  function closeAddTaskDialog() {
+    setCreateError(null);
+    addTaskDialogRef.current?.close();
   }
 
   function editTask(task: KanbanTask) {
@@ -232,20 +249,32 @@ export function KanbanBoard() {
             Task board
           </h2>
         </div>
-        <label className="kanban-filter">
-          <span>Repository</span>
-          <select
-            onChange={(event) => setRepositoryFilter(event.target.value)}
-            value={repositoryFilter}
+        <div className="kanban-header__actions">
+          <label className="kanban-filter">
+            <span>Repository</span>
+            <select
+              onChange={(event) => setRepositoryFilter(event.target.value)}
+              value={repositoryFilter}
+            >
+              <option value="all">All repositories</option>
+              {repositories.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            aria-label="Add new task"
+            className="kanban-add-button"
+            onClick={openAddTaskDialog}
+            ref={addTaskButtonRef}
+            title="Add new task"
+            type="button"
           >
-            <option value="all">All repositories</option>
-            {repositories.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-        </label>
+            <span aria-hidden="true">+</span>
+          </button>
+        </div>
       </header>
 
       {error && <p className="kanban-error" role="alert">{error}</p>}
@@ -253,45 +282,85 @@ export function KanbanBoard() {
         <p className="kanban-notice">{repositoryNotice}</p>
       )}
 
-      <form className="kanban-task-form" onSubmit={addTask}>
-        <label>
-          <span>Task title</span>
-          <input
-            onChange={(event) => setTitle(event.target.value)}
-            placeholder="What needs to be done?"
-            required
-            value={title}
-          />
-        </label>
-        <label>
-          <span>Repository</span>
-          <input
-            list="kanban-repositories"
-            onChange={(event) => setRepository(event.target.value)}
-            placeholder="owner/repository"
-            required
-            value={repository}
-          />
-          <datalist id="kanban-repositories">
-            {repositories.map((name) => (
-              <option key={name} value={name} />
-            ))}
-          </datalist>
-        </label>
-        <label>
-          <span>Description for agent</span>
-          <textarea
-            maxLength={5_000}
-            onChange={(event) => setDescription(event.target.value)}
-            placeholder="Expected result or acceptance criteria"
-            rows={2}
-            value={description}
-          />
-        </label>
-        <button disabled={submitting} type="submit">
-          {submitting ? "Adding…" : "Add new task"}
-        </button>
-      </form>
+      <dialog
+        aria-labelledby="add-task-dialog-title"
+        className="kanban-task-dialog"
+        onCancel={(event) => {
+          if (submitting) event.preventDefault();
+        }}
+        onClose={() => addTaskButtonRef.current?.focus()}
+        ref={addTaskDialogRef}
+      >
+        <header className="kanban-task-dialog__header">
+          <div>
+            <p className="panel-header__eyebrow">Repository work</p>
+            <h3 id="add-task-dialog-title">Add new task</h3>
+          </div>
+          <button
+            aria-label="Close add task dialog"
+            disabled={submitting}
+            onClick={closeAddTaskDialog}
+            type="button"
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+        <form className="kanban-task-dialog__form" onSubmit={addTask}>
+          <label>
+            <span>Task title</span>
+            <input
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="What needs to be done?"
+              ref={titleInputRef}
+              required
+              value={title}
+            />
+          </label>
+          <label>
+            <span>Repository</span>
+            <input
+              list="kanban-repositories"
+              onChange={(event) => setRepository(event.target.value)}
+              placeholder="owner/repository"
+              required
+              value={repository}
+            />
+          </label>
+          <label>
+            <span>Description for agent</span>
+            <textarea
+              maxLength={5_000}
+              onChange={(event) => setDescription(event.target.value)}
+              placeholder="Expected result or acceptance criteria"
+              rows={4}
+              value={description}
+            />
+          </label>
+          {createError && (
+            <p className="kanban-task-dialog__error" role="alert">
+              {createError}
+            </p>
+          )}
+          <div className="kanban-task-dialog__actions">
+            <button
+              disabled={submitting}
+              onClick={closeAddTaskDialog}
+              type="button"
+            >
+              Cancel
+            </button>
+            <button disabled={submitting} type="submit">
+              {submitting ? "Adding…" : "Add new task"}
+            </button>
+          </div>
+        </form>
+      </dialog>
+
+      <datalist id="kanban-repositories">
+        {repositories.map((name) => (
+          <option key={name} value={name} />
+        ))}
+      </datalist>
 
       <div className="kanban-board">
         {kanbanStatuses.map((status) => {
