@@ -688,13 +688,13 @@ button:focus-visible,
   font-weight: 750;
 }
 
-.kanban-task-dialog__actions button:last-child {
+.kanban-task-dialog__actions button:not(.kanban-task-dialog__delete):last-child {
   border-color: transparent;
   background: var(--lime);
   color: var(--color-zinc-950);
 }
 
-.kanban-task-dialog__actions button:last-child:hover {
+.kanban-task-dialog__actions button:not(.kanban-task-dialog__delete):last-child:hover {
   background: color-mix(in oklch, var(--lime) 88%, white);
 }
 
