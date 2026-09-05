@@ -199,11 +199,11 @@ export class TaskStore {
     return row ? taskFromRow(row) : null;
   }
 
-  deleteTodoTask(id: string): KanbanTask | null {
+  deleteTask(id: string): KanbanTask | null {
     const row = this.database
       .prepare(`
         DELETE FROM tasks
-        WHERE id = ? AND status = 'todo'
+        WHERE id = ?
         RETURNING *
       `)
       .get(id) as unknown as TaskRow | undefined;

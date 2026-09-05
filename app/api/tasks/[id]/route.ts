@@ -45,13 +45,8 @@ export async function DELETE(
 ) {
   const { id } = await context.params;
   const store = getTaskStore();
-  const task = store.deleteTodoTask(id);
-  if (task) return new Response(null, { status: 204 });
-  const currentTask = store.getTask(id);
-  return currentTask
-    ? Response.json(
-        { error: "Only Todo tasks can be deleted.", task: currentTask },
-        { status: 409 },
-      )
+  const task = store.deleteTask(id);
+  return task
+    ? new Response(null, { status: 204 })
     : Response.json({ error: "Task not found." }, { status: 404 });
 }

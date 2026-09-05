@@ -265,37 +265,25 @@ export function KanbanBoard() {
   }
 
   async function deleteTask() {
-    const taskId = editingTaskId;
+    const task = selectedTask;
     if (
-      !taskId ||
-      !isSelectedTaskEditable ||
+      !task ||
       savingTaskId ||
       deletingTaskId ||
       !window.confirm(
-        `Delete "${editTitle}" permanently? This action cannot be undone.`,
+        `Delete "${task.title}" permanently? This action cannot be undone.`,
       )
     ) {
       return;
     }
 
+    const taskId = task.id;
     setDeletingTaskId(taskId);
     setEditError(null);
     try {
       const response = await fetch(`/api/tasks/${encodeURIComponent(taskId)}`, {
         method: "DELETE",
       });
-      if (response.status === 409) {
-        const conflict = (await response.json()) as { task: KanbanTask };
-        setTasks((current) =>
-          current.map((candidate) =>
-            candidate.id === conflict.task.id ? conflict.task : candidate,
-          ),
-        );
-        editTaskButtonRef.current = null;
-        editTaskDialogRef.current?.close();
-        setError("This task is no longer Todo and cannot be deleted.");
-        return;
-      }
       if (response.status === 404) {
         setTasks((current) =>
           current.filter((candidate) => candidate.id !== taskId),
@@ -537,7 +525,7 @@ export function KanbanBoard() {
               {editError}
             </p>
           )}
-          {isSelectedTaskEditable && (
+          {selectedTask && (
             <div className="kanban-task-dialog__actions">
               <button
                 className="kanban-task-dialog__delete"
@@ -547,19 +535,23 @@ export function KanbanBoard() {
               >
                 {deletingTaskId ? "Deleting…" : "Delete"}
               </button>
-              <button
-                disabled={Boolean(savingTaskId || deletingTaskId)}
-                onClick={closeTaskEditDialog}
-                type="button"
-              >
-                Cancel
-              </button>
-              <button
-                disabled={Boolean(savingTaskId || deletingTaskId)}
-                type="submit"
-              >
-                {savingTaskId ? "Saving…" : "Save"}
-              </button>
+              {isSelectedTaskEditable && (
+                <>
+                  <button
+                    disabled={Boolean(savingTaskId || deletingTaskId)}
+                    onClick={closeTaskEditDialog}
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    disabled={Boolean(savingTaskId || deletingTaskId)}
+                    type="submit"
+                  >
+                    {savingTaskId ? "Saving…" : "Save"}
+                  </button>
+                </>
+              )}
             </div>
           )}
         </form>
