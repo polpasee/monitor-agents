@@ -39,6 +39,10 @@ export function isKanbanStatus(value: unknown): value is KanbanStatus {
   return typeof value === "string" && statusIds.has(value as KanbanStatus);
 }
 
+export function isKanbanTaskEditable(task: KanbanTask): boolean {
+  return task.status === "todo";
+}
+
 export function parseKanbanTaskPatch(
   body: Record<string, unknown> | null,
 ): KanbanTaskPatch | null {

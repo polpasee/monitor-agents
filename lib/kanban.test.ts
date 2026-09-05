@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  isKanbanTaskEditable,
   isKanbanStatus,
   kanbanRepositories,
+  kanbanStatuses,
   parseKanbanTaskPatch,
   type KanbanTask,
 } from "./kanban.ts";
@@ -47,6 +49,15 @@ test("isKanbanStatus accepts only board states", () => {
   assert.equal(isKanbanStatus("in-progress"), true);
   assert.equal(isKanbanStatus("failed"), true);
   assert.equal(isKanbanStatus("unknown"), false);
+});
+
+test("isKanbanTaskEditable allows only Todo tasks", () => {
+  assert.deepEqual(
+    kanbanStatuses.map((status) =>
+      isKanbanTaskEditable({ ...tasks[0], status: status.id }),
+    ),
+    [true, false, false, false, false],
+  );
 });
 
 test("parseKanbanTaskPatch preserves the exact status payload", () => {
