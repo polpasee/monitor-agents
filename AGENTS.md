@@ -61,6 +61,7 @@ Transform tasks into verifiable goals:
   - Commit on every sub-task after it completed
   - After they completed, created PR
   - use "/loop 30 Min : report time with current status of workflow"
+  - All Response should be use thai language.
 
 ## Step 1 Explore:
 
@@ -69,7 +70,7 @@ Transform tasks into verifiable goals:
 
 ## Step 2 Plan:
 
-- Create a detailed of implementation plan.
+- `Spawn new subagents` Create a detailed of implementation plan.
 
 ## Step 3 Implement/execute:
 
@@ -78,15 +79,24 @@ Transform tasks into verifiable goals:
 
 ## Step 4 Test & Verification
 
-- Any code edit : must to Test & Verification
+- Any code edit : must to Test & Verification by adversarial subagent from step#3
 - `Spwan new subagent` to Test & Verification and send it's back to subagent owner's tasks to fix them or It's OK
 - Ignore CI on Github if we have billing issues.
 
 ## Step 5 Merge and Clean:
 
 - `Spwan new subagent` to suupport this task
-- Merge all {PR, branch and worktree} and verify the git tree is in sync. then delete and clean all.
+- Merge all {PR, branch and worktree} and verify the git tree is in sync main. then delete and clean all.
 
+## Step 6 Summarize
+- Table for Workflow Step #1-#5
+- Request info from user
+- Pending Issues/Out of Scope (if available)
+- Summarize
+
+# Project Overview
+
+IP Portal is a centralized network infrastructure management platform designed for equipment inventory, performance tracking, and topology visualization. It includes a project tracking module inspired by Asana to manage workflows efficiently. The portal features a robust Authentication and Authorization system for secure access control, and it integrates directly with the Cacti Monitoring System via API to retrieve real-time network data.
 
 
 # Project Overview
