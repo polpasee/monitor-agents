@@ -92,6 +92,7 @@ interface JobState {
   effort: string | null;
   task: string | null;
   fanLabels: Map<string, string>;
+  fanDoneAts: Map<string, number>;
   resumeSessionId: string | null;
   createdAtMs: number | null;
   updatedAtMs: number | null;
@@ -108,6 +109,7 @@ interface TranscriptSummary {
   toolCalls: number;
   model: string | null;
   stopReason: string | null;
+  effort: string | null;
   firstUserText: string | null;
   firstAtMs: number | null;
   lastAtMs: number | null;
@@ -132,6 +134,7 @@ interface SubagentCandidate {
   agentType: string;
   description: string | null;
   fanLabel: string | null;
+  fanDoneAtMs: number | null;
   workflowId: string | null;
   rootId: string;
   parentAgentId: string | null;
@@ -351,6 +354,20 @@ function fanLabels(value: JsonRecord): Map<string, string> {
   return labels;
 }
 
+function fanDoneAts(value: JsonRecord): Map<string, number> {
+  const doneAts = new Map<string, number>();
+  const fan = Array.isArray(value.fan) ? value.fan : [];
+  for (const item of fan) {
+    const entry = record(item);
+    const id = entry ? stringValue(entry.id) : null;
+    const doneAtMs = entry ? timestampMs(entry.doneAt) : null;
+    if (id && doneAtMs !== null) {
+      doneAts.set(id, doneAtMs);
+    }
+  }
+  return doneAts;
+}
+
 function isControlText(text: string): boolean {
   return (
     text.startsWith("<") ||
@@ -525,6 +542,7 @@ async function loadJobState(
     effort: truncateName(respawnFlagValue(value, "--effort")),
     task: truncateTask(stringValue(value.detail) ?? stringValue(value.intent)),
     fanLabels: fanLabels(value),
+    fanDoneAts: fanDoneAts(value),
     resumeSessionId: stringValue(value.resumeSessionId),
     createdAtMs: timestampMs(value.createdAt),
     updatedAtMs: timestampMs(value.updatedAt),
@@ -727,6 +745,7 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
   let anonymousRequest = 0;
   let model: string | null = null;
   let stopReason: string | null = null;
+  let effort: string | null = null;
   let firstUserText: string | null = null;
   let firstAtMs: number | null = null;
   let lastAtMs: number | null = null;
@@ -822,6 +841,7 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
       model = messageModel;
     }
     stopReason = stringValue(message.stop_reason) ?? stopReason;
+    effort = stringValue(value.effort) ?? effort;
 
     const content = Array.isArray(message.content) ? message.content : [];
     const toolCalls = content.filter(
@@ -900,6 +920,7 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
     toolCalls,
     model,
     stopReason,
+    effort,
     firstUserText,
     firstAtMs,
     lastAtMs,
@@ -914,6 +935,7 @@ async function collectSubagentsInDirectory(
   workflowId: string | null,
   parent: AgentRun,
   labels: ReadonlyMap<string, string>,
+  doneAts: ReadonlyMap<string, number>,
   diagnostics: Diagnostics,
   parentTaskNotifications?: ReadonlyMap<string, ProviderAgentState>,
   workflowStates?: ReadonlyMap<string, ProviderAgentState>,
@@ -960,6 +982,7 @@ async function collectSubagentsInDirectory(
           agentType: safeAgentType(meta.agentType),
           description: truncateName(stringValue(meta.description)),
           fanLabel: labels.get(match[1]) ?? null,
+          fanDoneAtMs: doneAts.get(match[1]) ?? null,
           workflowId,
           rootId: parent.id,
           parentAgentId,
@@ -990,6 +1013,7 @@ async function findDirectSubagents(
   transcriptPath: string,
   parent: AgentRun,
   labels: ReadonlyMap<string, string>,
+  doneAts: ReadonlyMap<string, number>,
   parentTaskNotifications: ReadonlyMap<string, ProviderAgentState>,
   diagnostics: Diagnostics,
 ): Promise<SubagentCandidate[]> {
@@ -1003,6 +1027,7 @@ async function findDirectSubagents(
     null,
     parent,
     labels,
+    doneAts,
     diagnostics,
     parentTaskNotifications,
   );
@@ -1033,6 +1058,7 @@ async function findDirectSubagents(
         entry.name,
         parent,
         labels,
+        doneAts,
         diagnostics,
         parentTaskNotifications,
         workflowStates,
@@ -1049,6 +1075,7 @@ function subagentStatus(
   providerStatus: AgentStatus | null,
   modifiedAtMs: number,
   nowMs: number,
+  fanDoneAtMs: number | null,
 ): AgentStatus {
   if (providerStatus !== null) {
     return providerStatus;
@@ -1061,6 +1088,9 @@ function subagentStatus(
     return "aborted";
   }
   if (["end_turn", "stop", "stop_sequence"].includes(reason)) {
+    return "completed";
+  }
+  if (fanDoneAtMs !== null) {
     return "completed";
   }
   if (["completed", "failed", "aborted"].includes(rootStatus)) {
@@ -1299,6 +1329,7 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
           transcriptPath,
           root,
           job?.fanLabels ?? new Map(),
+          job?.fanDoneAts ?? new Map(),
           transcript?.taskNotifications ?? new Map(),
           diagnostics,
         )),
@@ -1405,6 +1436,7 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
       providerStatus,
       candidate.modifiedAtMs,
       nowMs,
+      candidate.fanDoneAtMs,
     );
     const startedAtMs = transcript.firstAtMs ?? candidate.modifiedAtMs;
     const lastActivityAtMs = Math.max(
@@ -1429,7 +1461,7 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
         `Claude ${candidate.agentType}`,
       provider: "claude",
       model: transcript.model ?? "unknown",
-      effort: candidate.rootEffort,
+      effort: transcript.effort ?? candidate.rootEffort,
       status,
       task:
         transcript.firstUserText ??
@@ -1441,7 +1473,7 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
       startedAt: isoTime(startedAtMs),
       endedAt:
         status === "completed" || status === "failed" || status === "aborted"
-          ? isoTime(lastActivityAtMs)
+          ? isoTime(candidate.fanDoneAtMs ?? lastActivityAtMs)
           : null,
       lastActivityAt: isoTime(lastActivityAtMs),
       tokenUsage: {
