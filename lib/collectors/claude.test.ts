@@ -1479,3 +1479,208 @@ test("Claude collector aborts the agents of a killed workflow", async () => {
     await rm(directory, { force: true, recursive: true });
   }
 });
+
+test("Claude collector completes a subagent from job-state doneAt and keeps its doneAt-less sibling running", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-claude-done-"));
+  const workspace = "/workspace/repo";
+  const sessionId = "done-session";
+  const projectDirectory = join(directory, "projects", "-workspace-repo");
+  const workflowDirectory = join(
+    projectDirectory,
+    sessionId,
+    "subagents",
+    "workflows",
+    "wf-done",
+  );
+  const previousDirectory = process.env.CLAUDE_CONFIG_DIR;
+  const previousRateLimitsFile = process.env.CLAUDE_RATE_LIMITS_FILE;
+  const previousWorkspace = process.env.MONITOR_WORKSPACE;
+  const now = Date.now();
+  const doneAt = now - 5_000;
+
+  try {
+    process.env.CLAUDE_CONFIG_DIR = directory;
+    delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    process.env.MONITOR_WORKSPACE = workspace;
+    await mkdir(join(directory, "sessions"), { recursive: true });
+    await mkdir(join(directory, "jobs", "job-done"), { recursive: true });
+    await mkdir(workflowDirectory, { recursive: true });
+    await writeFile(
+      join(directory, "sessions", "done.json"),
+      JSON.stringify({
+        sessionId,
+        jobId: "job-done",
+        name: "DONEJOB",
+        pid: process.pid,
+        cwd: workspace,
+        status: "busy",
+        startedAt: new Date(now - 60_000).toISOString(),
+        updatedAt: new Date(now - 1_000).toISOString(),
+      }),
+    );
+    await writeFile(
+      join(directory, "jobs", "job-done", "state.json"),
+      JSON.stringify({
+        state: "working",
+        detail: "Fan out",
+        respawnFlags: ["--agent", "claude", "--effort", "xhigh"],
+        fan: [
+          { id: "finishedchild", kind: "workflow", label: "verify", doneAt },
+          { id: "runningchild", kind: "workflow", label: "implement" },
+        ],
+        createdAt: new Date(now - 60_000).toISOString(),
+        updatedAt: new Date(now - 1_000).toISOString(),
+      }),
+    );
+    await writeFile(join(projectDirectory, `${sessionId}.jsonl`), "");
+    for (const id of ["finishedchild", "runningchild"]) {
+      await writeFile(
+        join(workflowDirectory, `agent-${id}.jsonl`),
+        `${JSON.stringify({
+          type: "assistant",
+          timestamp: new Date(doneAt - 3_000).toISOString(),
+          message: {
+            model: "claude-opus-5",
+            stop_reason: "tool_use",
+            content: [],
+          },
+        })}\n`,
+      );
+      await writeFile(
+        join(workflowDirectory, `agent-${id}.meta.json`),
+        JSON.stringify({ agentType: "workflow-subagent" }),
+      );
+    }
+
+    const result = await collectClaudeTelemetry();
+    const finished = result.agents.find(
+      (agent) => agent.id === `claude:${sessionId}:finishedchild`,
+    );
+    const stillRunning = result.agents.find(
+      (agent) => agent.id === `claude:${sessionId}:runningchild`,
+    );
+
+    assert.equal(finished?.status, "completed");
+    assert.equal(finished?.endedAt, new Date(doneAt).toISOString());
+    assert.equal(stillRunning?.status, "running");
+  } finally {
+    if (previousDirectory === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = previousDirectory;
+    }
+    if (previousRateLimitsFile === undefined) {
+      delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    } else {
+      process.env.CLAUDE_RATE_LIMITS_FILE = previousRateLimitsFile;
+    }
+    if (previousWorkspace === undefined) {
+      delete process.env.MONITOR_WORKSPACE;
+    } else {
+      process.env.MONITOR_WORKSPACE = previousWorkspace;
+    }
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test("Claude collector reads a subagent's own effort before falling back to the root's", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-claude-effort-"));
+  const workspace = "/workspace/repo";
+  const sessionId = "effort-session";
+  const projectDirectory = join(directory, "projects", "-workspace-repo");
+  const subagentsDirectory = join(projectDirectory, sessionId, "subagents");
+  const previousDirectory = process.env.CLAUDE_CONFIG_DIR;
+  const previousRateLimitsFile = process.env.CLAUDE_RATE_LIMITS_FILE;
+  const previousWorkspace = process.env.MONITOR_WORKSPACE;
+  const now = Date.now();
+
+  try {
+    process.env.CLAUDE_CONFIG_DIR = directory;
+    delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    process.env.MONITOR_WORKSPACE = workspace;
+    await mkdir(join(directory, "sessions"), { recursive: true });
+    await mkdir(join(directory, "jobs", "job-effort"), { recursive: true });
+    await mkdir(subagentsDirectory, { recursive: true });
+    await writeFile(
+      join(directory, "sessions", "effort.json"),
+      JSON.stringify({
+        sessionId,
+        jobId: "job-effort",
+        name: "EFFORTJOB",
+        pid: process.pid,
+        cwd: workspace,
+        status: "busy",
+        startedAt: new Date(now - 60_000).toISOString(),
+        updatedAt: new Date(now - 1_000).toISOString(),
+      }),
+    );
+    await writeFile(
+      join(directory, "jobs", "job-effort", "state.json"),
+      JSON.stringify({
+        state: "working",
+        detail: "Fan out",
+        respawnFlags: ["--agent", "claude", "--effort", "xhigh"],
+        createdAt: new Date(now - 60_000).toISOString(),
+        updatedAt: new Date(now - 1_000).toISOString(),
+      }),
+    );
+    await writeFile(join(projectDirectory, `${sessionId}.jsonl`), "");
+    await writeFile(
+      join(subagentsDirectory, "agent-ownffort.jsonl"),
+      `${JSON.stringify({
+        type: "assistant",
+        timestamp: new Date(now - 2_000).toISOString(),
+        effort: "medium",
+        message: {
+          model: "claude-opus-5",
+          stop_reason: "tool_use",
+          content: [],
+        },
+      })}\n`,
+    );
+    await writeFile(
+      join(subagentsDirectory, "agent-ownffort.meta.json"),
+      JSON.stringify({ agentType: "worker" }),
+    );
+    await writeFile(
+      join(subagentsDirectory, "agent-noeffort.jsonl"),
+      `${JSON.stringify({
+        type: "user",
+        timestamp: new Date(now - 2_000).toISOString(),
+        message: { role: "user", content: "Review the diff" },
+      })}\n`,
+    );
+    await writeFile(
+      join(subagentsDirectory, "agent-noeffort.meta.json"),
+      JSON.stringify({ agentType: "worker" }),
+    );
+
+    const result = await collectClaudeTelemetry();
+    const ownEffort = result.agents.find(
+      (agent) => agent.id === `claude:${sessionId}:ownffort`,
+    );
+    const noEffort = result.agents.find(
+      (agent) => agent.id === `claude:${sessionId}:noeffort`,
+    );
+
+    assert.equal(ownEffort?.effort, "medium");
+    assert.equal(noEffort?.effort, "xhigh");
+  } finally {
+    if (previousDirectory === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = previousDirectory;
+    }
+    if (previousRateLimitsFile === undefined) {
+      delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    } else {
+      process.env.CLAUDE_RATE_LIMITS_FILE = previousRateLimitsFile;
+    }
+    if (previousWorkspace === undefined) {
+      delete process.env.MONITOR_WORKSPACE;
+    } else {
+      process.env.MONITOR_WORKSPACE = previousWorkspace;
+    }
+    await rm(directory, { force: true, recursive: true });
+  }
+});
