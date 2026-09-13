@@ -31,6 +31,10 @@ const MAX_NAME_LENGTH = 32;
 const SCAN_CONCURRENCY = 8;
 const DEAD_SESSION_GRACE_MS = 2 * 60 * 1_000;
 const MAX_SUBAGENT_AGE_MS = 30 * 60 * 1_000;
+// A subagent that died mid-tool-call leaves no terminal stop reason. Once
+// its transcript has been quiet this long it is dead rather than working,
+// even while the session that spawned it is still open.
+const SUBAGENT_SILENCE_MS = 30 * 60 * 1_000;
 const CODEX_EXEC_COMMAND_PATTERN =
   /(?:^|[\n;&|])[\t ]*(?:nohup[\t ]+)?codex[\t ]+exec(?:[\t \\]|$)/u;
 // Qwen runs headless when given a prompt flag, which may follow other flags
@@ -631,6 +635,9 @@ async function loadWorkflowAgentStates(
   const progress = Array.isArray(value?.workflowProgress)
     ? value.workflowProgress
     : [];
+  // Per-agent entries freeze at whatever they last reported, so a workflow
+  // that was killed leaves its agents reading as "progress" forever.
+  const workflowStatus = workflowAgentStatus(value?.status);
 
   for (const item of progress) {
     const entry = record(item);
@@ -638,10 +645,16 @@ async function loadWorkflowAgentStates(
       continue;
     }
     const agentId = stringValue(entry.agentId);
-    const status = workflowAgentStatus(entry.state);
-    if (!agentId || !status) {
+    const agentState = workflowAgentStatus(entry.state);
+    if (!agentId || !agentState) {
       continue;
     }
+    const status =
+      workflowStatus &&
+      ["completed", "failed", "aborted"].includes(workflowStatus) &&
+      !["completed", "failed", "aborted"].includes(agentState)
+        ? workflowStatus
+        : agentState;
     states.set(agentId, {
       status,
       lastActivityAtMs:
@@ -1034,6 +1047,8 @@ function subagentStatus(
   stopReason: string | null,
   rootStatus: AgentStatus,
   providerStatus: AgentStatus | null,
+  modifiedAtMs: number,
+  nowMs: number,
 ): AgentStatus {
   if (providerStatus !== null) {
     return providerStatus;
@@ -1050,6 +1065,9 @@ function subagentStatus(
   }
   if (["completed", "failed", "aborted"].includes(rootStatus)) {
     return rootStatus;
+  }
+  if (nowMs - modifiedAtMs > SUBAGENT_SILENCE_MS) {
+    return "aborted";
   }
   if (rootStatus === "running") {
     return "running";
@@ -1385,6 +1403,8 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
       transcript.stopReason,
       candidate.rootStatus,
       providerStatus,
+      candidate.modifiedAtMs,
+      nowMs,
     );
     const startedAtMs = transcript.firstAtMs ?? candidate.modifiedAtMs;
     const lastActivityAtMs = Math.max(

@@ -1299,3 +1299,183 @@ test("Claude collector resolves an arbitrary-depth subagent chain via parentAgen
     await rm(directory, { force: true, recursive: true });
   }
 });
+
+test("Claude collector aborts a silent tool_use subagent of an open session", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-claude-silent-"));
+  const workspace = "/workspace/silent";
+  const sessionId = "silent-session";
+  const projectDirectory = join(directory, "projects", "-workspace-silent");
+  const subagentsDirectory = join(projectDirectory, sessionId, "subagents");
+  const previousDirectory = process.env.CLAUDE_CONFIG_DIR;
+  const previousRateLimitsFile = process.env.CLAUDE_RATE_LIMITS_FILE;
+  const previousWorkspace = process.env.MONITOR_WORKSPACE;
+  const now = Date.now();
+  const silentMs = now - 31 * 60 * 1_000;
+
+  try {
+    process.env.CLAUDE_CONFIG_DIR = directory;
+    delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    process.env.MONITOR_WORKSPACE = workspace;
+    await mkdir(join(directory, "sessions"), { recursive: true });
+    await mkdir(subagentsDirectory, { recursive: true });
+    await writeFile(
+      join(directory, "sessions", "silent.json"),
+      JSON.stringify({
+        sessionId,
+        pid: process.pid,
+        cwd: workspace,
+        status: "busy",
+        startedAt: new Date(now - 2 * 60 * 60 * 1_000).toISOString(),
+        updatedAt: new Date(now - 1_000).toISOString(),
+      }),
+    );
+    await writeFile(join(projectDirectory, `${sessionId}.jsonl`), "");
+
+    // Both subagents died mid-tool-call, so neither transcript records a
+    // terminal stop reason: only the silence tells them apart.
+    for (const id of ["silent", "busy"]) {
+      await writeFile(
+        join(subagentsDirectory, `agent-${id}.jsonl`),
+        `${JSON.stringify({
+          type: "assistant",
+          timestamp: new Date(now - 32 * 60 * 1_000).toISOString(),
+          message: {
+            model: "claude-opus-4",
+            stop_reason: "tool_use",
+            content: [{ type: "tool_use", name: "Bash", input: {} }],
+          },
+        })}\n`,
+      );
+      await writeFile(
+        join(subagentsDirectory, `agent-${id}.meta.json`),
+        JSON.stringify({ agentType: "worker" }),
+      );
+    }
+    await utimes(
+      join(subagentsDirectory, "agent-silent.jsonl"),
+      silentMs / 1_000,
+      silentMs / 1_000,
+    );
+
+    const result = await collectClaudeTelemetry();
+    const silent = result.agents.find(
+      (agent) => agent.id === `claude:${sessionId}:silent`,
+    );
+    const busy = result.agents.find(
+      (agent) => agent.id === `claude:${sessionId}:busy`,
+    );
+
+    assert.equal(silent?.status, "aborted");
+    assert.ok(silent?.endedAt !== null);
+    assert.equal(busy?.status, "running");
+  } finally {
+    if (previousDirectory === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = previousDirectory;
+    }
+    if (previousRateLimitsFile === undefined) {
+      delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    } else {
+      process.env.CLAUDE_RATE_LIMITS_FILE = previousRateLimitsFile;
+    }
+    if (previousWorkspace === undefined) {
+      delete process.env.MONITOR_WORKSPACE;
+    } else {
+      process.env.MONITOR_WORKSPACE = previousWorkspace;
+    }
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test("Claude collector aborts the agents of a killed workflow", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-claude-wfkilled-"));
+  const workspace = "/workspace/wfkilled";
+  const sessionId = "wfkilled-session";
+  const projectDirectory = join(directory, "projects", "-workspace-wfkilled");
+  const subagentsDirectory = join(projectDirectory, sessionId, "subagents");
+  const workflowDirectory = join(subagentsDirectory, "workflows", "wf-dead");
+  const workflowStateDirectory = join(projectDirectory, sessionId, "workflows");
+  const previousDirectory = process.env.CLAUDE_CONFIG_DIR;
+  const previousRateLimitsFile = process.env.CLAUDE_RATE_LIMITS_FILE;
+  const previousWorkspace = process.env.MONITOR_WORKSPACE;
+  const now = Date.now();
+
+  try {
+    process.env.CLAUDE_CONFIG_DIR = directory;
+    delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    process.env.MONITOR_WORKSPACE = workspace;
+    await mkdir(join(directory, "sessions"), { recursive: true });
+    await mkdir(workflowDirectory, { recursive: true });
+    await mkdir(workflowStateDirectory, { recursive: true });
+    await writeFile(
+      join(directory, "sessions", "wfkilled.json"),
+      JSON.stringify({
+        sessionId,
+        pid: process.pid,
+        cwd: workspace,
+        status: "busy",
+        startedAt: new Date(now - 60_000).toISOString(),
+        updatedAt: new Date(now - 1_000).toISOString(),
+      }),
+    );
+    await writeFile(join(projectDirectory, `${sessionId}.jsonl`), "");
+
+    for (const id of ["frozen", "finished"]) {
+      await writeFile(join(workflowDirectory, `agent-${id}.jsonl`), "");
+      await writeFile(
+        join(workflowDirectory, `agent-${id}.meta.json`),
+        JSON.stringify({ agentType: "workflow-subagent" }),
+      );
+    }
+    // The workflow was killed while "frozen" was still reporting progress.
+    await writeFile(
+      join(workflowStateDirectory, "wf-dead.json"),
+      JSON.stringify({
+        status: "killed",
+        workflowProgress: [
+          {
+            type: "workflow_agent",
+            agentId: "frozen",
+            state: "progress",
+            lastProgressAt: new Date(now - 30_000).toISOString(),
+          },
+          {
+            type: "workflow_agent",
+            agentId: "finished",
+            state: "done",
+            lastProgressAt: new Date(now - 40_000).toISOString(),
+          },
+        ],
+      }),
+    );
+
+    const result = await collectClaudeTelemetry();
+    const frozen = result.agents.find(
+      (agent) => agent.id === `claude:${sessionId}:frozen`,
+    );
+    const finished = result.agents.find(
+      (agent) => agent.id === `claude:${sessionId}:finished`,
+    );
+
+    assert.equal(frozen?.status, "aborted");
+    assert.equal(finished?.status, "completed");
+  } finally {
+    if (previousDirectory === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = previousDirectory;
+    }
+    if (previousRateLimitsFile === undefined) {
+      delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    } else {
+      process.env.CLAUDE_RATE_LIMITS_FILE = previousRateLimitsFile;
+    }
+    if (previousWorkspace === undefined) {
+      delete process.env.MONITOR_WORKSPACE;
+    } else {
+      process.env.MONITOR_WORKSPACE = previousWorkspace;
+    }
+    await rm(directory, { force: true, recursive: true });
+  }
+});
