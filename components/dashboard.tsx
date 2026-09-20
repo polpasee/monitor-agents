@@ -413,7 +413,10 @@ export function Dashboard({ snapshot: initialSnapshot }: DashboardProps) {
           />
         </div>
       ) : (
-        <KanbanBoard />
+        <KanbanBoard
+          agents={snapshot.agents}
+          capturedAt={snapshot.capturedAt}
+        />
       )}
 
       <section className="metric-grid" aria-label="Session summary">

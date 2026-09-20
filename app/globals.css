@@ -595,6 +595,33 @@ button:focus-visible,
   box-shadow: var(--shadow);
 }
 
+/* A task that has a run to show puts that run's inspector beside the form. */
+.kanban-task-dialog--with-agent {
+  display: grid;
+  width: min(1020px, calc(100% - 32px));
+  align-items: start;
+  grid-template-columns: minmax(0, 370px) minmax(0, 1fr);
+}
+
+.kanban-task-dialog--with-agent .agent-inspector {
+  position: static;
+  max-height: none;
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.kanban-task-dialog--with-agent .agent-inspector__body {
+  max-height: none;
+  overflow: visible;
+}
+
+.kanban-task-dialog__main {
+  min-width: 0;
+}
+
 .kanban-task-dialog::backdrop {
   background: color-mix(in oklch, var(--color-black) 72%, transparent);
   backdrop-filter: blur(4px);
@@ -2197,6 +2224,16 @@ button:focus-visible,
   .kanban-task-dialog {
     width: calc(100% - 28px);
     max-height: calc(100dvh - 28px);
+  }
+
+  .kanban-task-dialog--with-agent {
+    width: calc(100% - 28px);
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .kanban-task-dialog--with-agent .agent-inspector {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
   }
 
   .metric-grid {

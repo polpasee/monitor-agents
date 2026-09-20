@@ -6,7 +6,9 @@ import {
   mergeRepositoryNames,
   type RepositoryList,
 } from "@/lib/repository-list";
+import type { AgentRun } from "@/lib/telemetry";
 import {
+  findTaskAgent,
   formatDuration,
   formatTokenCount,
   isKanbanTaskEditable,
@@ -17,7 +19,14 @@ import {
   type KanbanTask,
 } from "@/lib/kanban";
 
-export function KanbanBoard() {
+import { AgentInspector } from "./agent-inspector";
+
+interface KanbanBoardProps {
+  agents: AgentRun[];
+  capturedAt: string;
+}
+
+export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
   const addTaskButtonRef = useRef<HTMLButtonElement>(null);
   const addTaskDialogRef = useRef<HTMLDialogElement>(null);
   const editTaskButtonRef = useRef<HTMLButtonElement>(null);
@@ -53,7 +62,13 @@ export function KanbanBoard() {
         : tasks.filter((task) => task.repository === repositoryFilter),
     [repositoryFilter, tasks],
   );
+  const [inspectedAgentId, setInspectedAgentId] = useState<string | null>(null);
   const selectedTask = tasks.find((task) => task.id === editingTaskId);
+  // The task's own run opens the panel; the relation links walk from there.
+  const inspectedAgent = selectedTask
+    ? (agents.find((agent) => agent.id === inspectedAgentId) ??
+      findTaskAgent(selectedTask, agents))
+    : null;
   const isSelectedTaskEditable = selectedTask
     ? isKanbanTaskEditable(selectedTask)
     : false;
@@ -187,6 +202,7 @@ export function KanbanBoard() {
   function editTask(task: KanbanTask, trigger: HTMLButtonElement) {
     editTaskButtonRef.current = trigger;
     setEditingTaskId(task.id);
+    setInspectedAgentId(null);
     setEditTitle(task.title);
     setEditRepository(task.repository);
     setEditDescription(task.description);
@@ -205,6 +221,7 @@ export function KanbanBoard() {
 
   function handleTaskEditDialogClose() {
     setEditingTaskId(null);
+    setInspectedAgentId(null);
     setEditTitle("");
     setEditRepository("");
     setEditDescription("");
@@ -453,7 +470,11 @@ export function KanbanBoard() {
 
       <dialog
         aria-labelledby="edit-task-dialog-title"
-        className="kanban-task-dialog"
+        className={
+          inspectedAgent
+            ? "kanban-task-dialog kanban-task-dialog--with-agent"
+            : "kanban-task-dialog"
+        }
         id="edit-task-dialog"
         onCancel={(event) => {
           if (savingTaskId || deletingTaskId) event.preventDefault();
@@ -461,148 +482,158 @@ export function KanbanBoard() {
         onClose={handleTaskEditDialogClose}
         ref={editTaskDialogRef}
       >
-        <header className="kanban-task-dialog__header">
-          <div>
-            <p className="panel-header__eyebrow">Repository work</p>
-            <h3 id="edit-task-dialog-title">
-              {isTaskDialogReadOnly ? "Task details" : "Edit task"}
-            </h3>
-          </div>
-          <button
-            aria-label={
-              isTaskDialogReadOnly
-                ? "Close task details dialog"
-                : "Close edit task dialog"
-            }
-            disabled={Boolean(savingTaskId || deletingTaskId)}
-            onClick={closeTaskEditDialog}
-            type="button"
-          >
-            <span aria-hidden="true">×</span>
-          </button>
-        </header>
-        <form className="kanban-task-dialog__form" onSubmit={saveTask}>
-          <label>
-            <span>Task title</span>
-            <input
-              disabled={isTaskDialogReadOnly}
-              maxLength={200}
-              onChange={(event) => setEditTitle(event.target.value)}
-              ref={editTitleInputRef}
-              required
-              value={
-                isTaskDialogReadOnly
-                  ? (selectedTask?.title ?? editTitle)
-                  : editTitle
-              }
-            />
-          </label>
-          <label>
-            <span>Repository</span>
-            <input
-              disabled={isTaskDialogReadOnly}
-              list="kanban-repositories"
-              maxLength={200}
-              onChange={(event) => setEditRepository(event.target.value)}
-              required
-              value={
-                isTaskDialogReadOnly
-                  ? (selectedTask?.repository ?? editRepository)
-                  : editRepository
-              }
-            />
-          </label>
-          <label>
-            <span>Description for agent</span>
-            <textarea
-              disabled={isTaskDialogReadOnly}
-              maxLength={5_000}
-              onChange={(event) => setEditDescription(event.target.value)}
-              rows={4}
-              value={
-                isTaskDialogReadOnly
-                  ? (selectedTask?.description ?? editDescription)
-                  : editDescription
-              }
-            />
-          </label>
-          {selectedTask && (
-            <section className="kanban-run-details">
-              <h4>Run details</h4>
-              <dl>
-                <div>
-                  <dt>Session ID</dt>
-                  <dd>{selectedTask.sessionId ?? "—"}</dd>
-                </div>
-                <div>
-                  <dt>Model</dt>
-                  <dd>{selectedTask.model ?? "—"}</dd>
-                </div>
-                <div>
-                  <dt>Effort / think</dt>
-                  <dd>{selectedTask.effort ?? "—"}</dd>
-                </div>
-                <div>
-                  <dt>Used tokens</dt>
-                  <dd>
-                    {typeof selectedTask.usedTokens === "number"
-                      ? selectedTask.usedTokens.toLocaleString()
-                      : "—"}
-                  </dd>
-                </div>
-              </dl>
-              <h4>Time in each state</h4>
-              {kanbanStatusDurations(selectedTask).length === 0 ? (
-                <p className="kanban-run-details__empty">
-                  No state changes recorded yet.
-                </p>
-              ) : (
-                <dl>
-                  {kanbanStatusDurations(selectedTask).map((entry) => (
-                    <div key={entry.status}>
-                      <dt>{statusLabels.get(entry.status)}</dt>
-                      <dd>{formatDuration(entry.milliseconds)}</dd>
-                    </div>
-                  ))}
-                </dl>
-              )}
-            </section>
-          )}
-          {editError && (
-            <p className="kanban-task-dialog__error" role="alert">
-              {editError}
-            </p>
-          )}
-          {selectedTask && (
-            <div className="kanban-task-dialog__actions">
-              <button
-                className="kanban-task-dialog__delete"
-                disabled={Boolean(savingTaskId || deletingTaskId)}
-                onClick={() => void deleteTask()}
-                type="button"
-              >
-                {deletingTaskId ? "Deleting…" : "Delete"}
-              </button>
-              {isSelectedTaskEditable && (
-                <>
-                  <button
-                    disabled={Boolean(savingTaskId || deletingTaskId)}
-                    onClick={closeTaskEditDialog}
-                    type="button"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    disabled={Boolean(savingTaskId || deletingTaskId)}
-                    type="submit"
-                  >
-                    {savingTaskId ? "Saving…" : "Save"}
-                  </button>
-                </>
-              )}
+        {inspectedAgent && (
+          <AgentInspector
+            agent={inspectedAgent}
+            agents={agents}
+            capturedAt={capturedAt}
+            onSelectAgent={setInspectedAgentId}
+          />
+        )}
+        <div className="kanban-task-dialog__main">
+          <header className="kanban-task-dialog__header">
+            <div>
+              <p className="panel-header__eyebrow">Repository work</p>
+              <h3 id="edit-task-dialog-title">
+                {isTaskDialogReadOnly ? "Task details" : "Edit task"}
+              </h3>
             </div>
-          )}
-        </form>
+            <button
+              aria-label={
+                isTaskDialogReadOnly
+                  ? "Close task details dialog"
+                  : "Close edit task dialog"
+              }
+              disabled={Boolean(savingTaskId || deletingTaskId)}
+              onClick={closeTaskEditDialog}
+              type="button"
+            >
+              <span aria-hidden="true">×</span>
+            </button>
+          </header>
+          <form className="kanban-task-dialog__form" onSubmit={saveTask}>
+            <label>
+              <span>Task title</span>
+              <input
+                disabled={isTaskDialogReadOnly}
+                maxLength={200}
+                onChange={(event) => setEditTitle(event.target.value)}
+                ref={editTitleInputRef}
+                required
+                value={
+                  isTaskDialogReadOnly
+                    ? (selectedTask?.title ?? editTitle)
+                    : editTitle
+                }
+              />
+            </label>
+            <label>
+              <span>Repository</span>
+              <input
+                disabled={isTaskDialogReadOnly}
+                list="kanban-repositories"
+                maxLength={200}
+                onChange={(event) => setEditRepository(event.target.value)}
+                required
+                value={
+                  isTaskDialogReadOnly
+                    ? (selectedTask?.repository ?? editRepository)
+                    : editRepository
+                }
+              />
+            </label>
+            <label>
+              <span>Description for agent</span>
+              <textarea
+                disabled={isTaskDialogReadOnly}
+                maxLength={5_000}
+                onChange={(event) => setEditDescription(event.target.value)}
+                rows={4}
+                value={
+                  isTaskDialogReadOnly
+                    ? (selectedTask?.description ?? editDescription)
+                    : editDescription
+                }
+              />
+            </label>
+            {selectedTask && (
+              <section className="kanban-run-details">
+                <h4>Run details</h4>
+                <dl>
+                  <div>
+                    <dt>Session ID</dt>
+                    <dd>{selectedTask.sessionId ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Model</dt>
+                    <dd>{selectedTask.model ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Effort / think</dt>
+                    <dd>{selectedTask.effort ?? "—"}</dd>
+                  </div>
+                  <div>
+                    <dt>Used tokens</dt>
+                    <dd>
+                      {typeof selectedTask.usedTokens === "number"
+                        ? selectedTask.usedTokens.toLocaleString()
+                        : "—"}
+                    </dd>
+                  </div>
+                </dl>
+                <h4>Time in each state</h4>
+                {kanbanStatusDurations(selectedTask).length === 0 ? (
+                  <p className="kanban-run-details__empty">
+                    No state changes recorded yet.
+                  </p>
+                ) : (
+                  <dl>
+                    {kanbanStatusDurations(selectedTask).map((entry) => (
+                      <div key={entry.status}>
+                        <dt>{statusLabels.get(entry.status)}</dt>
+                        <dd>{formatDuration(entry.milliseconds)}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+              </section>
+            )}
+            {editError && (
+              <p className="kanban-task-dialog__error" role="alert">
+                {editError}
+              </p>
+            )}
+            {selectedTask && (
+              <div className="kanban-task-dialog__actions">
+                <button
+                  className="kanban-task-dialog__delete"
+                  disabled={Boolean(savingTaskId || deletingTaskId)}
+                  onClick={() => void deleteTask()}
+                  type="button"
+                >
+                  {deletingTaskId ? "Deleting…" : "Delete"}
+                </button>
+                {isSelectedTaskEditable && (
+                  <>
+                    <button
+                      disabled={Boolean(savingTaskId || deletingTaskId)}
+                      onClick={closeTaskEditDialog}
+                      type="button"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      disabled={Boolean(savingTaskId || deletingTaskId)}
+                      type="submit"
+                    >
+                      {savingTaskId ? "Saving…" : "Save"}
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
+          </form>
+        </div>
       </dialog>
 
       <datalist id="kanban-repositories">
