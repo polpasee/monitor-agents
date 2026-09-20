@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  findTaskAgent,
   formatDuration,
   formatTokenCount,
   isKanbanTaskEditable,
@@ -263,4 +264,22 @@ test("parseTaskRunMetadata accepts only the fields an agent reports", () => {
   assert.equal(parseTaskRunMetadata({ usedTokens: "4200" }), null);
   assert.equal(parseTaskRunMetadata({ sessionId: "" }), null);
   assert.equal(parseTaskRunMetadata({ model: "m".repeat(201) }), null);
+});
+
+test("findTaskAgent matches the root run of the reported session", () => {
+  const agents = [
+    { id: "claude:session-1" },
+    { id: "claude:session-1:child-a" },
+    { id: "codex:session-2" },
+  ];
+
+  assert.deepEqual(findTaskAgent({ sessionId: "session-1" }, agents), {
+    id: "claude:session-1",
+  });
+  assert.deepEqual(findTaskAgent({ sessionId: "session-2" }, agents), {
+    id: "codex:session-2",
+  });
+  // A subagent of the session is not the run the task was handed to.
+  assert.equal(findTaskAgent({ sessionId: "child-a" }, agents), null);
+  assert.equal(findTaskAgent({ sessionId: null }, agents), null);
 });

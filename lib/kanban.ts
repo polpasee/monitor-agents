@@ -178,6 +178,24 @@ export function parseTaskRunMetadata(
   return metadata;
 }
 
+/**
+ * A runner reports the session it runs in, and every collector names a root run
+ * `<provider>:<sessionId>`. A subagent appends its own id to that root id, so
+ * only a two-segment id belongs to the task itself.
+ */
+export function findTaskAgent<T extends { id: string }>(
+  task: Pick<KanbanTask, "sessionId">,
+  agents: readonly T[],
+): T | null {
+  if (!task.sessionId) return null;
+  return (
+    agents.find((agent) => {
+      const segments = agent.id.split(":");
+      return segments.length === 2 && segments[1] === task.sessionId;
+    }) ?? null
+  );
+}
+
 export function kanbanRepositories(tasks: readonly KanbanTask[]): string[] {
   return [...new Set(tasks.map((task) => task.repository))].sort((left, right) =>
     left.localeCompare(right),
