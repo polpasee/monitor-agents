@@ -30,6 +30,7 @@ export interface KanbanTask {
   lastError: string | null;
   attemptCount: number;
   sessionId: string | null;
+  agentRunId: string | null;
   model: string | null;
   effort: string | null;
   usedTokens: number | null;
@@ -41,6 +42,7 @@ export interface KanbanTask {
 /** Run details an agent reports while it works on a task. */
 export interface TaskRunMetadata {
   sessionId?: string;
+  agentRunId?: string;
   model?: string;
   effort?: string;
   usedTokens?: number;
@@ -156,7 +158,7 @@ export function parseTaskRunMetadata(
 ): TaskRunMetadata | null {
   const metadata: TaskRunMetadata = {};
 
-  for (const key of ["sessionId", "model", "effort"] as const) {
+  for (const key of ["sessionId", "agentRunId", "model", "effort"] as const) {
     if (body[key] === undefined || body[key] === null) continue;
     const value = requiredString(body[key], 200);
     if (!value) return null;
@@ -197,24 +199,40 @@ const statusOrder: Record<AgentRun["status"], number> = {
   aborted: 5,
 };
 
-function runsTask(agent: AgentRun, title: string): boolean {
+/**
+ * How firmly a prompt claims the task: it either carries the task id outright,
+ * or it opens with the title, which the truncation may have cut to a few
+ * characters. Null when the prompt says nothing about this task.
+ */
+function claimStrength(
+  agent: AgentRun,
+  task: Pick<KanbanTask, "id" | "title">,
+): number | null {
+  if (agent.task.includes(task.id)) return 0;
+
   const opening = orchestratorTitle.exec(agent.task)?.[1].trim();
-  return (
-    opening !== undefined &&
+  return opening !== undefined &&
     opening.length >= 4 &&
-    title.replace(/^`/u, "").startsWith(opening)
-  );
+    task.title.replace(/^`/u, "").startsWith(opening)
+    ? 1
+    : null;
 }
 
 /**
- * A runner reports the session it runs in, and every collector names a root run
- * `<provider>:<sessionId>`. The task itself is worked by an orchestrator the
- * session spawned; the session's own run stands in when none can be named.
+ * In order of how sure the answer is: the run an agent reported for the task,
+ * the orchestrator the session spawned for it, then the session's own run —
+ * every collector names that root run `<provider>:<sessionId>`.
  */
 export function findTaskAgent(
-  task: Pick<KanbanTask, "sessionId" | "title">,
+  task: Pick<KanbanTask, "id" | "sessionId" | "agentRunId" | "title">,
   agents: readonly AgentRun[],
 ): AgentRun | null {
+  // A reported run needs no guessing, and it can be anywhere in the tree.
+  const reported = task.agentRunId
+    ? agents.find((agent) => agent.id === task.agentRunId)
+    : undefined;
+  if (reported) return reported;
+
   if (!task.sessionId) return null;
 
   const root = agents.find((agent) => {
@@ -224,16 +242,19 @@ export function findTaskAgent(
   if (!root) return null;
 
   const orchestrators = agents
-    .filter(
-      (agent) => agent.parentId === root.id && runsTask(agent, task.title),
-    )
+    .flatMap((agent) => {
+      if (agent.parentId !== root.id) return [];
+      const claim = claimStrength(agent, task);
+      return claim === null ? [] : [{ agent, claim }];
+    })
     .sort(
       (left, right) =>
-        statusOrder[left.status] - statusOrder[right.status] ||
-        Date.parse(right.startedAt) - Date.parse(left.startedAt),
+        left.claim - right.claim ||
+        statusOrder[left.agent.status] - statusOrder[right.agent.status] ||
+        Date.parse(right.agent.startedAt) - Date.parse(left.agent.startedAt),
     );
 
-  return orchestrators[0] ?? root;
+  return orchestrators[0]?.agent ?? root;
 }
 
 export function kanbanRepositories(tasks: readonly KanbanTask[]): string[] {
