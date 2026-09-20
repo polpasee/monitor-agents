@@ -595,8 +595,10 @@ button:focus-visible,
   box-shadow: var(--shadow);
 }
 
-/* A task that has a run to show puts that run's inspector beside the form. */
-.kanban-task-dialog--with-agent {
+/* A task that has a run to show puts that run's inspector beside the form. The
+   open state is part of the selector because a `display` of our own would
+   otherwise beat the rule that keeps a closed dialog out of the page. */
+.kanban-task-dialog--with-agent[open] {
   display: grid;
   width: min(1020px, calc(100% - 32px));
   align-items: start;
@@ -2233,7 +2235,7 @@ button:focus-visible,
     max-height: calc(100dvh - 28px);
   }
 
-  .kanban-task-dialog--with-agent {
+  .kanban-task-dialog--with-agent[open] {
     width: calc(100% - 28px);
     grid-template-columns: minmax(0, 1fr);
   }
