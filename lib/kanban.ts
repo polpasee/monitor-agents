@@ -1,4 +1,5 @@
 import { optionalString, requiredString } from "./api-input.ts";
+import type { AgentRun } from "./telemetry.ts";
 
 export const kanbanStatuses = [
   { id: "todo", label: "Todo" },
@@ -179,21 +180,60 @@ export function parseTaskRunMetadata(
 }
 
 /**
- * A runner reports the session it runs in, and every collector names a root run
- * `<provider>:<sessionId>`. A subagent appends its own id to that root id, so
- * only a two-segment id belongs to the task itself.
+ * A session picks up several tasks at once and hands each one to an
+ * orchestrator of its own, so the prompt is what says which task an
+ * orchestrator was given. The collector truncates that prompt, leaving only
+ * the opening of the title to match on.
  */
-export function findTaskAgent<T extends { id: string }>(
-  task: Pick<KanbanTask, "sessionId">,
-  agents: readonly T[],
-): T | null {
-  if (!task.sessionId) return null;
+const orchestratorTitle = /\*\*Task:\*\*\s*`?([^`…]+)/u;
+
+/** A live orchestrator describes the task better than one that already stopped. */
+const statusOrder: Record<AgentRun["status"], number> = {
+  running: 0,
+  idle: 1,
+  queued: 2,
+  completed: 3,
+  failed: 4,
+  aborted: 5,
+};
+
+function runsTask(agent: AgentRun, title: string): boolean {
+  const opening = orchestratorTitle.exec(agent.task)?.[1].trim();
   return (
-    agents.find((agent) => {
-      const segments = agent.id.split(":");
-      return segments.length === 2 && segments[1] === task.sessionId;
-    }) ?? null
+    opening !== undefined &&
+    opening.length >= 4 &&
+    title.replace(/^`/u, "").startsWith(opening)
   );
+}
+
+/**
+ * A runner reports the session it runs in, and every collector names a root run
+ * `<provider>:<sessionId>`. The task itself is worked by an orchestrator the
+ * session spawned; the session's own run stands in when none can be named.
+ */
+export function findTaskAgent(
+  task: Pick<KanbanTask, "sessionId" | "title">,
+  agents: readonly AgentRun[],
+): AgentRun | null {
+  if (!task.sessionId) return null;
+
+  const root = agents.find((agent) => {
+    const segments = agent.id.split(":");
+    return segments.length === 2 && segments[1] === task.sessionId;
+  });
+  if (!root) return null;
+
+  const orchestrators = agents
+    .filter(
+      (agent) => agent.parentId === root.id && runsTask(agent, task.title),
+    )
+    .sort(
+      (left, right) =>
+        statusOrder[left.status] - statusOrder[right.status] ||
+        Date.parse(right.startedAt) - Date.parse(left.startedAt),
+    );
+
+  return orchestrators[0] ?? root;
 }
 
 export function kanbanRepositories(tasks: readonly KanbanTask[]): string[] {

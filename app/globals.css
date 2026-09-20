@@ -602,14 +602,14 @@ button:focus-visible,
   display: grid;
   width: min(1020px, calc(100% - 32px));
   align-items: start;
-  grid-template-columns: minmax(0, 370px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 370px);
 }
 
 .kanban-task-dialog--with-agent .agent-inspector {
   position: static;
   max-height: none;
   border: 0;
-  border-right: 1px solid var(--border);
+  border-left: 1px solid var(--border);
   border-radius: 0;
   box-shadow: none;
   overflow: visible;
@@ -2241,8 +2241,8 @@ button:focus-visible,
   }
 
   .kanban-task-dialog--with-agent .agent-inspector {
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
+    border-left: 0;
+    border-top: 1px solid var(--border);
   }
 
   .metric-grid {

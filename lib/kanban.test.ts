@@ -14,6 +14,7 @@ import {
   parseTaskRunMetadata,
   type KanbanTask,
 } from "./kanban.ts";
+import type { AgentRun } from "./telemetry.ts";
 
 const tasks: KanbanTask[] = [
   {
@@ -266,20 +267,114 @@ test("parseTaskRunMetadata accepts only the fields an agent reports", () => {
   assert.equal(parseTaskRunMetadata({ model: "m".repeat(201) }), null);
 });
 
-test("findTaskAgent matches the root run of the reported session", () => {
+function agent(
+  id: string,
+  parentId: string | null,
+  overrides: Partial<AgentRun> = {},
+): AgentRun {
+  return {
+    id,
+    parentId,
+    name: id,
+    provider: "claude",
+    model: "claude-opus-5",
+    effort: null,
+    status: "running",
+    task: "",
+    spawnMethod: parentId ? "native" : "root",
+    cwd: "/repo",
+    startedAt: "2026-09-20T10:00:00.000Z",
+    endedAt: null,
+    lastActivityAt: "2026-09-20T10:05:00.000Z",
+    tokenUsage: {
+      input: 0,
+      output: 0,
+      cached: 0,
+      contextUsed: 0,
+      contextLimit: 0,
+    },
+    costUsd: null,
+    toolCalls: null,
+    ...overrides,
+  };
+}
+
+// The collector cuts the prompt short, so only the opening of the title is left.
+function implementerPrompt(opening: string): string {
+  return `You are the IMPLEMENTER for ONE task. Do the work yourself. **Task:** \`${opening}…`;
+}
+
+test("findTaskAgent picks the orchestrator that was handed the task", () => {
+  const root = agent("claude:session-1", null);
   const agents = [
-    { id: "claude:session-1" },
-    { id: "claude:session-1:child-a" },
-    { id: "codex:session-2" },
+    root,
+    agent("claude:session-1:a1", root.id, { task: implementerPrompt("know") }),
+    agent("claude:session-1:a2", root.id, { task: implementerPrompt("topo") }),
+    agent("claude:session-1:a3", root.id, { task: implementerPrompt("user") }),
   ];
 
-  assert.deepEqual(findTaskAgent({ sessionId: "session-1" }, agents), {
-    id: "claude:session-1",
-  });
-  assert.deepEqual(findTaskAgent({ sessionId: "session-2" }, agents), {
-    id: "codex:session-2",
-  });
-  // A subagent of the session is not the run the task was handed to.
-  assert.equal(findTaskAgent({ sessionId: "child-a" }, agents), null);
-  assert.equal(findTaskAgent({ sessionId: null }, agents), null);
+  // One session works several tasks at once, so each title finds its own run.
+  assert.equal(
+    findTaskAgent(
+      { sessionId: "session-1", title: "`knowledge_base` : multi select" },
+      agents,
+    )?.id,
+    "claude:session-1:a1",
+  );
+  assert.equal(
+    findTaskAgent(
+      { sessionId: "session-1", title: "`topology` : group the results" },
+      agents,
+    )?.id,
+    "claude:session-1:a2",
+  );
 });
+
+test("findTaskAgent prefers a live orchestrator over an abandoned one", () => {
+  const root = agent("claude:session-1", null);
+  const abandoned = agent("claude:session-1:a1", root.id, {
+    status: "aborted",
+    task: implementerPrompt("know"),
+    startedAt: "2026-09-20T11:00:00.000Z",
+  });
+  const retried = agent("claude:session-1:a2", root.id, {
+    status: "completed",
+    task: implementerPrompt("know"),
+  });
+
+  assert.equal(
+    findTaskAgent(
+      { sessionId: "session-1", title: "`knowledge_base` : multi select" },
+      [root, abandoned, retried],
+    )?.id,
+    "claude:session-1:a2",
+  );
+});
+
+test("findTaskAgent falls back to the session's own run", () => {
+  const root = agent("claude:session-1", null);
+  const other = agent("claude:session-1:a1", root.id, {
+    task: implementerPrompt("topo"),
+  });
+  const grandchild = agent("claude:session-1:a2", "claude:session-1:a1", {
+    task: implementerPrompt("know"),
+  });
+
+  // A task no orchestrator claims, and a nested worker, both leave the session.
+  assert.equal(
+    findTaskAgent(
+      { sessionId: "session-1", title: "`knowledge_base` : multi select" },
+      [root, other, grandchild],
+    ),
+    root,
+  );
+  assert.equal(
+    findTaskAgent({ sessionId: "session-2", title: "anything" }, [root]),
+    null,
+  );
+  assert.equal(
+    findTaskAgent({ sessionId: null, title: "anything" }, [root]),
+    null,
+  );
+});
+
