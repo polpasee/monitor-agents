@@ -582,6 +582,66 @@ test("TaskStore banks an expired attempt's tokens before the next one", async ()
   }
 });
 
+test("TaskStore upgrades a database that has run details but no carry", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-carry-"));
+  const path = join(directory, "tasks.sqlite");
+  const partial = new DatabaseSync(path);
+  partial.exec(`
+    CREATE TABLE tasks (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      repository TEXT NOT NULL,
+      status TEXT NOT NULL,
+      priority INTEGER NOT NULL DEFAULT 0,
+      claimed_by TEXT,
+      claimed_at TEXT,
+      lease_until TEXT,
+      result TEXT,
+      last_error TEXT,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      session_id TEXT,
+      model TEXT,
+      effort TEXT,
+      used_tokens INTEGER,
+      status_history TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+  partial.close();
+
+  const store = new TaskStore(path);
+  try {
+    const task = store.createTask({
+      title: "Reported before the carry column existed",
+      repository: "monitor-agents",
+    });
+    store.claimTask({
+      agentId: "agent-1",
+      repositories: ["monitor-agents"],
+      now: new Date("2026-08-04T00:00:00.000Z"),
+      leaseMs: 600_000,
+    });
+
+    // Every write names `carried_tokens`, so a half-upgraded database would
+    // fail here rather than at the next release.
+    assert.equal(
+      store.heartbeatTask(
+        task.id,
+        "agent-1",
+        new Date("2026-08-04T00:01:00.000Z"),
+        600_000,
+        { usedTokens: 7_000 },
+      )?.usedTokens,
+      7_000,
+    );
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("TaskStore reopens an already migrated database without losing history", async () => {
   const directory = await mkdtemp(join(tmpdir(), "monitor-task-reopen-"));
   const path = join(directory, "tasks.sqlite");

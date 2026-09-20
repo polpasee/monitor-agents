@@ -177,8 +177,8 @@ export function parseClaudeRunMetadata(stdout: string): ClaudeRunMetadata {
       if (typeof modelUsage === "object" && modelUsage !== null) {
         resultTokens = modelUsageTokens(modelUsage);
       } else if (typeof usage === "object" && usage !== null) {
-        // A run can close with several result events, each reporting its own
-        // turn, so the per-turn numbers are summed rather than overwritten.
+        // Without `modelUsage` there is only the per-turn number, and a run can
+        // close with several result events, so those are summed.
         resultTokens = (resultTokens ?? 0) + usageTokens(usage);
       }
       continue;
