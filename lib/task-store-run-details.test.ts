@@ -167,10 +167,21 @@ test("TaskStore upgrades a database written before run details existed", async (
     INSERT INTO tasks (
       id, title, description, repository, status, priority,
       claimed_by, claimed_at, created_at, updated_at
-    ) VALUES (
+    ) VALUES
+    (
       'legacy-1', 'Old task', '', 'monitor-agents', 'in-progress', 0,
       'agent-1', '2026-08-04T00:01:00.000Z',
       '2026-08-04T00:00:00.000Z', '2026-08-04T00:02:00.000Z'
+    ),
+    (
+      'legacy-2', 'Finished task', '', 'monitor-agents', 'done', 0,
+      'agent-1', '2026-08-04T00:01:00.000Z',
+      '2026-08-04T00:00:00.000Z', '2026-08-04T00:09:00.000Z'
+    ),
+    (
+      'legacy-3', 'Never claimed', '', 'monitor-agents', 'done', 0,
+      NULL, NULL,
+      '2026-08-04T00:00:00.000Z', '2026-08-04T00:09:00.000Z'
     );
   `);
   legacy.close();
@@ -184,8 +195,48 @@ test("TaskStore upgrades a database written before run details existed", async (
       { status: "todo", at: "2026-08-04T00:00:00.000Z" },
       { status: "in-progress", at: "2026-08-04T00:01:00.000Z" },
     ]);
+
+    // A finished task kept its claim timestamp, so the run time it spent
+    // in-progress must not be booked to the status it ended on.
+    assert.deepEqual(store.getTask("legacy-2")?.statusHistory, [
+      { status: "todo", at: "2026-08-04T00:00:00.000Z" },
+      { status: "in-progress", at: "2026-08-04T00:01:00.000Z" },
+      { status: "done", at: "2026-08-04T00:09:00.000Z" },
+    ]);
+    assert.deepEqual(store.getTask("legacy-3")?.statusHistory, [
+      { status: "todo", at: "2026-08-04T00:00:00.000Z" },
+      { status: "done", at: "2026-08-04T00:09:00.000Z" },
+    ]);
   } finally {
     store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("TaskStore reopens an already migrated database without losing history", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-reopen-"));
+  const path = join(directory, "tasks.sqlite");
+
+  const first = new TaskStore(path);
+  const task = first.createTask(
+    { title: "Survives a restart", repository: "monitor-agents" },
+    new Date("2026-08-04T00:00:00.000Z"),
+  );
+  first.updateTaskStatus(
+    task.id,
+    "done",
+    new Date("2026-08-04T00:02:00.000Z"),
+  );
+  first.close();
+
+  const second = new TaskStore(path);
+  try {
+    assert.deepEqual(second.getTask(task.id)?.statusHistory, [
+      { status: "todo", at: "2026-08-04T00:00:00.000Z" },
+      { status: "done", at: "2026-08-04T00:02:00.000Z" },
+    ]);
+  } finally {
+    second.close();
     await rm(directory, { recursive: true, force: true });
   }
 });

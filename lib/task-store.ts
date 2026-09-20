@@ -171,14 +171,27 @@ export class TaskStore {
       }
     }
 
+    // A finished row still carries the moment it was claimed, so its run time
+    // is booked to `in-progress` instead of collapsing into the final status.
     this.database.exec(`
       UPDATE tasks
       SET status_history = CASE
         WHEN status = 'todo'
           THEN json_array(json_object('status', status, 'at', created_at))
+        WHEN status = 'in-progress'
+          THEN json_array(
+            json_object('status', 'todo', 'at', created_at),
+            json_object('status', status, 'at', COALESCE(claimed_at, updated_at))
+          )
+        WHEN claimed_at IS NULL
+          THEN json_array(
+            json_object('status', 'todo', 'at', created_at),
+            json_object('status', status, 'at', updated_at)
+          )
         ELSE json_array(
           json_object('status', 'todo', 'at', created_at),
-          json_object('status', status, 'at', COALESCE(claimed_at, updated_at))
+          json_object('status', 'in-progress', 'at', claimed_at),
+          json_object('status', status, 'at', updated_at)
         )
       END
       WHERE status_history IS NULL OR status_history = '[]'
