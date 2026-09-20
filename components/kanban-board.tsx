@@ -482,14 +482,6 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
         onClose={handleTaskEditDialogClose}
         ref={editTaskDialogRef}
       >
-        {inspectedAgent && (
-          <AgentInspector
-            agent={inspectedAgent}
-            agents={agents}
-            capturedAt={capturedAt}
-            onSelectAgent={setInspectedAgentId}
-          />
-        )}
         <div className="kanban-task-dialog__main">
           <header className="kanban-task-dialog__header">
             <div>
@@ -634,6 +626,14 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
             )}
           </form>
         </div>
+        {inspectedAgent && (
+          <AgentInspector
+            agent={inspectedAgent}
+            agents={agents}
+            capturedAt={capturedAt}
+            onSelectAgent={setInspectedAgentId}
+          />
+        )}
       </dialog>
 
       <datalist id="kanban-repositories">
