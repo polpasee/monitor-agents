@@ -304,6 +304,7 @@ test("TaskStore records every status a task passes through", async () => {
       new Date("2026-08-04T00:03:00.000Z"),
       {
         sessionId: "session-1",
+        agentRunId: "claude:session-1",
         model: "claude-opus-5",
         effort: "high",
         usedTokens: 4_200,
@@ -316,6 +317,7 @@ test("TaskStore records every status a task passes through", async () => {
       { status: "review", at: "2026-08-04T00:03:00.000Z" },
     ]);
     assert.equal(completed?.sessionId, "session-1");
+    assert.equal(completed?.agentRunId, "claude:session-1");
     assert.equal(completed?.model, "claude-opus-5");
     assert.equal(completed?.effort, "high");
     assert.equal(completed?.usedTokens, 4_200);
@@ -462,6 +464,7 @@ test("TaskStore upgrades a database written before run details existed", async (
     const task = store.getTask("legacy-1");
     assert.equal(task?.usedTokens, null);
     assert.equal(task?.sessionId, null);
+    assert.equal(task?.agentRunId, null);
     assert.deepEqual(task?.statusHistory, [
       { status: "todo", at: "2026-08-04T00:00:00.000Z" },
       { status: "in-progress", at: "2026-08-04T00:01:00.000Z" },
