@@ -94,6 +94,82 @@ export function parseClaudeOutput(stdout: string): {
   return { result: result || truncate(stdout, 2_000), isError };
 }
 
+export interface ClaudeRunMetadata {
+  sessionId?: string;
+  model?: string;
+  effort?: string;
+  usedTokens?: number;
+}
+
+function stringField(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+/**
+ * The stream carries the run details the board shows: `system` announces the
+ * session and model, and every `assistant` event carries the usage of one API
+ * request. Retried requests repeat the same id, so usage is kept per request
+ * instead of summed blindly.
+ */
+export function parseClaudeRunMetadata(stdout: string): ClaudeRunMetadata {
+  const metadata: ClaudeRunMetadata = {};
+  const requests = new Map<string, number>();
+  let anonymousRequest = 0;
+
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    let event: unknown;
+    try {
+      event = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (typeof event !== "object" || event === null) continue;
+    const value = event as Record<string, unknown>;
+
+    metadata.sessionId = stringField(value.session_id) ?? metadata.sessionId;
+    metadata.model = stringField(value.model) ?? metadata.model;
+    metadata.effort = stringField(value.effort) ?? metadata.effort;
+
+    if (value.type !== "assistant") continue;
+    const message = value.message as Record<string, unknown> | undefined;
+    if (typeof message !== "object" || message === null) continue;
+
+    const messageModel = stringField(message.model);
+    if (messageModel && messageModel !== "<synthetic>") {
+      metadata.model = messageModel;
+    }
+
+    const usage = message.usage as Record<string, unknown> | undefined;
+    if (typeof usage !== "object" || usage === null) continue;
+    const tokens = [
+      "input_tokens",
+      "cache_creation_input_tokens",
+      "cache_read_input_tokens",
+      "output_tokens",
+    ].reduce(
+      (total, key) =>
+        total + (typeof usage[key] === "number" ? (usage[key] as number) : 0),
+      0,
+    );
+    const requestKey =
+      stringField(value.requestId) ??
+      stringField(message.id) ??
+      `anonymous-${anonymousRequest++}`;
+    requests.set(requestKey, tokens);
+  }
+
+  if (requests.size > 0) {
+    metadata.usedTokens = [...requests.values()].reduce(
+      (total, tokens) => total + tokens,
+      0,
+    );
+  }
+
+  return metadata;
+}
+
 /**
  * Agent tooling (MCP servers, editor caches) writes into the checkout while a
  * task runs. Those paths must never reach the pull request, so staging uses an

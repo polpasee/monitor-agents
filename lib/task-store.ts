@@ -3,7 +3,12 @@ import { mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-import type { KanbanStatus, KanbanTask } from "./kanban";
+import type {
+  KanbanStatus,
+  KanbanStatusEvent,
+  KanbanTask,
+  TaskRunMetadata,
+} from "./kanban";
 
 interface TaskRow {
   id: string;
@@ -18,6 +23,11 @@ interface TaskRow {
   result: string | null;
   last_error: string | null;
   attempt_count: number;
+  session_id: string | null;
+  model: string | null;
+  effort: string | null;
+  used_tokens: number | null;
+  status_history: string;
   created_at: string;
   updated_at: string;
 }
@@ -42,6 +52,15 @@ export interface ClaimTaskInput {
   leaseMs?: number;
 }
 
+function statusHistoryFromRow(value: string): KanbanStatusEvent[] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? (parsed as KanbanStatusEvent[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 function taskFromRow(row: TaskRow): KanbanTask {
   return {
     id: row.id,
@@ -56,9 +75,33 @@ function taskFromRow(row: TaskRow): KanbanTask {
     result: row.result,
     lastError: row.last_error,
     attemptCount: row.attempt_count,
+    sessionId: row.session_id,
+    model: row.model,
+    effort: row.effort,
+    usedTokens: row.used_tokens,
+    statusHistory: statusHistoryFromRow(row.status_history),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+const appendStatusSql =
+  "json_insert(status_history, '$[#]', json_object('status', ?, 'at', ?))";
+
+const runMetadataSql = `
+  session_id = COALESCE(?, session_id),
+  model = COALESCE(?, model),
+  effort = COALESCE(?, effort),
+  used_tokens = COALESCE(?, used_tokens)
+`;
+
+function runMetadataValues(metadata: TaskRunMetadata | undefined) {
+  return [
+    metadata?.sessionId ?? null,
+    metadata?.model ?? null,
+    metadata?.effort ?? null,
+    metadata?.usedTokens ?? null,
+  ] as const;
 }
 
 export class TaskStore {
@@ -86,12 +129,59 @@ export class TaskStore {
         result TEXT,
         last_error TEXT,
         attempt_count INTEGER NOT NULL DEFAULT 0,
+        session_id TEXT,
+        model TEXT,
+        effort TEXT,
+        used_tokens INTEGER,
+        status_history TEXT NOT NULL DEFAULT '[]',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
 
       CREATE INDEX IF NOT EXISTS tasks_queue
         ON tasks (status, repository, priority DESC, created_at ASC);
+    `);
+    this.migrate();
+  }
+
+  /**
+   * `CREATE TABLE IF NOT EXISTS` leaves an existing database on the old shape,
+   * so run-detail columns are added in place and their history backfilled from
+   * the timestamps the row already carries.
+   */
+  private migrate() {
+    const columns = new Set(
+      (
+        this.database.prepare("PRAGMA table_info(tasks)").all() as unknown as {
+          name: string;
+        }[]
+      ).map((column) => column.name),
+    );
+
+    const additions: [string, string][] = [
+      ["session_id", "TEXT"],
+      ["model", "TEXT"],
+      ["effort", "TEXT"],
+      ["used_tokens", "INTEGER"],
+      ["status_history", "TEXT NOT NULL DEFAULT '[]'"],
+    ];
+    for (const [name, definition] of additions) {
+      if (!columns.has(name)) {
+        this.database.exec(`ALTER TABLE tasks ADD COLUMN ${name} ${definition}`);
+      }
+    }
+
+    this.database.exec(`
+      UPDATE tasks
+      SET status_history = CASE
+        WHEN status = 'todo'
+          THEN json_array(json_object('status', status, 'at', created_at))
+        ELSE json_array(
+          json_object('status', 'todo', 'at', created_at),
+          json_object('status', status, 'at', COALESCE(claimed_at, updated_at))
+        )
+      END
+      WHERE status_history IS NULL OR status_history = '[]'
     `);
   }
 
@@ -106,8 +196,11 @@ export class TaskStore {
       .prepare(`
         INSERT INTO tasks (
           id, title, description, repository, status, priority,
-          created_at, updated_at
-        ) VALUES (?, ?, ?, ?, 'todo', ?, ?, ?)
+          status_history, created_at, updated_at
+        ) VALUES (
+          ?, ?, ?, ?, 'todo', ?,
+          json_array(json_object('status', 'todo', 'at', ?)), ?, ?
+        )
       `)
       .run(
         id,
@@ -115,6 +208,7 @@ export class TaskStore {
         input.description?.trim() ?? "",
         input.repository.trim(),
         input.priority ?? 0,
+        timestamp,
         timestamp,
         timestamp,
       );
@@ -163,6 +257,10 @@ export class TaskStore {
             claimed_by = CASE WHEN ? THEN NULL ELSE claimed_by END,
             claimed_at = CASE WHEN ? THEN NULL ELSE claimed_at END,
             lease_until = CASE WHEN ? THEN NULL ELSE lease_until END,
+            status_history = CASE
+              WHEN status = ? THEN status_history
+              ELSE ${appendStatusSql}
+            END,
             updated_at = ?
         WHERE id = ?
       `)
@@ -171,6 +269,9 @@ export class TaskStore {
         clearClaim ? 1 : 0,
         clearClaim ? 1 : 0,
         clearLease ? 1 : 0,
+        status,
+        status,
+        now.toISOString(),
         now.toISOString(),
         id,
       );
@@ -234,12 +335,13 @@ export class TaskStore {
               claimed_at = NULL,
               lease_until = NULL,
               last_error = COALESCE(last_error, 'Agent lease expired.'),
+              status_history = ${appendStatusSql},
               updated_at = ?
           WHERE status = 'in-progress'
             AND lease_until IS NOT NULL
             AND lease_until <= ?
         `)
-        .run(nowIso, nowIso);
+        .run("todo", nowIso, nowIso, nowIso);
 
       const candidate = this.database
         .prepare(`
@@ -265,10 +367,19 @@ export class TaskStore {
               lease_until = ?,
               last_error = NULL,
               attempt_count = attempt_count + 1,
+              status_history = ${appendStatusSql},
               updated_at = ?
           WHERE id = ? AND status = 'todo'
         `)
-        .run(input.agentId.trim(), nowIso, leaseUntil, nowIso, candidate.id);
+        .run(
+          input.agentId.trim(),
+          nowIso,
+          leaseUntil,
+          "in-progress",
+          nowIso,
+          nowIso,
+          candidate.id,
+        );
       this.database.exec("COMMIT");
       return this.getTask(candidate.id);
     } catch (error) {
@@ -282,12 +393,13 @@ export class TaskStore {
     agentId: string,
     now = new Date(),
     leaseMs = 60_000,
+    metadata?: TaskRunMetadata,
   ): KanbanTask | null {
     const timestamp = now.toISOString();
     const result = this.database
       .prepare(`
         UPDATE tasks
-        SET lease_until = ?, updated_at = ?
+        SET lease_until = ?, ${runMetadataSql}, updated_at = ?
         WHERE id = ?
           AND status = 'in-progress'
           AND claimed_by = ?
@@ -295,6 +407,7 @@ export class TaskStore {
       `)
       .run(
         new Date(now.getTime() + leaseMs).toISOString(),
+        ...runMetadataValues(metadata),
         timestamp,
         id,
         agentId,
@@ -308,17 +421,32 @@ export class TaskStore {
     agentId: string,
     resultText: string,
     now = new Date(),
+    metadata?: TaskRunMetadata,
   ): KanbanTask | null {
     const result = this.database
       .prepare(`
         UPDATE tasks
-        SET status = 'review', result = ?, lease_until = NULL, updated_at = ?
+        SET status = 'review',
+            result = ?,
+            lease_until = NULL,
+            status_history = ${appendStatusSql},
+            ${runMetadataSql},
+            updated_at = ?
         WHERE id = ?
           AND status = 'in-progress'
           AND claimed_by = ?
           AND lease_until > ?
       `)
-      .run(resultText.trim(), now.toISOString(), id, agentId, now.toISOString());
+      .run(
+        resultText.trim(),
+        "review",
+        now.toISOString(),
+        ...runMetadataValues(metadata),
+        now.toISOString(),
+        id,
+        agentId,
+        now.toISOString(),
+      );
     return result.changes === 1 ? this.getTask(id) : null;
   }
 
@@ -327,17 +455,32 @@ export class TaskStore {
     agentId: string,
     errorText: string,
     now = new Date(),
+    metadata?: TaskRunMetadata,
   ): KanbanTask | null {
     const result = this.database
       .prepare(`
         UPDATE tasks
-        SET status = 'failed', last_error = ?, lease_until = NULL, updated_at = ?
+        SET status = 'failed',
+            last_error = ?,
+            lease_until = NULL,
+            status_history = ${appendStatusSql},
+            ${runMetadataSql},
+            updated_at = ?
         WHERE id = ?
           AND status = 'in-progress'
           AND claimed_by = ?
           AND lease_until > ?
       `)
-      .run(errorText.trim(), now.toISOString(), id, agentId, now.toISOString());
+      .run(
+        errorText.trim(),
+        "failed",
+        now.toISOString(),
+        ...runMetadataValues(metadata),
+        now.toISOString(),
+        id,
+        agentId,
+        now.toISOString(),
+      );
     return result.changes === 1 ? this.getTask(id) : null;
   }
 }

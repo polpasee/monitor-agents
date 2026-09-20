@@ -1,5 +1,6 @@
 import { agentAuthError } from "@/lib/agent-auth";
 import { readJsonObject, requiredString } from "@/lib/api-input";
+import { parseTaskRunMetadata } from "@/lib/kanban";
 import { getTaskStore } from "@/lib/task-store";
 
 export const dynamic = "force-dynamic";
@@ -15,9 +16,11 @@ export async function POST(
   const body = await readJsonObject(request);
   const agentId = requiredString(body?.agentId, 200);
   const leaseSeconds = body?.leaseSeconds ?? 60;
+  const metadata = body ? parseTaskRunMetadata(body) : null;
   if (
     !body ||
     !agentId ||
+    !metadata ||
     typeof leaseSeconds !== "number" ||
     !Number.isInteger(leaseSeconds) ||
     leaseSeconds < 15 ||
@@ -32,6 +35,7 @@ export async function POST(
     agentId,
     new Date(),
     leaseSeconds * 1_000,
+    metadata,
   );
   return task
     ? Response.json(task)

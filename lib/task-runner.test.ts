@@ -7,6 +7,7 @@ import {
   formatCompletionResult,
   maxResultLength,
   parseClaudeOutput,
+  parseClaudeRunMetadata,
   repositoryDirectoryName,
   stagePathspecs,
   taskBranchName,
@@ -26,6 +27,11 @@ const task: KanbanTask = {
   result: null,
   lastError: null,
   attemptCount: 0,
+  sessionId: null,
+  model: null,
+  effort: null,
+  usedTokens: null,
+  statusHistory: [],
   createdAt: "2026-08-05T00:00:00.000Z",
   updatedAt: "2026-08-05T00:00:00.000Z",
 };
@@ -127,4 +133,69 @@ test("truncate keeps results inside the API limit", () => {
   const shortened = truncate(long, maxResultLength);
   assert.equal(shortened.length, maxResultLength);
   assert.match(shortened, /…$/);
+});
+
+test("parseClaudeRunMetadata reads the session, model, effort, and tokens", () => {
+  const stdout = [
+    JSON.stringify({
+      type: "system",
+      subtype: "init",
+      session_id: "5c8f0c1e",
+      model: "claude-opus-5",
+    }),
+    "not json",
+    JSON.stringify({
+      type: "assistant",
+      requestId: "req-1",
+      effort: "high",
+      message: {
+        id: "msg-1",
+        model: "claude-opus-5",
+        usage: {
+          input_tokens: 100,
+          cache_creation_input_tokens: 50,
+          cache_read_input_tokens: 800,
+          output_tokens: 20,
+        },
+      },
+    }),
+    JSON.stringify({
+      type: "assistant",
+      requestId: "req-2",
+      message: {
+        id: "msg-2",
+        model: "<synthetic>",
+        usage: { input_tokens: 10, output_tokens: 5 },
+      },
+    }),
+  ].join("\n");
+
+  assert.deepEqual(parseClaudeRunMetadata(stdout), {
+    sessionId: "5c8f0c1e",
+    model: "claude-opus-5",
+    effort: "high",
+    usedTokens: 985,
+  });
+});
+
+test("parseClaudeRunMetadata counts a retried request once", () => {
+  const event = (outputTokens: number) =>
+    JSON.stringify({
+      type: "assistant",
+      requestId: "req-1",
+      message: {
+        id: "msg-1",
+        model: "claude-opus-5",
+        usage: { input_tokens: 100, output_tokens: outputTokens },
+      },
+    });
+
+  assert.equal(
+    parseClaudeRunMetadata([event(10), event(30)].join("\n")).usedTokens,
+    130,
+  );
+});
+
+test("parseClaudeRunMetadata reports nothing for an empty stream", () => {
+  assert.deepEqual(parseClaudeRunMetadata(""), {});
 });

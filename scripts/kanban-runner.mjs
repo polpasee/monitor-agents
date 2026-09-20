@@ -11,6 +11,7 @@ import {
   formatCompletionResult,
   formatFailure,
   parseClaudeOutput,
+  parseClaudeRunMetadata,
   repositoryDirectoryName,
   stagePathspecs,
   taskBranchName,
@@ -108,7 +109,7 @@ async function defaultBaseRef(directory) {
   }
 }
 
-async function runClaude(worktree, prompt, logPath) {
+async function runClaude(worktree, prompt, logPath, output) {
   return new Promise((resolvePromise) => {
     const child = spawn(
       config.claudeBin,
@@ -123,7 +124,6 @@ async function runClaude(worktree, prompt, logPath) {
       { cwd: worktree, stdio: ["ignore", "pipe", "pipe"] },
     );
 
-    let stdout = "";
     let stderr = "";
     const timeout = setTimeout(() => {
       child.kill("SIGTERM");
@@ -131,19 +131,19 @@ async function runClaude(worktree, prompt, logPath) {
     }, config.taskTimeoutSeconds * 1_000);
 
     child.stdout.on("data", (chunk) => {
-      stdout += chunk;
+      output.stdout += chunk;
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
     });
     child.on("error", (error) => {
       clearTimeout(timeout);
-      resolvePromise({ code: -1, stdout, stderr: `${stderr}\n${error.message}` });
+      resolvePromise({ code: -1, stdout: output.stdout, stderr: `${stderr}\n${error.message}` });
     });
     child.on("close", async (code) => {
       clearTimeout(timeout);
-      await writeFile(logPath, stdout, "utf8").catch(() => {});
-      resolvePromise({ code, stdout, stderr });
+      await writeFile(logPath, output.stdout, "utf8").catch(() => {});
+      resolvePromise({ code, stdout: output.stdout, stderr });
     });
   });
 }
@@ -191,10 +191,12 @@ async function runTask(task, directory) {
   const name = branch.replace("task/", "");
   const worktree = resolve(directory, ".claude/worktrees", name);
   const logPath = join(config.logDir, `${name}.jsonl`);
+  const output = { stdout: "" };
   const heartbeat = setInterval(() => {
     api(`/api/agent/tasks/${encodeURIComponent(task.id)}/heartbeat`, {
       agentId: config.agentId,
       leaseSeconds: config.leaseSeconds,
+      ...parseClaudeRunMetadata(output.stdout),
     }).catch((error) => log(`Heartbeat failed: ${error.message}`));
   }, Math.max(15, Math.floor(config.leaseSeconds / 2)) * 1_000);
 
@@ -203,8 +205,9 @@ async function runTask(task, directory) {
     await git(directory, ["worktree", "add", "-b", branch, worktree, base]);
     log(`Worktree ${worktree} on ${branch} from ${base}`);
 
-    const run = await runClaude(worktree, buildTaskPrompt(task), logPath);
+    const run = await runClaude(worktree, buildTaskPrompt(task), logPath, output);
     const { result, isError } = parseClaudeOutput(run.stdout);
+    const metadata = parseClaudeRunMetadata(run.stdout);
 
     if (run.code !== 0 || isError) {
       await api(`/api/agent/tasks/${encodeURIComponent(task.id)}/fail`, {
@@ -213,6 +216,7 @@ async function runTask(task, directory) {
           `claude exited with code ${run.code}. Worktree kept at ${worktree}.`,
           `${result}\n${truncate(run.stderr, 1_000)}`,
         ),
+        ...metadata,
       });
       log(`Task ${task.id} failed; worktree kept for inspection.`);
       return;
@@ -227,6 +231,7 @@ async function runTask(task, directory) {
         pullRequestUrl: published.pullRequestUrl,
         changedFiles: published.changedFiles,
       }),
+      ...metadata,
     });
     log(`Task ${task.id} moved to review${published.pullRequestUrl ? ` (${published.pullRequestUrl})` : ""}`);
 

@@ -10,6 +10,11 @@ export const kanbanStatuses = [
 
 export type KanbanStatus = (typeof kanbanStatuses)[number]["id"];
 
+export interface KanbanStatusEvent {
+  status: KanbanStatus;
+  at: string;
+}
+
 export interface KanbanTask {
   id: string;
   title: string;
@@ -23,8 +28,21 @@ export interface KanbanTask {
   result: string | null;
   lastError: string | null;
   attemptCount: number;
+  sessionId: string | null;
+  model: string | null;
+  effort: string | null;
+  usedTokens: number | null;
+  statusHistory: KanbanStatusEvent[];
   createdAt: string;
   updatedAt: string;
+}
+
+/** Run details an agent reports while it works on a task. */
+export interface TaskRunMetadata {
+  sessionId?: string;
+  model?: string;
+  effort?: string;
+  usedTokens?: number;
 }
 
 export type KanbanTaskPatch =
@@ -68,6 +86,86 @@ export function parseKanbanTaskPatch(
   return title && repository && description !== null
     ? { title, repository, description }
     : null;
+}
+
+/**
+ * `statusHistory` records the moment each status started, so the time spent in
+ * a status is the gap to the next entry. A task can re-enter a status (an
+ * expired lease sends `in-progress` back to `todo`), so the gaps are summed.
+ */
+export function kanbanStatusDurations(
+  task: KanbanTask,
+  now = new Date(),
+): { status: KanbanStatus; milliseconds: number }[] {
+  const totals = new Map<KanbanStatus, number>();
+
+  task.statusHistory.forEach((event, index) => {
+    const start = Date.parse(event.at);
+    const nextAt = task.statusHistory[index + 1]?.at;
+    const end = nextAt ? Date.parse(nextAt) : now.getTime();
+    if (Number.isNaN(start) || Number.isNaN(end)) return;
+    totals.set(
+      event.status,
+      (totals.get(event.status) ?? 0) + Math.max(0, end - start),
+    );
+  });
+
+  return kanbanStatuses
+    .filter((status) => totals.has(status.id))
+    .map((status) => ({
+      status: status.id,
+      milliseconds: totals.get(status.id) ?? 0,
+    }));
+}
+
+export function formatDuration(milliseconds: number): string {
+  const seconds = Math.floor(milliseconds / 1_000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  const hours = Math.floor(minutes / 60);
+  return hours < 24
+    ? `${hours}h ${minutes % 60}m`
+    : `${Math.floor(hours / 24)}d ${hours % 24}h`;
+}
+
+export function formatTokenCount(tokens: number): string {
+  if (tokens < 1_000) return `${tokens}`;
+  if (tokens < 1_000_000) return `${(tokens / 1_000).toFixed(1)}k`;
+  return `${(tokens / 1_000_000).toFixed(2)}M`;
+}
+
+/**
+ * Run details are optional everywhere: an agent reports what it knows, and a
+ * missing key leaves the stored value untouched. `null` rejects the request so
+ * a malformed report is never silently dropped.
+ */
+export function parseTaskRunMetadata(
+  body: Record<string, unknown>,
+): TaskRunMetadata | null {
+  const metadata: TaskRunMetadata = {};
+
+  for (const key of ["sessionId", "model", "effort"] as const) {
+    if (body[key] === undefined) continue;
+    const value = requiredString(body[key], 200);
+    if (!value) return null;
+    metadata[key] = value;
+  }
+
+  if (body.usedTokens !== undefined) {
+    const tokens = body.usedTokens;
+    if (
+      typeof tokens !== "number" ||
+      !Number.isInteger(tokens) ||
+      tokens < 0 ||
+      tokens > 1_000_000_000_000
+    ) {
+      return null;
+    }
+    metadata.usedTokens = tokens;
+  }
+
+  return metadata;
 }
 
 export function kanbanRepositories(tasks: readonly KanbanTask[]): string[] {

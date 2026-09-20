@@ -7,8 +7,11 @@ import {
   type RepositoryList,
 } from "@/lib/repository-list";
 import {
+  formatDuration,
+  formatTokenCount,
   isKanbanTaskEditable,
   kanbanRepositories,
+  kanbanStatusDurations,
   kanbanStatuses,
   type KanbanStatus,
   type KanbanTask,
@@ -56,6 +59,9 @@ export function KanbanBoard() {
     : false;
   const isTaskDialogReadOnly = Boolean(
     editingTaskId && !isSelectedTaskEditable,
+  );
+  const statusLabels = new Map(
+    kanbanStatuses.map((status) => [status.id, status.label]),
   );
 
   useEffect(() => {
@@ -520,6 +526,48 @@ export function KanbanBoard() {
               }
             />
           </label>
+          {selectedTask && (
+            <section className="kanban-run-details">
+              <h4>Run details</h4>
+              <dl>
+                <div>
+                  <dt>Session ID</dt>
+                  <dd>{selectedTask.sessionId ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt>Model</dt>
+                  <dd>{selectedTask.model ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt>Effort / think</dt>
+                  <dd>{selectedTask.effort ?? "—"}</dd>
+                </div>
+                <div>
+                  <dt>Used tokens</dt>
+                  <dd>
+                    {selectedTask.usedTokens === null
+                      ? "—"
+                      : selectedTask.usedTokens.toLocaleString()}
+                  </dd>
+                </div>
+              </dl>
+              <h4>Time in each state</h4>
+              {kanbanStatusDurations(selectedTask).length === 0 ? (
+                <p className="kanban-run-details__empty">
+                  No state changes recorded yet.
+                </p>
+              ) : (
+                <dl>
+                  {kanbanStatusDurations(selectedTask).map((entry) => (
+                    <div key={entry.status}>
+                      <dt>{statusLabels.get(entry.status)}</dt>
+                      <dd>{formatDuration(entry.milliseconds)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              )}
+            </section>
+          )}
           {editError && (
             <p className="kanban-task-dialog__error" role="alert">
               {editError}
@@ -611,7 +659,19 @@ export function KanbanBoard() {
                         <span className="kanban-card__repository">
                           {task.repository}
                         </span>
-                        <span className="kanban-card__title">{task.title}</span>
+                        <span className="kanban-card__title-row">
+                          <span className="kanban-card__title">
+                            {task.title}
+                          </span>
+                          {task.usedTokens !== null && (
+                            <span
+                              className="kanban-card__tokens"
+                              title={`${task.usedTokens.toLocaleString()} tokens used`}
+                            >
+                              {formatTokenCount(task.usedTokens)}
+                            </span>
+                          )}
+                        </span>
                       </button>
                     </article>
                   );
