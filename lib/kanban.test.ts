@@ -31,6 +31,7 @@ const tasks: KanbanTask[] = [
     lastError: null,
     attemptCount: 0,
     sessionId: null,
+    agentRunId: null,
     model: null,
     effort: null,
     usedTokens: null,
@@ -52,6 +53,7 @@ const tasks: KanbanTask[] = [
     lastError: null,
     attemptCount: 0,
     sessionId: null,
+    agentRunId: null,
     model: null,
     effort: null,
     usedTokens: null,
@@ -156,6 +158,7 @@ const task: KanbanTask = {
   lastError: null,
   attemptCount: 1,
   sessionId: "session-1",
+  agentRunId: null,
   model: "claude-opus-5",
   effort: "high",
   usedTokens: 12_345,
@@ -316,14 +319,14 @@ test("findTaskAgent picks the orchestrator that was handed the task", () => {
   // One session works several tasks at once, so each title finds its own run.
   assert.equal(
     findTaskAgent(
-      { sessionId: "session-1", title: "`knowledge_base` : multi select" },
+      { id: "task-1", agentRunId: null, sessionId: "session-1", title: "`knowledge_base` : multi select" },
       agents,
     )?.id,
     "claude:session-1:a1",
   );
   assert.equal(
     findTaskAgent(
-      { sessionId: "session-1", title: "`topology` : group the results" },
+      { id: "task-1", agentRunId: null, sessionId: "session-1", title: "`topology` : group the results" },
       agents,
     )?.id,
     "claude:session-1:a2",
@@ -344,10 +347,70 @@ test("findTaskAgent prefers a live orchestrator over an abandoned one", () => {
 
   assert.equal(
     findTaskAgent(
-      { sessionId: "session-1", title: "`knowledge_base` : multi select" },
+      { id: "task-1", agentRunId: null, sessionId: "session-1", title: "`knowledge_base` : multi select" },
       [root, abandoned, retried],
     )?.id,
     "claude:session-1:a2",
+  );
+});
+
+test("findTaskAgent takes a reported run over anything it could infer", () => {
+  const root = agent("claude:session-1", null);
+  const guessed = agent("claude:session-1:a1", root.id, {
+    task: implementerPrompt("know"),
+  });
+  // A reported run is exact, so it wins even from another session's tree.
+  const reported = agent("claude:session-9:a7", "claude:session-9");
+
+  assert.equal(
+    findTaskAgent(
+      {
+        id: "task-1",
+        agentRunId: "claude:session-9:a7",
+        sessionId: "session-1",
+        title: "`knowledge_base` : multi select",
+      },
+      [root, guessed, reported],
+    ),
+    reported,
+  );
+
+  // A run that is no longer in the snapshot leaves the inference to work.
+  assert.equal(
+    findTaskAgent(
+      {
+        id: "task-1",
+        agentRunId: "claude:session-9:gone",
+        sessionId: "session-1",
+        title: "`knowledge_base` : multi select",
+      },
+      [root, guessed],
+    ),
+    guessed,
+  );
+});
+
+test("findTaskAgent trusts a task id in the prompt over the title", () => {
+  const root = agent("claude:session-1", null);
+  const named = agent("claude:session-1:a1", root.id, {
+    task: "Kanban task 3f6a1c2e-9b44-4d1e-8f0a-77c2b1d5e900. Do the work.",
+  });
+  const lookalike = agent("claude:session-1:a2", root.id, {
+    task: implementerPrompt("know"),
+  });
+
+  assert.equal(
+    findTaskAgent(
+      {
+        id: "3f6a1c2e-9b44-4d1e-8f0a-77c2b1d5e900",
+        agentRunId: null,
+        sessionId: "session-1",
+        title: "`knowledge_base` : multi select",
+      },
+      [root, lookalike, named],
+    )?.id,
+    // Both candidates are running, so only the id breaks the tie.
+    "claude:session-1:a1",
   );
 });
 
@@ -363,17 +426,17 @@ test("findTaskAgent falls back to the session's own run", () => {
   // A task no orchestrator claims, and a nested worker, both leave the session.
   assert.equal(
     findTaskAgent(
-      { sessionId: "session-1", title: "`knowledge_base` : multi select" },
+      { id: "task-1", agentRunId: null, sessionId: "session-1", title: "`knowledge_base` : multi select" },
       [root, other, grandchild],
     ),
     root,
   );
   assert.equal(
-    findTaskAgent({ sessionId: "session-2", title: "anything" }, [root]),
+    findTaskAgent({ id: "task-1", agentRunId: null, sessionId: "session-2", title: "anything" }, [root]),
     null,
   );
   assert.equal(
-    findTaskAgent({ sessionId: null, title: "anything" }, [root]),
+    findTaskAgent({ id: "task-1", agentRunId: null, sessionId: null, title: "anything" }, [root]),
     null,
   );
 });

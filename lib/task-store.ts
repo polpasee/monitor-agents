@@ -24,6 +24,7 @@ interface TaskRow {
   last_error: string | null;
   attempt_count: number;
   session_id: string | null;
+  agent_run_id: string | null;
   model: string | null;
   effort: string | null;
   used_tokens: number | null;
@@ -76,6 +77,7 @@ function taskFromRow(row: TaskRow): KanbanTask {
     lastError: row.last_error,
     attemptCount: row.attempt_count,
     sessionId: row.session_id,
+    agentRunId: row.agent_run_id,
     model: row.model,
     effort: row.effort,
     usedTokens: row.used_tokens,
@@ -95,6 +97,7 @@ const appendStatusSql =
  */
 const runMetadataSql = `
   session_id = COALESCE(?, session_id),
+  agent_run_id = COALESCE(?, agent_run_id),
   model = COALESCE(?, model),
   effort = COALESCE(?, effort),
   used_tokens = CASE
@@ -112,6 +115,7 @@ function runMetadataValues(metadata: TaskRunMetadata | undefined) {
   const usedTokens = metadata?.usedTokens ?? null;
   return [
     metadata?.sessionId ?? null,
+    metadata?.agentRunId ?? null,
     metadata?.model ?? null,
     metadata?.effort ?? null,
     usedTokens,
@@ -145,6 +149,7 @@ export class TaskStore {
         last_error TEXT,
         attempt_count INTEGER NOT NULL DEFAULT 0,
         session_id TEXT,
+        agent_run_id TEXT,
         model TEXT,
         effort TEXT,
         used_tokens INTEGER,
@@ -176,6 +181,7 @@ export class TaskStore {
 
     const additions: [string, string][] = [
       ["session_id", "TEXT"],
+      ["agent_run_id", "TEXT"],
       ["model", "TEXT"],
       ["effort", "TEXT"],
       ["used_tokens", "INTEGER"],

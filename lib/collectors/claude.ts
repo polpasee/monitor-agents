@@ -26,7 +26,8 @@ import type { CollectorResult } from "./types";
 const MAX_ROOTS = 8;
 const MAX_SUBAGENTS = 48;
 const MAX_QUOTA_AGE_MS = 15 * 60 * 1_000;
-const MAX_TASK_LENGTH = 160;
+// Long enough to keep what a spawn prompt says about the task it was given.
+const MAX_TASK_LENGTH = 400;
 const MAX_NAME_LENGTH = 32;
 const SCAN_CONCURRENCY = 8;
 const DEAD_SESSION_GRACE_MS = 2 * 60 * 1_000;

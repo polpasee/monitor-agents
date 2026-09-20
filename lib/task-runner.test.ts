@@ -28,6 +28,7 @@ const task: KanbanTask = {
   lastError: null,
   attemptCount: 0,
   sessionId: null,
+  agentRunId: null,
   model: null,
   effort: null,
   usedTokens: null,
@@ -176,6 +177,8 @@ test("parseClaudeRunMetadata reads the session, model, and tokens mid-run", () =
     sessionId: "5c8f0c1e",
     model: "claude-opus-5",
     usedTokens: 985,
+    // The run the board should open on, named the way the topology names it.
+    agentRunId: "claude:5c8f0c1e",
   });
 });
 

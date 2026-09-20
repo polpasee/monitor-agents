@@ -97,6 +97,7 @@ export function parseClaudeOutput(stdout: string): {
 /** The stream reports no effort level; the runner reads that separately. */
 export interface ClaudeRunMetadata {
   sessionId?: string;
+  agentRunId?: string;
   model?: string;
   usedTokens?: number;
 }
@@ -215,6 +216,12 @@ export function parseClaudeRunMetadata(stdout: string): ClaudeRunMetadata {
       (total, tokens) => total + tokens,
       0,
     );
+  }
+
+  // The runner gives the task a session of its own, which the topology names
+  // `claude:<sessionId>`, so the board needs no guess about which run it is.
+  if (metadata.sessionId) {
+    metadata.agentRunId = `claude:${metadata.sessionId}`;
   }
 
   return metadata;
