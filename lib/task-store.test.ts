@@ -484,6 +484,104 @@ test("TaskStore upgrades a database written before run details existed", async (
   }
 });
 
+test("TaskStore adds a retry's tokens to what earlier attempts spent", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-retry-"));
+  const store = new TaskStore(join(directory, "tasks.sqlite"));
+
+  try {
+    const task = store.createTask({
+      title: "Fails once, then succeeds",
+      repository: "monitor-agents",
+    });
+
+    store.claimTask({
+      agentId: "agent-1",
+      repositories: ["monitor-agents"],
+      now: new Date("2026-08-04T00:00:00.000Z"),
+      leaseMs: 600_000,
+    });
+    assert.equal(
+      store.heartbeatTask(
+        task.id,
+        "agent-1",
+        new Date("2026-08-04T00:01:00.000Z"),
+        600_000,
+        { usedTokens: 30_000 },
+      )?.usedTokens,
+      30_000,
+    );
+
+    // Sending the task back to Todo banks what the first attempt spent.
+    store.updateTaskStatus(task.id, "todo", new Date("2026-08-04T00:02:00.000Z"));
+    assert.equal(store.getTask(task.id)?.usedTokens, null);
+
+    store.claimTask({
+      agentId: "agent-2",
+      repositories: ["monitor-agents"],
+      now: new Date("2026-08-04T00:03:00.000Z"),
+      leaseMs: 600_000,
+    });
+    const completed = store.completeTask(
+      task.id,
+      "agent-2",
+      "Done",
+      new Date("2026-08-04T00:05:00.000Z"),
+      { usedTokens: 12_000 },
+    );
+
+    assert.equal(completed?.usedTokens, 42_000);
+    assert.equal(completed?.attemptCount, 2);
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("TaskStore banks an expired attempt's tokens before the next one", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-expired-tokens-"));
+  const store = new TaskStore(join(directory, "tasks.sqlite"));
+
+  try {
+    const task = store.createTask({
+      title: "Lease expires mid-run",
+      repository: "monitor-agents",
+    });
+    store.claimTask({
+      agentId: "agent-1",
+      repositories: ["monitor-agents"],
+      now: new Date("2026-08-04T00:00:00.000Z"),
+      leaseMs: 1_000,
+    });
+    store.heartbeatTask(
+      task.id,
+      "agent-1",
+      new Date("2026-08-04T00:00:00.500Z"),
+      1_000,
+      { usedTokens: 5_000 },
+    );
+
+    store.claimTask({
+      agentId: "agent-2",
+      repositories: ["monitor-agents"],
+      now: new Date("2026-08-04T00:01:00.000Z"),
+      leaseMs: 600_000,
+    });
+    assert.equal(
+      store.heartbeatTask(
+        task.id,
+        "agent-2",
+        new Date("2026-08-04T00:02:00.000Z"),
+        600_000,
+        { usedTokens: 1_500 },
+      )?.usedTokens,
+      6_500,
+    );
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("TaskStore reopens an already migrated database without losing history", async () => {
   const directory = await mkdtemp(join(tmpdir(), "monitor-task-reopen-"));
   const path = join(directory, "tasks.sqlite");

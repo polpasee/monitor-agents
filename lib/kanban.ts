@@ -88,10 +88,17 @@ export function parseKanbanTaskPatch(
     : null;
 }
 
+/** Statuses where the work has stopped, so nothing is still being spent. */
+const terminalStatuses = new Set<KanbanStatus>(["done", "failed"]);
+
 /**
  * `statusHistory` records the moment each status started, so the time spent in
  * a status is the gap to the next entry. A task can re-enter a status (an
  * expired lease sends `in-progress` back to `todo`), so the gaps are summed.
+ *
+ * The status a task currently sits in is still running, so its gap ends now —
+ * unless the task has finished, where a clock that kept counting would read as
+ * work still being done.
  */
 export function kanbanStatusDurations(
   task: KanbanTask,
@@ -104,6 +111,7 @@ export function kanbanStatusDurations(
   history.forEach((event, index) => {
     const start = Date.parse(event.at);
     const nextAt = history[index + 1]?.at;
+    if (!nextAt && terminalStatuses.has(event.status)) return;
     const end = nextAt ? Date.parse(nextAt) : now.getTime();
     if (Number.isNaN(start) || Number.isNaN(end)) return;
     totals.set(

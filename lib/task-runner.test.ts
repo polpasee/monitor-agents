@@ -223,6 +223,47 @@ test("parseClaudeRunMetadata prefers the final result event's usage", () => {
   assert.equal(parseClaudeRunMetadata(stdout).usedTokens, 2_590);
 });
 
+test("parseClaudeRunMetadata totals every model the run billed", () => {
+  // `usage` covers one turn; `modelUsage` is the running total for the whole
+  // session, so a run that spawned a subagent is only complete in the latter.
+  const stdout = [
+    JSON.stringify({
+      type: "result",
+      result_index: 0,
+      usage: { input_tokens: 100, output_tokens: 20 },
+      modelUsage: {
+        "claude-opus-5": {
+          inputTokens: 100,
+          outputTokens: 20,
+          cacheReadInputTokens: 900,
+          cacheCreationInputTokens: 80,
+        },
+      },
+    }),
+    JSON.stringify({
+      type: "result",
+      result_index: 1,
+      usage: { input_tokens: 10, output_tokens: 5 },
+      modelUsage: {
+        "claude-opus-5": {
+          inputTokens: 100,
+          outputTokens: 20,
+          cacheReadInputTokens: 900,
+          cacheCreationInputTokens: 80,
+        },
+        "claude-haiku-4-5-20251001": {
+          inputTokens: 40,
+          outputTokens: 60,
+          cacheReadInputTokens: 500,
+          cacheCreationInputTokens: 0,
+        },
+      },
+    }),
+  ].join("\n");
+
+  assert.equal(parseClaudeRunMetadata(stdout).usedTokens, 1_700);
+});
+
 test("parseClaudeRunMetadata reports nothing for an empty stream", () => {
   assert.deepEqual(parseClaudeRunMetadata(""), {});
 });

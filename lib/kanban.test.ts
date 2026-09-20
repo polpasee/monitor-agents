@@ -179,6 +179,39 @@ test("kanbanStatusDurations sums every visit to a status", () => {
   );
 });
 
+test("kanbanStatusDurations stops the clock once a task has finished", () => {
+  const finished: KanbanTask = {
+    ...task,
+    status: "done",
+    statusHistory: [
+      { status: "todo", at: "2026-08-04T00:00:00.000Z" },
+      { status: "in-progress", at: "2026-08-04T00:01:00.000Z" },
+      { status: "done", at: "2026-08-04T00:04:00.000Z" },
+    ],
+  };
+
+  // Viewed weeks later, the finished status must not report the wait as work.
+  assert.deepEqual(
+    kanbanStatusDurations(finished, new Date("2026-09-20T00:00:00.000Z")),
+    [
+      { status: "todo", milliseconds: 60_000 },
+      { status: "in-progress", milliseconds: 180_000 },
+    ],
+  );
+
+  // A status the task is still sitting in keeps counting.
+  assert.deepEqual(
+    kanbanStatusDurations(
+      { ...finished, statusHistory: finished.statusHistory.slice(0, 2) },
+      new Date("2026-08-04T00:06:00.000Z"),
+    ),
+    [
+      { status: "todo", milliseconds: 60_000 },
+      { status: "in-progress", milliseconds: 300_000 },
+    ],
+  );
+});
+
 test("kanbanStatusDurations reports nothing without history", () => {
   assert.deepEqual(kanbanStatusDurations({ ...task, statusHistory: [] }), []);
   // An older server never sent the field at all.

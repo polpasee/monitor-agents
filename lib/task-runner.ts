@@ -105,17 +105,39 @@ function stringField(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
-function usageTokens(usage: Record<string, unknown>): number {
-  return [
-    "input_tokens",
-    "cache_creation_input_tokens",
-    "cache_read_input_tokens",
-    "output_tokens",
-  ].reduce(
+function sumTokens(usage: Record<string, unknown>, keys: string[]): number {
+  return keys.reduce(
     (total, key) =>
       total + (typeof usage[key] === "number" ? (usage[key] as number) : 0),
     0,
   );
+}
+
+function usageTokens(usage: Record<string, unknown>): number {
+  return sumTokens(usage, [
+    "input_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+    "output_tokens",
+  ]);
+}
+
+/**
+ * A `result` event's `usage` covers only that turn, while `modelUsage` is the
+ * running total for the whole session, subagents included.
+ */
+function modelUsageTokens(modelUsage: Record<string, unknown>): number {
+  return Object.values(modelUsage).reduce((total: number, entry) => {
+    return typeof entry === "object" && entry !== null
+      ? total +
+          sumTokens(entry as Record<string, unknown>, [
+            "inputTokens",
+            "outputTokens",
+            "cacheReadInputTokens",
+            "cacheCreationInputTokens",
+          ])
+      : total;
+  }, 0);
 }
 
 /**
@@ -124,9 +146,9 @@ function usageTokens(usage: Record<string, unknown>): number {
  * request. Retried requests repeat the same id, so usage is kept per request
  * instead of summed blindly.
  *
- * The closing `result` event reports the whole run, including the subagents
- * whose own turns never reach this stream, so it wins once it arrives. Until
- * then the per-request sum is what a heartbeat can report.
+ * A closing `result` event carries `modelUsage`, the running total for the
+ * whole session across every model and subagent, so it wins once it arrives.
+ * Until then the per-request sum is what a heartbeat can report.
  */
 export function parseClaudeRunMetadata(stdout: string): ClaudeRunMetadata {
   const metadata: ClaudeRunMetadata = {};
@@ -150,9 +172,14 @@ export function parseClaudeRunMetadata(stdout: string): ClaudeRunMetadata {
     metadata.model = stringField(value.model) ?? metadata.model;
 
     if (value.type === "result") {
+      const modelUsage = value.modelUsage as Record<string, unknown> | undefined;
       const usage = value.usage as Record<string, unknown> | undefined;
-      if (typeof usage === "object" && usage !== null) {
-        resultTokens = usageTokens(usage);
+      if (typeof modelUsage === "object" && modelUsage !== null) {
+        resultTokens = modelUsageTokens(modelUsage);
+      } else if (typeof usage === "object" && usage !== null) {
+        // A run can close with several result events, each reporting its own
+        // turn, so the per-turn numbers are summed rather than overwritten.
+        resultTokens = (resultTokens ?? 0) + usageTokens(usage);
       }
       continue;
     }

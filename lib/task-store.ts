@@ -88,19 +88,34 @@ function taskFromRow(row: TaskRow): KanbanTask {
 const appendStatusSql =
   "json_insert(status_history, '$[#]', json_object('status', ?, 'at', ?))";
 
+/**
+ * An agent reports the tokens of the run it is executing, which starts from
+ * zero on a retry. Earlier attempts are banked in `carried_tokens` when the
+ * task returns to Todo, so the stored total covers every attempt.
+ */
 const runMetadataSql = `
   session_id = COALESCE(?, session_id),
   model = COALESCE(?, model),
   effort = COALESCE(?, effort),
-  used_tokens = COALESCE(?, used_tokens)
+  used_tokens = CASE
+    WHEN ? IS NULL THEN used_tokens ELSE carried_tokens + ?
+  END
+`;
+
+/** Banks the current total before an attempt that starts counting again. */
+const carryTokensSql = `
+  carried_tokens = COALESCE(used_tokens, carried_tokens),
+  used_tokens = NULL
 `;
 
 function runMetadataValues(metadata: TaskRunMetadata | undefined) {
+  const usedTokens = metadata?.usedTokens ?? null;
   return [
     metadata?.sessionId ?? null,
     metadata?.model ?? null,
     metadata?.effort ?? null,
-    metadata?.usedTokens ?? null,
+    usedTokens,
+    usedTokens,
   ] as const;
 }
 
@@ -133,6 +148,7 @@ export class TaskStore {
         model TEXT,
         effort TEXT,
         used_tokens INTEGER,
+        carried_tokens INTEGER NOT NULL DEFAULT 0,
         status_history TEXT NOT NULL DEFAULT '[]',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
@@ -163,6 +179,7 @@ export class TaskStore {
       ["model", "TEXT"],
       ["effort", "TEXT"],
       ["used_tokens", "INTEGER"],
+      ["carried_tokens", "INTEGER NOT NULL DEFAULT 0"],
       ["status_history", "TEXT NOT NULL DEFAULT '[]'"],
     ];
     for (const [name, definition] of additions) {
@@ -270,6 +287,10 @@ export class TaskStore {
             claimed_by = CASE WHEN ? THEN NULL ELSE claimed_by END,
             claimed_at = CASE WHEN ? THEN NULL ELSE claimed_at END,
             lease_until = CASE WHEN ? THEN NULL ELSE lease_until END,
+            carried_tokens = CASE
+              WHEN ? THEN COALESCE(used_tokens, carried_tokens) ELSE carried_tokens
+            END,
+            used_tokens = CASE WHEN ? THEN NULL ELSE used_tokens END,
             status_history = CASE
               WHEN status = ? THEN status_history
               ELSE ${appendStatusSql}
@@ -282,6 +303,8 @@ export class TaskStore {
         clearClaim ? 1 : 0,
         clearClaim ? 1 : 0,
         clearLease ? 1 : 0,
+        clearClaim ? 1 : 0,
+        clearClaim ? 1 : 0,
         status,
         status,
         now.toISOString(),
@@ -348,6 +371,7 @@ export class TaskStore {
               claimed_at = NULL,
               lease_until = NULL,
               last_error = COALESCE(last_error, 'Agent lease expired.'),
+              ${carryTokensSql},
               status_history = ${appendStatusSql},
               updated_at = ?
           WHERE status = 'in-progress'
