@@ -613,9 +613,16 @@ button:focus-visible,
   overflow: visible;
 }
 
+/* The narrow-viewport rules split the sidebar body into columns, which the
+   dialog's own column is too narrow to carry. */
 .kanban-task-dialog--with-agent .agent-inspector__body {
+  display: block;
   max-height: none;
   overflow: visible;
+}
+
+.kanban-task-dialog--with-agent .inspector-section {
+  border-right: 0;
 }
 
 .kanban-task-dialog__main {
