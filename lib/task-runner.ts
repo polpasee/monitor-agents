@@ -94,6 +94,132 @@ export function parseClaudeOutput(stdout: string): {
   return { result: result || truncate(stdout, 2_000), isError };
 }
 
+/** The stream reports no effort level; the runner reads that separately. */
+export interface ClaudeRunMetadata {
+  sessionId?: string;
+  model?: string;
+  usedTokens?: number;
+}
+
+function stringField(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function sumTokens(usage: Record<string, unknown>, keys: string[]): number {
+  return keys.reduce(
+    (total, key) =>
+      total + (typeof usage[key] === "number" ? (usage[key] as number) : 0),
+    0,
+  );
+}
+
+function usageTokens(usage: Record<string, unknown>): number {
+  return sumTokens(usage, [
+    "input_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+    "output_tokens",
+  ]);
+}
+
+/**
+ * A `result` event's `usage` covers only that turn, while `modelUsage` is the
+ * running total for the whole session, subagents included.
+ */
+function modelUsageTokens(modelUsage: Record<string, unknown>): number {
+  return Object.values(modelUsage).reduce((total: number, entry) => {
+    return typeof entry === "object" && entry !== null
+      ? total +
+          sumTokens(entry as Record<string, unknown>, [
+            "inputTokens",
+            "outputTokens",
+            "cacheReadInputTokens",
+            "cacheCreationInputTokens",
+          ])
+      : total;
+  }, 0);
+}
+
+/**
+ * The stream carries the run details the board shows: `system` announces the
+ * session and model, and every `assistant` event carries the usage of one API
+ * request. Retried requests repeat the same id, so usage is kept per request
+ * instead of summed blindly.
+ *
+ * A closing `result` event carries `modelUsage`, the running total for the
+ * whole session across every model and subagent, so it wins once it arrives.
+ * Until then the per-request sum is what a heartbeat can report.
+ */
+export function parseClaudeRunMetadata(stdout: string): ClaudeRunMetadata {
+  const metadata: ClaudeRunMetadata = {};
+  const requests = new Map<string, number>();
+  let resultTokens: number | undefined;
+  let anonymousRequest = 0;
+
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    let event: unknown;
+    try {
+      event = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (typeof event !== "object" || event === null) continue;
+    const value = event as Record<string, unknown>;
+
+    metadata.sessionId = stringField(value.session_id) ?? metadata.sessionId;
+    metadata.model = stringField(value.model) ?? metadata.model;
+
+    if (value.type === "result") {
+      const modelUsage = value.modelUsage as Record<string, unknown> | undefined;
+      const usage = value.usage as Record<string, unknown> | undefined;
+      if (typeof modelUsage === "object" && modelUsage !== null) {
+        resultTokens = modelUsageTokens(modelUsage);
+      } else if (typeof usage === "object" && usage !== null) {
+        // Without `modelUsage` there is only the per-turn number, and a run can
+        // close with several result events, so those are summed.
+        resultTokens = (resultTokens ?? 0) + usageTokens(usage);
+      }
+      continue;
+    }
+
+    if (value.type !== "assistant") continue;
+    const message = value.message as Record<string, unknown> | undefined;
+    if (typeof message !== "object" || message === null) continue;
+
+    // A subagent's turns carry their own model, which is not the model the
+    // task itself ran on, so only the main agent's turns name the model.
+    const messageModel = stringField(message.model);
+    if (
+      messageModel &&
+      messageModel !== "<synthetic>" &&
+      !value.parent_tool_use_id
+    ) {
+      metadata.model = messageModel;
+    }
+
+    const usage = message.usage as Record<string, unknown> | undefined;
+    if (typeof usage !== "object" || usage === null) continue;
+    const requestKey =
+      stringField(value.request_id) ??
+      stringField(message.id) ??
+      `anonymous-${anonymousRequest++}`;
+    requests.set(requestKey, usageTokens(usage));
+  }
+
+  if (resultTokens !== undefined) {
+    metadata.usedTokens = resultTokens;
+  } else if (requests.size > 0) {
+    metadata.usedTokens = [...requests.values()].reduce(
+      (total, tokens) => total + tokens,
+      0,
+    );
+  }
+
+  return metadata;
+}
+
 /**
  * Agent tooling (MCP servers, editor caches) writes into the checkout while a
  * task runs. Those paths must never reach the pull request, so staging uses an

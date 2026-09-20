@@ -1,5 +1,6 @@
 import { agentAuthError } from "@/lib/agent-auth";
 import { readJsonObject, requiredString } from "@/lib/api-input";
+import { parseTaskRunMetadata } from "@/lib/kanban";
 import { getTaskStore } from "@/lib/task-store";
 
 export const dynamic = "force-dynamic";
@@ -15,12 +16,13 @@ export async function POST(
   const body = await readJsonObject(request);
   const agentId = requiredString(body?.agentId, 200);
   const result = requiredString(body?.result, 10_000);
-  if (!body || !agentId || !result) {
+  const metadata = body ? parseTaskRunMetadata(body) : null;
+  if (!body || !agentId || !result || !metadata) {
     return Response.json({ error: "Invalid completion input." }, { status: 400 });
   }
 
   const { id } = await context.params;
-  const task = getTaskStore().completeTask(id, agentId, result);
+  const task = getTaskStore().completeTask(id, agentId, result, new Date(), metadata);
   return task
     ? Response.json(task)
     : Response.json({ error: "Task claim is not active." }, { status: 409 });

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 import { execFile, spawn } from "node:child_process";
-import { access, mkdir, writeFile } from "node:fs/promises";
-import { hostname } from "node:os";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { hostname, homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
@@ -11,6 +11,7 @@ import {
   formatCompletionResult,
   formatFailure,
   parseClaudeOutput,
+  parseClaudeRunMetadata,
   repositoryDirectoryName,
   stagePathspecs,
   taskBranchName,
@@ -33,6 +34,12 @@ const config = {
     .map((entry) => entry.trim())
     .filter(Boolean),
   logDir: process.env.KANBAN_LOG_DIR ?? join(process.env.HOME ?? "", ".claude", "kanban-runner"),
+  usageStatusFile:
+    process.env.CLAUDE_RATE_LIMITS_FILE?.trim() ||
+    join(
+      process.env.CLAUDE_CONFIG_DIR?.trim() || join(homedir(), ".claude"),
+      "usage-status.json",
+    ),
   repositories: (process.env.KANBAN_REPOSITORIES ?? "")
     .split(",")
     .map((name) => name.trim())
@@ -108,7 +115,24 @@ async function defaultBaseRef(directory) {
   }
 }
 
-async function runClaude(worktree, prompt, logPath) {
+/**
+ * The stream never reports the effort level, so it is read from the status
+ * file the statusline hook writes, and only when that file still describes the
+ * session this task is running.
+ */
+async function readEffort(sessionId) {
+  if (!sessionId) return {};
+  try {
+    const status = JSON.parse(await readFile(config.usageStatusFile, "utf8"));
+    return status?.sessionId === sessionId && typeof status.effort === "string"
+      ? { effort: status.effort }
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+async function runClaude(worktree, prompt, logPath, output) {
   return new Promise((resolvePromise) => {
     const child = spawn(
       config.claudeBin,
@@ -123,7 +147,10 @@ async function runClaude(worktree, prompt, logPath) {
       { cwd: worktree, stdio: ["ignore", "pipe", "pipe"] },
     );
 
-    let stdout = "";
+    // Token accounting parses every line, so a multi-byte character split
+    // across two chunks must not corrupt the JSON it lands in.
+    child.stdout.setEncoding("utf8");
+
     let stderr = "";
     const timeout = setTimeout(() => {
       child.kill("SIGTERM");
@@ -131,19 +158,19 @@ async function runClaude(worktree, prompt, logPath) {
     }, config.taskTimeoutSeconds * 1_000);
 
     child.stdout.on("data", (chunk) => {
-      stdout += chunk;
+      output.stdout += chunk;
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
     });
     child.on("error", (error) => {
       clearTimeout(timeout);
-      resolvePromise({ code: -1, stdout, stderr: `${stderr}\n${error.message}` });
+      resolvePromise({ code: -1, stdout: output.stdout, stderr: `${stderr}\n${error.message}` });
     });
     child.on("close", async (code) => {
       clearTimeout(timeout);
-      await writeFile(logPath, stdout, "utf8").catch(() => {});
-      resolvePromise({ code, stdout, stderr });
+      await writeFile(logPath, output.stdout, "utf8").catch(() => {});
+      resolvePromise({ code, stdout: output.stdout, stderr });
     });
   });
 }
@@ -191,11 +218,19 @@ async function runTask(task, directory) {
   const name = branch.replace("task/", "");
   const worktree = resolve(directory, ".claude/worktrees", name);
   const logPath = join(config.logDir, `${name}.jsonl`);
+  const output = { stdout: "" };
   const heartbeat = setInterval(() => {
-    api(`/api/agent/tasks/${encodeURIComponent(task.id)}/heartbeat`, {
-      agentId: config.agentId,
-      leaseSeconds: config.leaseSeconds,
-    }).catch((error) => log(`Heartbeat failed: ${error.message}`));
+    const metadata = parseClaudeRunMetadata(output.stdout);
+    readEffort(metadata.sessionId)
+      .then((effort) =>
+        api(`/api/agent/tasks/${encodeURIComponent(task.id)}/heartbeat`, {
+          agentId: config.agentId,
+          leaseSeconds: config.leaseSeconds,
+          ...metadata,
+          ...effort,
+        }),
+      )
+      .catch((error) => log(`Heartbeat failed: ${error.message}`));
   }, Math.max(15, Math.floor(config.leaseSeconds / 2)) * 1_000);
 
   try {
@@ -203,8 +238,13 @@ async function runTask(task, directory) {
     await git(directory, ["worktree", "add", "-b", branch, worktree, base]);
     log(`Worktree ${worktree} on ${branch} from ${base}`);
 
-    const run = await runClaude(worktree, buildTaskPrompt(task), logPath);
+    const run = await runClaude(worktree, buildTaskPrompt(task), logPath, output);
     const { result, isError } = parseClaudeOutput(run.stdout);
+    const streamMetadata = parseClaudeRunMetadata(run.stdout);
+    const metadata = {
+      ...streamMetadata,
+      ...(await readEffort(streamMetadata.sessionId)),
+    };
 
     if (run.code !== 0 || isError) {
       await api(`/api/agent/tasks/${encodeURIComponent(task.id)}/fail`, {
@@ -213,6 +253,7 @@ async function runTask(task, directory) {
           `claude exited with code ${run.code}. Worktree kept at ${worktree}.`,
           `${result}\n${truncate(run.stderr, 1_000)}`,
         ),
+        ...metadata,
       });
       log(`Task ${task.id} failed; worktree kept for inspection.`);
       return;
@@ -227,6 +268,7 @@ async function runTask(task, directory) {
         pullRequestUrl: published.pullRequestUrl,
         changedFiles: published.changedFiles,
       }),
+      ...metadata,
     });
     log(`Task ${task.id} moved to review${published.pullRequestUrl ? ` (${published.pullRequestUrl})` : ""}`);
 
