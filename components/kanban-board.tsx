@@ -545,9 +545,9 @@ export function KanbanBoard() {
                 <div>
                   <dt>Used tokens</dt>
                   <dd>
-                    {selectedTask.usedTokens === null
-                      ? "—"
-                      : selectedTask.usedTokens.toLocaleString()}
+                    {typeof selectedTask.usedTokens === "number"
+                      ? selectedTask.usedTokens.toLocaleString()
+                      : "—"}
                   </dd>
                 </div>
               </dl>
@@ -663,7 +663,7 @@ export function KanbanBoard() {
                           <span className="kanban-card__title">
                             {task.title}
                           </span>
-                          {task.usedTokens !== null && (
+                          {typeof task.usedTokens === "number" && (
                             <span
                               className="kanban-card__tokens"
                               title={`${task.usedTokens.toLocaleString()} tokens used`}

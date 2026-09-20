@@ -94,10 +94,10 @@ export function parseClaudeOutput(stdout: string): {
   return { result: result || truncate(stdout, 2_000), isError };
 }
 
+/** The stream reports no effort level; the runner reads that separately. */
 export interface ClaudeRunMetadata {
   sessionId?: string;
   model?: string;
-  effort?: string;
   usedTokens?: number;
 }
 
@@ -105,15 +105,33 @@ function stringField(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function usageTokens(usage: Record<string, unknown>): number {
+  return [
+    "input_tokens",
+    "cache_creation_input_tokens",
+    "cache_read_input_tokens",
+    "output_tokens",
+  ].reduce(
+    (total, key) =>
+      total + (typeof usage[key] === "number" ? (usage[key] as number) : 0),
+    0,
+  );
+}
+
 /**
  * The stream carries the run details the board shows: `system` announces the
  * session and model, and every `assistant` event carries the usage of one API
  * request. Retried requests repeat the same id, so usage is kept per request
  * instead of summed blindly.
+ *
+ * The closing `result` event reports the whole run, including the subagents
+ * whose own turns never reach this stream, so it wins once it arrives. Until
+ * then the per-request sum is what a heartbeat can report.
  */
 export function parseClaudeRunMetadata(stdout: string): ClaudeRunMetadata {
   const metadata: ClaudeRunMetadata = {};
   const requests = new Map<string, number>();
+  let resultTokens: number | undefined;
   let anonymousRequest = 0;
 
   for (const line of stdout.split("\n")) {
@@ -130,37 +148,42 @@ export function parseClaudeRunMetadata(stdout: string): ClaudeRunMetadata {
 
     metadata.sessionId = stringField(value.session_id) ?? metadata.sessionId;
     metadata.model = stringField(value.model) ?? metadata.model;
-    metadata.effort = stringField(value.effort) ?? metadata.effort;
+
+    if (value.type === "result") {
+      const usage = value.usage as Record<string, unknown> | undefined;
+      if (typeof usage === "object" && usage !== null) {
+        resultTokens = usageTokens(usage);
+      }
+      continue;
+    }
 
     if (value.type !== "assistant") continue;
     const message = value.message as Record<string, unknown> | undefined;
     if (typeof message !== "object" || message === null) continue;
 
+    // A subagent's turns carry their own model, which is not the model the
+    // task itself ran on, so only the main agent's turns name the model.
     const messageModel = stringField(message.model);
-    if (messageModel && messageModel !== "<synthetic>") {
+    if (
+      messageModel &&
+      messageModel !== "<synthetic>" &&
+      !value.parent_tool_use_id
+    ) {
       metadata.model = messageModel;
     }
 
     const usage = message.usage as Record<string, unknown> | undefined;
     if (typeof usage !== "object" || usage === null) continue;
-    const tokens = [
-      "input_tokens",
-      "cache_creation_input_tokens",
-      "cache_read_input_tokens",
-      "output_tokens",
-    ].reduce(
-      (total, key) =>
-        total + (typeof usage[key] === "number" ? (usage[key] as number) : 0),
-      0,
-    );
     const requestKey =
-      stringField(value.requestId) ??
+      stringField(value.request_id) ??
       stringField(message.id) ??
       `anonymous-${anonymousRequest++}`;
-    requests.set(requestKey, tokens);
+    requests.set(requestKey, usageTokens(usage));
   }
 
-  if (requests.size > 0) {
+  if (resultTokens !== undefined) {
+    metadata.usedTokens = resultTokens;
+  } else if (requests.size > 0) {
     metadata.usedTokens = [...requests.values()].reduce(
       (total, tokens) => total + tokens,
       0,

@@ -98,10 +98,12 @@ export function kanbanStatusDurations(
   now = new Date(),
 ): { status: KanbanStatus; milliseconds: number }[] {
   const totals = new Map<KanbanStatus, number>();
+  // A board can be served a task from an older API that never sent a history.
+  const history = task.statusHistory ?? [];
 
-  task.statusHistory.forEach((event, index) => {
+  history.forEach((event, index) => {
     const start = Date.parse(event.at);
-    const nextAt = task.statusHistory[index + 1]?.at;
+    const nextAt = history[index + 1]?.at;
     const end = nextAt ? Date.parse(nextAt) : now.getTime();
     if (Number.isNaN(start) || Number.isNaN(end)) return;
     totals.set(
@@ -137,8 +139,8 @@ export function formatTokenCount(tokens: number): string {
 
 /**
  * Run details are optional everywhere: an agent reports what it knows, and a
- * missing key leaves the stored value untouched. `null` rejects the request so
- * a malformed report is never silently dropped.
+ * key it leaves out — or sends as `null` — keeps the stored value. Anything
+ * else rejects the request so a malformed report is never silently dropped.
  */
 export function parseTaskRunMetadata(
   body: Record<string, unknown>,
@@ -146,13 +148,13 @@ export function parseTaskRunMetadata(
   const metadata: TaskRunMetadata = {};
 
   for (const key of ["sessionId", "model", "effort"] as const) {
-    if (body[key] === undefined) continue;
+    if (body[key] === undefined || body[key] === null) continue;
     const value = requiredString(body[key], 200);
     if (!value) return null;
     metadata[key] = value;
   }
 
-  if (body.usedTokens !== undefined) {
+  if (body.usedTokens !== undefined && body.usedTokens !== null) {
     const tokens = body.usedTokens;
     if (
       typeof tokens !== "number" ||

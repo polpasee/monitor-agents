@@ -135,19 +135,19 @@ test("truncate keeps results inside the API limit", () => {
   assert.match(shortened, /…$/);
 });
 
-test("parseClaudeRunMetadata reads the session, model, effort, and tokens", () => {
+test("parseClaudeRunMetadata reads the session, model, and tokens mid-run", () => {
   const stdout = [
     JSON.stringify({
       type: "system",
       subtype: "init",
       session_id: "5c8f0c1e",
-      model: "claude-opus-5",
+      model: "claude-opus-5[1m]",
     }),
     "not json",
     JSON.stringify({
       type: "assistant",
-      requestId: "req-1",
-      effort: "high",
+      request_id: "req_1",
+      parent_tool_use_id: null,
       message: {
         id: "msg-1",
         model: "claude-opus-5",
@@ -159,12 +159,14 @@ test("parseClaudeRunMetadata reads the session, model, effort, and tokens", () =
         },
       },
     }),
+    // A subagent's turn names its own model, which is not the task's model.
     JSON.stringify({
       type: "assistant",
-      requestId: "req-2",
+      request_id: "req_2",
+      parent_tool_use_id: "toolu_1",
       message: {
         id: "msg-2",
-        model: "<synthetic>",
+        model: "claude-haiku-4-5-20251001",
         usage: { input_tokens: 10, output_tokens: 5 },
       },
     }),
@@ -173,7 +175,6 @@ test("parseClaudeRunMetadata reads the session, model, effort, and tokens", () =
   assert.deepEqual(parseClaudeRunMetadata(stdout), {
     sessionId: "5c8f0c1e",
     model: "claude-opus-5",
-    effort: "high",
     usedTokens: 985,
   });
 });
@@ -182,7 +183,7 @@ test("parseClaudeRunMetadata counts a retried request once", () => {
   const event = (outputTokens: number) =>
     JSON.stringify({
       type: "assistant",
-      requestId: "req-1",
+      request_id: "req_1",
       message: {
         id: "msg-1",
         model: "claude-opus-5",
@@ -194,6 +195,32 @@ test("parseClaudeRunMetadata counts a retried request once", () => {
     parseClaudeRunMetadata([event(10), event(30)].join("\n")).usedTokens,
     130,
   );
+});
+
+test("parseClaudeRunMetadata prefers the final result event's usage", () => {
+  const stdout = [
+    JSON.stringify({
+      type: "assistant",
+      request_id: "req_1",
+      message: {
+        id: "msg-1",
+        model: "claude-opus-5",
+        usage: { input_tokens: 100, output_tokens: 20 },
+      },
+    }),
+    JSON.stringify({
+      type: "result",
+      subtype: "success",
+      usage: {
+        input_tokens: 400,
+        cache_creation_input_tokens: 100,
+        cache_read_input_tokens: 2_000,
+        output_tokens: 90,
+      },
+    }),
+  ].join("\n");
+
+  assert.equal(parseClaudeRunMetadata(stdout).usedTokens, 2_590);
 });
 
 test("parseClaudeRunMetadata reports nothing for an empty stream", () => {
