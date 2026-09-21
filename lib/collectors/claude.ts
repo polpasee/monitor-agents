@@ -989,7 +989,12 @@ async function collectSubagentsInDirectory(
           parentAgentId,
           rootStatus: parent.status,
           rootEffort: parent.effort,
-          cwd: parent.cwd,
+          // A subagent spawned into a worktree (or nested under one) runs
+          // there rather than in its session's cwd.
+          cwd:
+            stringValue(meta.worktreePath) ??
+            stringValue(meta.inheritedWorktreePath) ??
+            parent.cwd,
           transcriptPath: transcript,
           modifiedAtMs: (await stat(transcript)).mtimeMs,
           providerStatus: providerState?.status ?? null,
