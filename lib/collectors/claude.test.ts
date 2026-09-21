@@ -256,6 +256,7 @@ test("Claude collector enriches roots from registry and job state and finds suba
       JSON.stringify({
         agentType: "code-reviewer",
         description: "Code review",
+        worktreePath: `${workspace}/.claude/worktrees/agent-nodepth`,
       }),
     );
     await writeFile(join(subagentsDirectory, "agent-deep.jsonl"), "");
@@ -265,6 +266,7 @@ test("Claude collector enriches roots from registry and job state and finds suba
         agentType: "worker",
         spawnDepth: 2,
         parentAgentId: "nodepth",
+        inheritedWorktreePath: `${workspace}/.claude/worktrees/agent-nodepth`,
       }),
     );
     for (const extra of ["s1", "s2", "s3", "s4", "s5"]) {
@@ -364,6 +366,10 @@ test("Claude collector enriches roots from registry and job state and finds suba
     // that direct subagent, not the root — arbitrary-depth chains are
     // resolved via parentAgentId, not directory nesting or spawnDepth.
     assert.equal(deepChild?.parentId, direct?.id);
+    // A subagent spawned into a worktree runs there, not in its session's cwd.
+    assert.equal(direct?.cwd, `${workspace}/.claude/worktrees/agent-nodepth`);
+    assert.equal(deepChild?.cwd, `${workspace}/.claude/worktrees/agent-nodepth`);
+    assert.equal(workflowChild?.cwd, workspace);
     assert.equal(deepChild?.effort, "xhigh");
   } finally {
     if (previousDirectory === undefined) {
