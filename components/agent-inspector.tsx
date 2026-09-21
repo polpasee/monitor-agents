@@ -174,7 +174,11 @@ export function AgentInspector({
           <dl className="context-list">
             <div className="context-list__row">
               <dt>Agent ID</dt>
-              <dd className="context-list__mono">{agent.id}</dd>
+              {/* A subagent's id is prefixed with its session's, which read as
+                  the session itself; its own segment is what names it. */}
+              <dd className="context-list__mono" title={agent.id}>
+                {agent.id.split(":").at(-1)}
+              </dd>
             </div>
             <div className="context-list__row">
               <dt>Parent</dt>
