@@ -794,8 +794,8 @@ export function Topology({
       .attr("class", "force-node__repo")
       .attr("y", (item) => item.radius + 12)
       .text((item) =>
-        // Every subagent under a root shares the root's cwd, so the repo
-        // name is redundant there; its own name is what distinguishes it.
+        // A subagent works in the root's repo (or a worktree of it), so the
+        // repo name is redundant there; its own name is what distinguishes it.
         item.depth === 0
           ? workspaceLabel(item.agent.cwd)
           : middleEllipsis(item.agent.name, 20),
