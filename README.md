@@ -136,7 +136,10 @@ SQLite mode with one Next.js server instance; use an external transactional
 database before scaling the dashboard to multiple server instances.
 
 The dashboard can create tasks and move them between `todo`, `in-progress`,
-`review`, `done`, and `failed`. An Agent must claim a task before working on it.
+`review`, `done`, and `failed`. Each task has a priority of `low`, `normal` (the
+default for tasks added on the dashboard), or `high`. Agents claim higher
+priority first, and each column lists higher priority first. An Agent must claim
+a task before working on it.
 The claim is atomic, so two Agents cannot receive the same task. Agents only
 receive tasks matching the repository names they send in the claim request.
 
@@ -190,6 +193,18 @@ curl -sS http://127.0.0.1:5000/api/agent/tasks/TASK_ID/fail \
   -d '{"agentId":"codex-worker-1","error":"Required repository was unavailable."}'
 ```
 
+Work an Agent notices while doing another task is queued, not done on the spot.
+Such tasks are always `low` priority, whatever the request sends:
+
+```bash
+curl -sS -X POST http://127.0.0.1:5000/api/agent/tasks \
+  -H "Authorization: Bearer $MONITOR_AGENT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Fix the flaky topology test","repository":"monitor-agents","description":"It times out on slow machines."}'
+```
+
+It returns the new task with HTTP `201`.
+
 If an Agent stops heartbeating, its expired `in-progress` task returns to
 `todo` automatically on the next claim. The task text is data, not permission
 to execute arbitrary shell commands; each Agent must independently enforce its
@@ -232,7 +247,8 @@ Claude runs with `--dangerously-skip-permissions` so tasks finish unattended.
 Only queue tasks you would run yourself: task text reaching this runner executes
 with your full local privileges.
 
-The runner owns git, and the prompt tells Claude not to commit or push. Each
+The runner owns git, and the prompt tells Claude not to commit or push. The
+prompt tells Claude to queue unrelated work through `POST /api/agent/tasks`. Each
 attempt gets its own branch and worktree (`task/<slug>`, then `task/<slug>-a2`
 on retry). Successful tasks move to `review` with the pull request URL in the
 result and their worktree removed; failed tasks move to `failed` and keep the
