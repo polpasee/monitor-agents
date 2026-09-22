@@ -1,35 +1,24 @@
+import { agentAuthError } from "@/lib/agent-auth";
 import {
   optionalString,
   readJsonObject,
   requiredString,
 } from "@/lib/api-input";
-import { parseKanbanPriority } from "@/lib/kanban";
 import { getTaskStore } from "@/lib/task-store";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function GET(request: Request) {
-  const repository = new URL(request.url).searchParams.get("repository")?.trim();
-  return Response.json(getTaskStore().listTasks(repository || undefined), {
-    headers: { "Cache-Control": "no-store, max-age=0" },
-  });
-}
-
 export async function POST(request: Request) {
+  const authError = agentAuthError(request);
+  if (authError) return authError;
+
   const body = await readJsonObject(request);
   const title = requiredString(body?.title, 200);
   const repository = requiredString(body?.repository, 200);
   const description = optionalString(body?.description, 5_000);
-  const priority = parseKanbanPriority(body?.priority);
 
-  if (
-    !body ||
-    !title ||
-    !repository ||
-    description === null ||
-    priority === null
-  ) {
+  if (!body || !title || !repository || description === null) {
     return Response.json({ error: "Invalid task input." }, { status: 400 });
   }
 
@@ -37,7 +26,9 @@ export async function POST(request: Request) {
     title,
     repository,
     description,
-    priority,
+    // Work an agent notices during another task waits behind everything a
+    // person queued, so any priority in the request is ignored.
+    priority: -1,
   });
   return Response.json(task, { status: 201 });
 }

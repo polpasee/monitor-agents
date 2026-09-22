@@ -67,6 +67,8 @@ test("buildTaskPrompt carries the task and forbids git publishing", () => {
   assert.match(prompt, /Add repository filter to the board/);
   assert.match(prompt, /Filter tasks by repository name\./);
   assert.match(prompt, /Do not run git commit/);
+  assert.match(prompt, /\/api\/agent\/tasks/);
+  assert.match(prompt, /"repository":"polpasee\/monitor-agents"/);
 });
 
 test("parseClaudeOutput reads the final result event of a stream", () => {

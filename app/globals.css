@@ -569,6 +569,7 @@ button:focus-visible,
 
 .kanban-filter select,
 .kanban-task-dialog__form input,
+.kanban-task-dialog__form select,
 .kanban-task-dialog__form textarea {
   height: 34px;
   border: 1px solid var(--border);
@@ -671,7 +672,8 @@ button:focus-visible,
   padding: 18px;
 }
 
-.kanban-task-dialog__form input {
+.kanban-task-dialog__form input,
+.kanban-task-dialog__form select {
   width: 100%;
   padding: 0 11px;
 }
@@ -694,6 +696,7 @@ button:focus-visible,
 
 .kanban-filter select:focus-visible,
 .kanban-task-dialog__form input:focus-visible,
+.kanban-task-dialog__form select:focus-visible,
 .kanban-task-dialog__form textarea:focus-visible {
   border-color: var(--lime);
   outline: 2px solid color-mix(in oklch, var(--lime) 38%, transparent);
@@ -878,6 +881,7 @@ button:focus-visible,
 }
 
 .kanban-card {
+  min-width: 0;
   padding: 13px;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -891,6 +895,7 @@ button:focus-visible,
 
 .kanban-card__repository {
   display: block;
+  min-width: 0;
   overflow: hidden;
   color: var(--lime);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
@@ -926,8 +931,13 @@ button:focus-visible,
   gap: 8px;
 }
 
+.kanban-card__title-row--top {
+  align-items: center;
+}
+
 .kanban-card__tokens,
-.kanban-card__pr {
+.kanban-card__pr,
+.kanban-card__priority {
   flex: 0 0 auto;
   padding: 2px 6px;
   border: 1px solid var(--border);
@@ -937,6 +947,19 @@ button:focus-visible,
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 9px;
   white-space: nowrap;
+}
+
+.kanban-card__priority {
+  margin: 0;
+}
+
+.kanban-card__priority--high {
+  border-color: color-mix(in oklch, var(--amber) 45%, var(--border));
+  color: var(--amber);
+}
+
+.kanban-card__priority--low {
+  color: var(--muted);
 }
 
 .kanban-card__title {
