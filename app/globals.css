@@ -886,6 +886,7 @@ button:focus-visible,
   align-content: start;
   gap: 8px;
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .kanban-card {
@@ -2277,6 +2278,12 @@ button:focus-visible,
 
   .kanban-filter select {
     width: 100%;
+  }
+
+  /* Stacked page and Kanban headers make the chrome around the column taller. */
+  .kanban-column {
+    min-height: min(460px, calc(100dvh - 315px));
+    max-height: calc(100dvh - 315px);
   }
 
   .kanban-task-dialog {
