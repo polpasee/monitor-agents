@@ -20,7 +20,7 @@ const bearerErrors = [
 
 const runMetadata = [
   "sessionId?, agentRunId?, model?, effort?: string, 1–200 chars",
-  "usedTokens?: integer 0–1000000000000",
+  "usedTokens?: integer 0–1000000000000, this attempt's running total (not an increment)",
   "Run details left out or null keep the stored value",
 ];
 
@@ -45,7 +45,7 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
     request: [
       "title: string, 1–200 chars",
       "repository: string, 1–200 chars",
-      "description?: string, up to 5000 chars",
+      "description?: string, up to 5000 chars; omit it rather than send null (400)",
       'priority?: "high" | "normal" | "low" (default "normal")',
     ],
     responses: [
@@ -60,7 +60,7 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
     auth: "none",
     request: [
       'Either { status: "todo" | "in-progress" | "review" | "done" | "failed" } alone',
-      "Or exactly { title, repository, description } (limits as POST) plus optional priority; null priority means normal",
+      "Or exactly { title, repository, description } (limits as POST) plus priority?; omitted keeps the current one, null resets it to normal",
     ],
     responses: [
       { status: 200, description: "KanbanTask" },
@@ -95,7 +95,7 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
     request: [
       "title: string, 1–200 chars",
       "repository: string, 1–200 chars",
-      "description?: string, up to 5000 chars",
+      "description?: string, up to 5000 chars; omit it rather than send null (400)",
     ],
     responses: [
       { status: 201, description: "KanbanTask in todo" },
@@ -138,7 +138,8 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
       inactiveClaim,
       ...bearerErrors,
     ],
-    description: "Extends the claiming agent's lease and records run details.",
+    description:
+      "Extends the claiming agent's lease and records run details. Heartbeat well within leaseSeconds: an expired lease goes back to Todo on the next claim, and heartbeat, complete and fail then return 409.",
   },
   {
     method: "POST",
