@@ -8,6 +8,7 @@ import {
   maxResultLength,
   parseClaudeOutput,
   parseClaudeRunMetadata,
+  pullRequestNumberFromUrl,
   repositoryDirectoryName,
   stagePathspecs,
   taskBranchName,
@@ -118,6 +119,18 @@ test("formatCompletionResult states when a run produced no changes", () => {
   });
   assert.match(result, /^No file changes were produced\./);
   assert.doesNotMatch(result, /Pull request/);
+});
+
+test("pullRequestNumberFromUrl reads the number from a pull request URL", () => {
+  assert.equal(
+    pullRequestNumberFromUrl("https://github.com/polpasee/monitor-agents/pull/20"),
+    20,
+  );
+  assert.equal(pullRequestNumberFromUrl(undefined), undefined);
+  assert.equal(
+    pullRequestNumberFromUrl("https://github.com/polpasee/monitor-agents"),
+    undefined,
+  );
 });
 
 test("stagePathspecs excludes agent tool droppings from the commit", () => {

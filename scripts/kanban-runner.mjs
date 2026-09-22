@@ -10,8 +10,10 @@ import {
   buildTaskPrompt,
   formatCompletionResult,
   formatFailure,
+  maxResultLength,
   parseClaudeOutput,
   parseClaudeRunMetadata,
+  pullRequestNumberFromUrl,
   repositoryDirectoryName,
   stagePathspecs,
   taskBranchName,
@@ -268,6 +270,9 @@ async function runTask(task, directory) {
         pullRequestUrl: published.pullRequestUrl,
         changedFiles: published.changedFiles,
       }),
+      pullRequestNumber: pullRequestNumberFromUrl(published.pullRequestUrl),
+      // An empty summary is left out rather than rejected by the API.
+      summary: truncate(result, maxResultLength) || undefined,
       ...metadata,
     });
     log(`Task ${task.id} moved to review${published.pullRequestUrl ? ` (${published.pullRequestUrl})` : ""}`);
