@@ -28,7 +28,7 @@ export async function POST(
     (pullRequestNumber !== undefined &&
       !(
         typeof pullRequestNumber === "number" &&
-        Number.isInteger(pullRequestNumber) &&
+        Number.isSafeInteger(pullRequestNumber) &&
         pullRequestNumber > 0
       )) ||
     summary === null
