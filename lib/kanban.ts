@@ -61,7 +61,12 @@ export interface TaskRunMetadata {
 
 export type KanbanTaskPatch =
   | { status: KanbanStatus }
-  | { title: string; repository: string; description: string };
+  | {
+      title: string;
+      repository: string;
+      description: string;
+      priority?: number;
+    };
 
 const statusIds = new Set<KanbanStatus>(
   kanbanStatuses.map((status) => status.id),
@@ -96,8 +101,9 @@ export function parseKanbanTaskPatch(
     return isKanbanStatus(body.status) ? { status: body.status } : null;
   }
 
+  const hasPriority = Object.hasOwn(body, "priority");
   if (
-    keys.length !== 3 ||
+    keys.length !== (hasPriority ? 4 : 3) ||
     !["title", "repository", "description"].every((key) =>
       Object.hasOwn(body, key),
     )
@@ -105,11 +111,19 @@ export function parseKanbanTaskPatch(
     return null;
   }
 
+  const priority = hasPriority ? parseKanbanPriority(body.priority) : undefined;
+  if (priority === null) return null;
+
   const title = requiredString(body.title, 200);
   const repository = requiredString(body.repository, 200);
   const description = optionalString(body.description, 5_000);
   return title && repository && description !== null
-    ? { title, repository, description }
+    ? {
+        title,
+        repository,
+        description,
+        ...(priority !== undefined && { priority }),
+      }
     : null;
 }
 

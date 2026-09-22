@@ -38,6 +38,7 @@ test("TaskStore updates editable details while a task is Todo", async () => {
       title: "Old title",
       description: "Old description",
       repository: "monitor-agents",
+      priority: 2,
     });
     const updatedAt = new Date("2026-09-04T01:00:00.000Z");
     const updated = store.updateTodoTaskDetails(
@@ -57,6 +58,18 @@ test("TaskStore updates editable details while a task is Todo", async () => {
       repository: "cacti-api",
       updatedAt: updatedAt.toISOString(),
     });
+
+    const details = {
+      title: "New title",
+      description: "New description",
+      repository: "cacti-api",
+    };
+    assert.equal(
+      store.updateTodoTaskDetails(task.id, { ...details, priority: 1 })
+        ?.priority,
+      1,
+    );
+    assert.equal(store.updateTodoTaskDetails(task.id, details)?.priority, 1);
   } finally {
     store.close();
     await rm(directory, { recursive: true, force: true });
@@ -86,6 +99,7 @@ test("TaskStore rejects a stale Todo edit after another connection claims it", a
       title: "Stale title",
       description: "Stale description",
       repository: "cacti-api",
+      priority: 1,
     });
 
     assert.equal(claimed?.id, task.id);
@@ -97,6 +111,7 @@ test("TaskStore rejects a stale Todo edit after another connection claims it", a
       "Keep this description",
     );
     assert.equal(editorStore.getTask(task.id)?.repository, "monitor-agents");
+    assert.equal(editorStore.getTask(task.id)?.priority, 0);
   } finally {
     agentStore.close();
     editorStore.close();
