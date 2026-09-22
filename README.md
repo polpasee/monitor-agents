@@ -176,8 +176,10 @@ Successful work moves to `review` for a human decision:
 curl -sS http://127.0.0.1:5000/api/agent/tasks/TASK_ID/complete \
   -H "Authorization: Bearer $MONITOR_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"agentId":"codex-worker-1","result":"Commit abc123; tests passed."}'
+  -d '{"agentId":"codex-worker-1","result":"Commit abc123; tests passed.","pullRequestNumber":42,"summary":"Added the repository filter; npm test passed."}'
 ```
+
+`pullRequestNumber` (positive integer) and `summary` (up to 10,000 characters) are optional; the board shows `PR #N` on the card and the summary in Run details. Without a number, the board reads it from a `PR #N` or `/pull/N` in `result`.
 
 Failed work moves to `failed` and records the error:
 
