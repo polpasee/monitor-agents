@@ -46,6 +46,7 @@ export interface UpdateTaskDetailsInput {
   title: string;
   description: string;
   repository: string;
+  priority?: number;
 }
 
 export interface ClaimTaskInput {
@@ -346,7 +347,8 @@ export class TaskStore {
     const row = this.database
       .prepare(`
         UPDATE tasks
-        SET title = ?, description = ?, repository = ?, updated_at = ?
+        SET title = ?, description = ?, repository = ?,
+            priority = COALESCE(?, priority), updated_at = ?
         WHERE id = ? AND status = 'todo'
         RETURNING *
       `)
@@ -354,6 +356,7 @@ export class TaskStore {
         input.title.trim(),
         input.description.trim(),
         input.repository.trim(),
+        input.priority ?? null,
         now.toISOString(),
         id,
       ) as unknown as TaskRow | undefined;

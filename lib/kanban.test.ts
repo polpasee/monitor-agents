@@ -118,6 +118,39 @@ test("parseKanbanTaskPatch validates exact editable task details", () => {
     }),
     null,
   );
+  assert.deepEqual(
+    parseKanbanTaskPatch({
+      title: "Urgent fix",
+      repository: "monitor-agents",
+      description: "",
+      priority: "high",
+    }),
+    {
+      title: "Urgent fix",
+      repository: "monitor-agents",
+      description: "",
+      priority: 1,
+    },
+  );
+  assert.equal(
+    parseKanbanTaskPatch({
+      title: "Unknown level",
+      repository: "monitor-agents",
+      description: "",
+      priority: "urgent",
+    }),
+    null,
+  );
+  assert.equal(
+    parseKanbanTaskPatch({
+      title: "Extra",
+      repository: "monitor-agents",
+      description: "",
+      priority: "high",
+      status: "done",
+    }),
+    null,
+  );
   assert.equal(
     parseKanbanTaskPatch({
       title: " ",
