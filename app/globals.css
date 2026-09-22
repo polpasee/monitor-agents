@@ -935,6 +935,13 @@ button:focus-visible,
   align-items: center;
 }
 
+.kanban-card__badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .kanban-card__tokens,
 .kanban-card__pr,
 .kanban-card__priority {
@@ -949,6 +956,8 @@ button:focus-visible,
   white-space: nowrap;
 }
 
+.kanban-card__badges .kanban-card__tokens,
+.kanban-card__badges .kanban-card__pr,
 .kanban-card__priority {
   margin: 0;
 }

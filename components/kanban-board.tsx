@@ -718,6 +718,10 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
                   const isSaving = savingTaskId === task.id;
                   const isEditable = isKanbanTaskEditable(task);
                   const cardPriority = kanbanPriorityOf(task.priority);
+                  const showsTokens = typeof task.usedTokens === "number";
+                  const showsPullRequest =
+                    showsCompletion(task) &&
+                    typeof task.pullRequestNumber === "number";
 
                   return (
                     <article
@@ -746,25 +750,26 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
                             {cardPriority.label}
                           </span>
                         </span>
-                        <span className="kanban-card__title-row">
-                          <span className="kanban-card__title">
-                            {task.title}
-                          </span>
-                          {typeof task.usedTokens === "number" && (
-                            <span
-                              className="kanban-card__tokens"
-                              title={`${task.usedTokens.toLocaleString()} tokens used`}
-                            >
-                              {formatTokenCount(task.usedTokens)}
-                            </span>
-                          )}
-                          {showsCompletion(task) &&
-                            typeof task.pullRequestNumber === "number" && (
+                        <span className="kanban-card__title">
+                          {task.title}
+                        </span>
+                        {(showsTokens || showsPullRequest) && (
+                          <span className="kanban-card__badges">
+                            {typeof task.usedTokens === "number" && (
+                              <span
+                                className="kanban-card__tokens"
+                                title={`${task.usedTokens.toLocaleString()} tokens used`}
+                              >
+                                {formatTokenCount(task.usedTokens)}
+                              </span>
+                            )}
+                            {showsPullRequest && (
                               <span className="kanban-card__pr">
                                 PR #{task.pullRequestNumber}
                               </span>
                             )}
-                        </span>
+                          </span>
+                        )}
                       </button>
                     </article>
                   );
