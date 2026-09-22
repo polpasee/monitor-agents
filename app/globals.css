@@ -95,6 +95,7 @@ button {
   border: 0;
 }
 
+a:focus-visible,
 button:focus-visible,
 [tabindex]:focus-visible {
   outline: 2px solid var(--lime);
@@ -217,7 +218,7 @@ button:focus-visible,
   background: var(--surface-1);
 }
 
-.dashboard-nav button {
+.dashboard-nav :is(button, a) {
   padding: 8px 13px;
   border-radius: 7px;
   background: transparent;
@@ -225,13 +226,15 @@ button:focus-visible,
   cursor: pointer;
   font-size: 11px;
   font-weight: 650;
+  text-align: center;
+  text-decoration: none;
 }
 
-.dashboard-nav button:hover {
+.dashboard-nav :is(button, a):hover {
   color: var(--text-soft);
 }
 
-.dashboard-nav button[aria-current="page"] {
+.dashboard-nav :is(button, a)[aria-current="page"] {
   background: color-mix(in oklch, var(--lime) 14%, transparent);
   color: var(--lime);
 }
@@ -2325,7 +2328,7 @@ button:focus-visible,
     width: 100%;
   }
 
-  .dashboard-nav button {
+  .dashboard-nav :is(button, a) {
     flex: 1;
   }
 
