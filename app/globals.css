@@ -881,6 +881,7 @@ button:focus-visible,
 }
 
 .kanban-card {
+  min-width: 0;
   padding: 13px;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -928,6 +929,10 @@ button:focus-visible,
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
+}
+
+.kanban-card__title-row--top {
+  align-items: center;
 }
 
 .kanban-card__tokens,

@@ -736,7 +736,7 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
                         onClick={(event) => editTask(task, event.currentTarget)}
                         type="button"
                       >
-                        <span className="kanban-card__title-row">
+                        <span className="kanban-card__title-row kanban-card__title-row--top">
                           <span className="kanban-card__repository">
                             {task.repository}
                           </span>
