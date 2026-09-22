@@ -9,7 +9,9 @@ import {
 import type { AgentRun } from "@/lib/telemetry";
 import {
   findTaskAgent,
+  formatBangkokTime,
   formatDuration,
+  formatStatusAge,
   formatTokenCount,
   isKanbanTaskEditable,
   kanbanPriorities,
@@ -24,15 +26,6 @@ import {
 } from "@/lib/kanban";
 
 import { AgentInspector } from "./agent-inspector";
-
-const timestamp = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  hourCycle: "h23",
-  timeZone: "UTC",
-});
 
 interface KanbanBoardProps {
   agents: AgentRun[];
@@ -838,8 +831,9 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
                         <time
                           className="kanban-card__timestamp"
                           dateTime={since}
+                          title={formatBangkokTime(since)}
                         >
-                          {timestamp.format(new Date(since))} UTC
+                          {formatStatusAge(since)}
                         </time>
                       </button>
                     </article>
