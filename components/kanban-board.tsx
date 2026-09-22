@@ -26,6 +26,11 @@ interface KanbanBoardProps {
   capturedAt: string;
 }
 
+/** A reset, retry, or failure keeps the details of the last completion. */
+function showsCompletion(task: KanbanTask): boolean {
+  return task.status === "review" || task.status === "done";
+}
+
 export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
   const addTaskButtonRef = useRef<HTMLButtonElement>(null);
   const addTaskDialogRef = useRef<HTMLDialogElement>(null);
@@ -575,13 +580,14 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
                   <div>
                     <dt>Pull request</dt>
                     <dd>
-                      {selectedTask.pullRequestNumber
+                      {showsCompletion(selectedTask) &&
+                      typeof selectedTask.pullRequestNumber === "number"
                         ? `#${selectedTask.pullRequestNumber}`
                         : "—"}
                     </dd>
                   </div>
                 </dl>
-                {selectedTask.summary && (
+                {showsCompletion(selectedTask) && selectedTask.summary && (
                   <>
                     <h4>Summary</h4>
                     <p className="kanban-run-details__summary">
@@ -718,11 +724,12 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
                               {formatTokenCount(task.usedTokens)}
                             </span>
                           )}
-                          {typeof task.pullRequestNumber === "number" && (
-                            <span className="kanban-card__pr">
-                              PR #{task.pullRequestNumber}
-                            </span>
-                          )}
+                          {showsCompletion(task) &&
+                            typeof task.pullRequestNumber === "number" && (
+                              <span className="kanban-card__pr">
+                                PR #{task.pullRequestNumber}
+                              </span>
+                            )}
                         </span>
                       </button>
                     </article>
