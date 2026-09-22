@@ -216,6 +216,43 @@ test("TaskStore claims a task once and completes it into review", async () => {
   }
 });
 
+test("TaskStore lists and claims higher priority first", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-priority-"));
+  const store = new TaskStore(join(directory, "tasks.sqlite"));
+
+  try {
+    const levels = [
+      { title: "Low", priority: -1, at: "2026-08-04T00:00:00.000Z" },
+      { title: "High", priority: 1, at: "2026-08-04T00:01:00.000Z" },
+      { title: "Normal", priority: 0, at: "2026-08-04T00:02:00.000Z" },
+    ];
+    for (const { title, priority, at } of levels) {
+      store.createTask(
+        { title, repository: "monitor-agents", priority },
+        new Date(at),
+      );
+    }
+
+    assert.deepEqual(
+      store.listTasks().map((task) => task.title),
+      ["High", "Normal", "Low"],
+    );
+    const now = new Date("2026-08-04T00:03:00.000Z");
+    const claimed = [1, 2, 3].map(
+      (index) =>
+        store.claimTask({
+          agentId: `agent-${index}`,
+          repositories: ["monitor-agents"],
+          now,
+        })?.title,
+    );
+    assert.deepEqual(claimed, ["High", "Normal", "Low"]);
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("TaskStore releases an expired lease for another agent", async () => {
   const directory = await mkdtemp(join(tmpdir(), "monitor-task-lease-"));
   const store = new TaskStore(join(directory, "tasks.sqlite"));
