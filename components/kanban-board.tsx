@@ -16,6 +16,7 @@ import {
   kanbanPriorityOf,
   kanbanRepositories,
   kanbanStatusDurations,
+  kanbanStatusSince,
   kanbanStatuses,
   type KanbanPriority,
   type KanbanStatus,
@@ -23,6 +24,15 @@ import {
 } from "@/lib/kanban";
 
 import { AgentInspector } from "./agent-inspector";
+
+const timestamp = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+  timeZone: "UTC",
+});
 
 interface KanbanBoardProps {
   agents: AgentRun[];
@@ -776,6 +786,7 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
                   const showsPullRequest =
                     showsCompletion(task) &&
                     typeof task.pullRequestNumber === "number";
+                  const since = kanbanStatusSince(task);
 
                   return (
                     <article
@@ -824,6 +835,12 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
                             )}
                           </span>
                         )}
+                        <time
+                          className="kanban-card__timestamp"
+                          dateTime={since}
+                        >
+                          {timestamp.format(new Date(since))} UTC
+                        </time>
                       </button>
                     </article>
                   );

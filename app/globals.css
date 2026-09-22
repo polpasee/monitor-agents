@@ -991,6 +991,14 @@ button:focus-visible,
   line-height: 1.45;
 }
 
+.kanban-card__timestamp {
+  display: block;
+  margin-top: 9px;
+  color: var(--muted);
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+}
+
 .kanban-column__empty {
   margin: 0;
   padding: 28px 10px;
