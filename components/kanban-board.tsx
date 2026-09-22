@@ -39,6 +39,7 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
   const addTaskDialogRef = useRef<HTMLDialogElement>(null);
   const editTaskButtonRef = useRef<HTMLButtonElement>(null);
   const editTaskDialogRef = useRef<HTMLDialogElement>(null);
+  const editDialogPressOutsideRef = useRef(false);
   const editTitleInputRef = useRef<HTMLInputElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const [tasks, setTasks] = useState<KanbanTask[]>([]);
@@ -235,6 +236,20 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
     if (savingTaskId || deletingTaskId) return;
     setEditError(null);
     editTaskDialogRef.current?.close();
+  }
+
+  /** A press on the backdrop targets the dialog itself but lands outside its box. */
+  function isTaskEditDialogBackdropEvent(
+    event: React.MouseEvent<HTMLDialogElement>,
+  ) {
+    const box = event.currentTarget.getBoundingClientRect();
+    return (
+      event.target === event.currentTarget &&
+      (event.clientX < box.left ||
+        event.clientX > box.right ||
+        event.clientY < box.top ||
+        event.clientY > box.bottom)
+    );
   }
 
   function handleTaskEditDialogClose() {
@@ -517,7 +532,19 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
         onCancel={(event) => {
           if (savingTaskId || deletingTaskId) event.preventDefault();
         }}
+        onClick={(event) => {
+          if (
+            editDialogPressOutsideRef.current &&
+            isTaskEditDialogBackdropEvent(event)
+          ) {
+            closeTaskEditDialog();
+          }
+        }}
         onClose={handleTaskEditDialogClose}
+        onPointerDown={(event) => {
+          editDialogPressOutsideRef.current =
+            isTaskEditDialogBackdropEvent(event);
+        }}
         ref={editTaskDialogRef}
       >
         <div className="kanban-task-dialog__main">
