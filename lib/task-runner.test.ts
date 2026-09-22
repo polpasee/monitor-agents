@@ -32,6 +32,8 @@ const task: KanbanTask = {
   model: null,
   effort: null,
   usedTokens: null,
+  pullRequestNumber: null,
+  summary: null,
   statusHistory: [],
   createdAt: "2026-08-05T00:00:00.000Z",
   updatedAt: "2026-08-05T00:00:00.000Z",

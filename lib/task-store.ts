@@ -28,6 +28,8 @@ interface TaskRow {
   model: string | null;
   effort: string | null;
   used_tokens: number | null;
+  pull_request_number: number | null;
+  summary: string | null;
   status_history: string;
   created_at: string;
   updated_at: string;
@@ -62,6 +64,13 @@ function statusHistoryFromRow(value: string): KanbanStatusEvent[] {
   }
 }
 
+/** Rows completed before the number was reported still name the PR in `result`. */
+function pullRequestNumberFromResult(result: string | null): number | null {
+  const match =
+    result && (/PR #(\d+)/.exec(result) ?? /\/pull\/(\d+)/.exec(result));
+  return match ? Number(match[1]) : null;
+}
+
 function taskFromRow(row: TaskRow): KanbanTask {
   return {
     id: row.id,
@@ -81,6 +90,9 @@ function taskFromRow(row: TaskRow): KanbanTask {
     model: row.model,
     effort: row.effort,
     usedTokens: row.used_tokens,
+    pullRequestNumber:
+      row.pull_request_number ?? pullRequestNumberFromResult(row.result),
+    summary: row.summary,
     statusHistory: statusHistoryFromRow(row.status_history),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -154,6 +166,8 @@ export class TaskStore {
         effort TEXT,
         used_tokens INTEGER,
         carried_tokens INTEGER NOT NULL DEFAULT 0,
+        pull_request_number INTEGER,
+        summary TEXT,
         status_history TEXT NOT NULL DEFAULT '[]',
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
@@ -186,6 +200,8 @@ export class TaskStore {
       ["effort", "TEXT"],
       ["used_tokens", "INTEGER"],
       ["carried_tokens", "INTEGER NOT NULL DEFAULT 0"],
+      ["pull_request_number", "INTEGER"],
+      ["summary", "TEXT"],
       ["status_history", "TEXT NOT NULL DEFAULT '[]'"],
     ];
     for (const [name, definition] of additions) {
@@ -465,12 +481,15 @@ export class TaskStore {
     resultText: string,
     now = new Date(),
     metadata?: TaskRunMetadata,
+    completion?: { pullRequestNumber?: number; summary?: string },
   ): KanbanTask | null {
     const result = this.database
       .prepare(`
         UPDATE tasks
         SET status = 'review',
             result = ?,
+            pull_request_number = ?,
+            summary = ?,
             lease_until = NULL,
             status_history = ${appendStatusSql},
             ${runMetadataSql},
@@ -482,6 +501,8 @@ export class TaskStore {
       `)
       .run(
         resultText.trim(),
+        completion?.pullRequestNumber ?? null,
+        completion?.summary?.trim() || null,
         "review",
         now.toISOString(),
         ...runMetadataValues(metadata),
