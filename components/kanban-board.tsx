@@ -572,7 +572,23 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
                         : "—"}
                     </dd>
                   </div>
+                  <div>
+                    <dt>Pull request</dt>
+                    <dd>
+                      {selectedTask.pullRequestNumber
+                        ? `#${selectedTask.pullRequestNumber}`
+                        : "—"}
+                    </dd>
+                  </div>
                 </dl>
+                {selectedTask.summary && (
+                  <>
+                    <h4>Summary</h4>
+                    <p className="kanban-run-details__summary">
+                      {selectedTask.summary}
+                    </p>
+                  </>
+                )}
                 <h4>Time in each state</h4>
                 {kanbanStatusDurations(selectedTask).length === 0 ? (
                   <p className="kanban-run-details__empty">
@@ -700,6 +716,11 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
                               title={`${task.usedTokens.toLocaleString()} tokens used`}
                             >
                               {formatTokenCount(task.usedTokens)}
+                            </span>
+                          )}
+                          {typeof task.pullRequestNumber === "number" && (
+                            <span className="kanban-card__pr">
+                              PR #{task.pullRequestNumber}
                             </span>
                           )}
                         </span>
