@@ -53,6 +53,7 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
   const [editTitle, setEditTitle] = useState("");
   const [editRepository, setEditRepository] = useState("");
   const [editDescription, setEditDescription] = useState("");
+  const [editPriority, setEditPriority] = useState<KanbanPriority>("normal");
   const [editError, setEditError] = useState<string | null>(null);
   const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
@@ -222,6 +223,7 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
     setEditTitle(task.title);
     setEditRepository(task.repository);
     setEditDescription(task.description);
+    setEditPriority(kanbanPriorityOf(task.priority).id);
     setEditError(null);
     editTaskDialogRef.current?.showModal();
     if (isKanbanTaskEditable(task)) {
@@ -241,6 +243,7 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
     setEditTitle("");
     setEditRepository("");
     setEditDescription("");
+    setEditPriority("normal");
     setEditError(null);
 
     const trigger = editTaskButtonRef.current;
@@ -273,6 +276,10 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
           title: nextTitle,
           repository: nextRepository,
           description: nextDescription,
+          ...(selectedTask &&
+            editPriority !== kanbanPriorityOf(selectedTask.priority).id && {
+              priority: editPriority,
+            }),
         }),
       });
       if (response.status === 409) {
@@ -564,6 +571,26 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
                     : editRepository
                 }
               />
+            </label>
+            <label>
+              <span>Priority</span>
+              <select
+                disabled={isTaskDialogReadOnly}
+                onChange={(event) =>
+                  setEditPriority(event.target.value as KanbanPriority)
+                }
+                value={
+                  isTaskDialogReadOnly && selectedTask
+                    ? kanbanPriorityOf(selectedTask.priority).id
+                    : editPriority
+                }
+              >
+                {kanbanPriorities.map((level) => (
+                  <option key={level.id} value={level.id}>
+                    {level.label}
+                  </option>
+                ))}
+              </select>
             </label>
             <label>
               <span>Description for agent</span>
