@@ -751,6 +751,14 @@ button:focus-visible,
   font-size: 10px;
 }
 
+.kanban-run-details__summary {
+  margin: 0;
+  color: var(--text);
+  font-size: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .kanban-task-dialog__error {
   margin: 0;
   color: var(--red);
@@ -918,7 +926,8 @@ button:focus-visible,
   gap: 8px;
 }
 
-.kanban-card__tokens {
+.kanban-card__tokens,
+.kanban-card__pr {
   flex: 0 0 auto;
   padding: 2px 6px;
   border: 1px solid var(--border);

@@ -416,6 +416,76 @@ test("TaskStore keeps run details reported by a heartbeat", async () => {
   }
 });
 
+async function completedWith(
+  resultText: string,
+  completion?: { pullRequestNumber?: number; summary?: string },
+) {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-pr-"));
+  const store = new TaskStore(join(directory, "tasks.sqlite"));
+  try {
+    const task = store.createTask({
+      title: "Open a pull request",
+      repository: "monitor-agents",
+    });
+    store.claimTask({
+      agentId: "agent-1",
+      repositories: ["monitor-agents"],
+      now: new Date("2026-08-04T00:00:00.000Z"),
+      leaseMs: 600_000,
+    });
+    const completed = store.completeTask(
+      task.id,
+      "agent-1",
+      resultText,
+      new Date("2026-08-04T00:01:00.000Z"),
+      undefined,
+      completion,
+    );
+    assert.deepEqual(store.getTask(task.id), completed);
+    return completed;
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+test("TaskStore stores the pull request number and summary an agent reports", async () => {
+  const completed = await completedWith("Tests passed", {
+    pullRequestNumber: 42,
+    summary: "  Did X\n",
+  });
+
+  assert.equal(completed?.pullRequestNumber, 42);
+  assert.equal(completed?.summary, "Did X");
+  assert.equal(completed?.result, "Tests passed");
+});
+
+test("TaskStore reads the pull request number from the result when none is sent", async () => {
+  const fromUrl = await completedWith(
+    "3 file(s) changed on task/x.\nPull request: https://github.com/o/r/pull/20",
+  );
+  assert.equal(fromUrl?.pullRequestNumber, 20);
+  assert.equal(fromUrl?.summary, null);
+
+  const fromMention = await completedWith(
+    "PR #7 merged via https://github.com/o/r/pull/9",
+  );
+  assert.equal(fromMention?.pullRequestNumber, 7);
+
+  const prose = await completedWith(
+    "No code change needed - already shipped in PR #1998",
+  );
+  assert.equal(prose?.pullRequestNumber, null);
+  assert.equal((await completedWith("see PR #0"))?.pullRequestNumber, null);
+  assert.equal((await completedWith("PR #0 opened"))?.pullRequestNumber, null);
+
+  const reported = await completedWith(
+    "PR #7 merged via https://github.com/o/r/pull/9",
+    { pullRequestNumber: 11 },
+  );
+  assert.equal(reported?.pullRequestNumber, 11);
+});
+
 test("TaskStore upgrades a database written before run details existed", async () => {
   const directory = await mkdtemp(join(tmpdir(), "monitor-task-migrate-"));
   const path = join(directory, "tasks.sqlite");
@@ -439,21 +509,21 @@ test("TaskStore upgrades a database written before run details existed", async (
     );
     INSERT INTO tasks (
       id, title, description, repository, status, priority,
-      claimed_by, claimed_at, created_at, updated_at
+      claimed_by, claimed_at, result, created_at, updated_at
     ) VALUES
     (
       'legacy-1', 'Old task', '', 'monitor-agents', 'in-progress', 0,
-      'agent-1', '2026-08-04T00:01:00.000Z',
+      'agent-1', '2026-08-04T00:01:00.000Z', NULL,
       '2026-08-04T00:00:00.000Z', '2026-08-04T00:02:00.000Z'
     ),
     (
       'legacy-2', 'Finished task', '', 'monitor-agents', 'done', 0,
-      'agent-1', '2026-08-04T00:01:00.000Z',
+      'agent-1', '2026-08-04T00:01:00.000Z', 'PR #5 https://github.com/o/r/pull/5 - open',
       '2026-08-04T00:00:00.000Z', '2026-08-04T00:09:00.000Z'
     ),
     (
       'legacy-3', 'Never claimed', '', 'monitor-agents', 'done', 0,
-      NULL, NULL,
+      NULL, NULL, NULL,
       '2026-08-04T00:00:00.000Z', '2026-08-04T00:09:00.000Z'
     );
   `);
@@ -465,6 +535,9 @@ test("TaskStore upgrades a database written before run details existed", async (
     assert.equal(task?.usedTokens, null);
     assert.equal(task?.sessionId, null);
     assert.equal(task?.agentRunId, null);
+    assert.equal(task?.pullRequestNumber, null);
+    assert.equal(task?.summary, null);
+    assert.equal(store.getTask("legacy-2")?.pullRequestNumber, 5);
     assert.deepEqual(task?.statusHistory, [
       { status: "todo", at: "2026-08-04T00:00:00.000Z" },
       { status: "in-progress", at: "2026-08-04T00:01:00.000Z" },

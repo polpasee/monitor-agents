@@ -34,6 +34,8 @@ export interface KanbanTask {
   model: string | null;
   effort: string | null;
   usedTokens: number | null;
+  pullRequestNumber: number | null;
+  summary: string | null;
   statusHistory: KanbanStatusEvent[];
   createdAt: string;
   updatedAt: string;

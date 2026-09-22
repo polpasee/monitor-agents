@@ -260,6 +260,11 @@ export function formatCompletionResult(input: CompletionSummary): string {
   );
 }
 
+export function pullRequestNumberFromUrl(url: string | undefined): number | undefined {
+  const match = url ? /\/pull\/(\d+)/.exec(url) : null;
+  return match ? Number(match[1]) : undefined;
+}
+
 export function formatFailure(reason: string, detail: string): string {
   return truncate([reason, detail].filter(Boolean).join("\n\n"), maxResultLength);
 }
