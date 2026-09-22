@@ -10,6 +10,7 @@ import {
   kanbanPriorityOf,
   kanbanRepositories,
   kanbanStatusDurations,
+  kanbanStatusSince,
   kanbanStatuses,
   parseKanbanPriority,
   parseKanbanTaskPatch,
@@ -268,6 +269,30 @@ test("kanbanStatusDurations reports nothing without history", () => {
     }),
     [],
   );
+});
+
+test("kanbanStatusSince reports when the task entered its current status", () => {
+  assert.equal(kanbanStatusSince(task), "2026-08-04T00:04:30.000Z");
+  // A re-entered status counts from its latest visit.
+  assert.equal(
+    kanbanStatusSince({ ...task, status: "in-progress" }),
+    "2026-08-04T00:02:30.000Z",
+  );
+});
+
+test("kanbanStatusSince falls back to the last update without a matching entry", () => {
+  assert.equal(
+    kanbanStatusSince({ ...task, statusHistory: [] }),
+    task.updatedAt,
+  );
+  assert.equal(
+    kanbanStatusSince({
+      ...task,
+      statusHistory: undefined as unknown as KanbanTask["statusHistory"],
+    }),
+    task.updatedAt,
+  );
+  assert.equal(kanbanStatusSince({ ...task, status: "done" }), task.updatedAt);
 });
 
 test("formatDuration scales from seconds to days", () => {

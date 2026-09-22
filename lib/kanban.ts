@@ -167,6 +167,15 @@ export function kanbanStatusDurations(
     }));
 }
 
+/** When the task entered its current status; tasks without a history fall back to their last update. */
+export function kanbanStatusSince(task: KanbanTask): string {
+  const history = task.statusHistory ?? [];
+  return (
+    history.findLast((event) => event.status === task.status)?.at ??
+    task.updatedAt
+  );
+}
+
 export function formatDuration(milliseconds: number): string {
   const seconds = Math.floor(milliseconds / 1_000);
   if (seconds < 60) return `${seconds}s`;
