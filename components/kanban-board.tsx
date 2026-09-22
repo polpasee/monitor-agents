@@ -12,9 +12,12 @@ import {
   formatDuration,
   formatTokenCount,
   isKanbanTaskEditable,
+  kanbanPriorities,
+  kanbanPriorityOf,
   kanbanRepositories,
   kanbanStatusDurations,
   kanbanStatuses,
+  type KanbanPriority,
   type KanbanStatus,
   type KanbanTask,
 } from "@/lib/kanban";
@@ -45,6 +48,7 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
   const [title, setTitle] = useState("");
   const [repository, setRepository] = useState("");
   const [description, setDescription] = useState("");
+  const [priority, setPriority] = useState<KanbanPriority>("normal");
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editRepository, setEditRepository] = useState("");
@@ -62,9 +66,14 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
   );
   const visibleTasks = useMemo(
     () =>
-      repositoryFilter === "all"
-        ? tasks
-        : tasks.filter((task) => task.repository === repositoryFilter),
+      (repositoryFilter === "all"
+        ? [...tasks]
+        : tasks.filter((task) => task.repository === repositoryFilter)
+      ).sort(
+        (left, right) =>
+          right.priority - left.priority ||
+          left.createdAt.localeCompare(right.createdAt),
+      ),
     [repositoryFilter, tasks],
   );
   const [inspectedAgentId, setInspectedAgentId] = useState<string | null>(null);
@@ -174,6 +183,7 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
           title: nextTitle,
           repository: nextRepository,
           description: description.trim(),
+          priority,
         }),
       });
       if (!response.ok) {
@@ -183,6 +193,7 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
       setTasks((current) => [...current, task]);
       setTitle("");
       setDescription("");
+      setPriority("normal");
       setRepository(nextRepository);
       setError(null);
       addTaskDialogRef.current?.close();
@@ -444,6 +455,21 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
             />
           </label>
           <label>
+            <span>Priority</span>
+            <select
+              onChange={(event) =>
+                setPriority(event.target.value as KanbanPriority)
+              }
+              value={priority}
+            >
+              {kanbanPriorities.map((level) => (
+                <option key={level.id} value={level.id}>
+                  {level.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
             <span>Description for agent</span>
             <textarea
               maxLength={5_000}
@@ -691,6 +717,7 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
                   const isSelected = editingTaskId === task.id;
                   const isSaving = savingTaskId === task.id;
                   const isEditable = isKanbanTaskEditable(task);
+                  const cardPriority = kanbanPriorityOf(task.priority);
 
                   return (
                     <article
@@ -709,8 +736,15 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
                         onClick={(event) => editTask(task, event.currentTarget)}
                         type="button"
                       >
-                        <span className="kanban-card__repository">
-                          {task.repository}
+                        <span className="kanban-card__title-row">
+                          <span className="kanban-card__repository">
+                            {task.repository}
+                          </span>
+                          <span
+                            className={`kanban-card__priority kanban-card__priority--${cardPriority.id}`}
+                          >
+                            {cardPriority.label}
+                          </span>
                         </span>
                         <span className="kanban-card__title-row">
                           <span className="kanban-card__title">
