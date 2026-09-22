@@ -3,6 +3,7 @@ import {
   readJsonObject,
   requiredString,
 } from "@/lib/api-input";
+import { parseKanbanPriority } from "@/lib/kanban";
 import { getTaskStore } from "@/lib/task-store";
 
 export const dynamic = "force-dynamic";
@@ -20,17 +21,14 @@ export async function POST(request: Request) {
   const title = requiredString(body?.title, 200);
   const repository = requiredString(body?.repository, 200);
   const description = optionalString(body?.description, 5_000);
-  const priority = body?.priority ?? 0;
+  const priority = parseKanbanPriority(body?.priority);
 
   if (
     !body ||
     !title ||
     !repository ||
     description === null ||
-    typeof priority !== "number" ||
-    !Number.isInteger(priority) ||
-    priority < -100 ||
-    priority > 100
+    priority === null
   ) {
     return Response.json({ error: "Invalid task input." }, { status: 400 });
   }
