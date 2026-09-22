@@ -3,7 +3,9 @@ import test from "node:test";
 
 import {
   findTaskAgent,
+  formatBangkokTime,
   formatDuration,
+  formatStatusAge,
   formatTokenCount,
   isKanbanTaskEditable,
   isKanbanStatus,
@@ -300,6 +302,32 @@ test("formatDuration scales from seconds to days", () => {
   assert.equal(formatDuration(90_000), "1m 30s");
   assert.equal(formatDuration(3_900_000), "1h 5m");
   assert.equal(formatDuration(93_600_000), "1d 2h");
+});
+
+test("formatBangkokTime converts to GMT+7", () => {
+  assert.equal(formatBangkokTime("2026-09-12T07:30:00Z"), "Sep 12, 14:30");
+  assert.equal(formatBangkokTime("2026-09-12T20:15:00Z"), "Sep 13, 03:15");
+});
+
+test("formatStatusAge counts minutes, hours and days within a week", () => {
+  const since = "2026-09-12T07:30:00.000Z";
+  const at = (milliseconds: number) =>
+    formatStatusAge(since, new Date(Date.parse(since) + milliseconds));
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  assert.equal(at(0), "Last 1 Minute");
+  assert.equal(at(119_999), "Last 1 Minute");
+  assert.equal(at(2 * minute), "Last 2 Minutes");
+  assert.equal(at(59 * minute), "Last 59 Minutes");
+  assert.equal(at(hour), "Last 1 Hour");
+  assert.equal(at(2 * hour), "Last 2 Hours");
+  assert.equal(at(23 * hour + 59 * minute), "Last 23 Hours");
+  assert.equal(at(day), "Last 1 Day");
+  assert.equal(at(2 * day), "Last 2 Days");
+  assert.equal(at(6 * day + 23 * hour), "Last 6 Days");
+  assert.equal(at(7 * day), "Sep 12, 14:30");
+  assert.equal(at(-5 * minute), "Last 1 Minute");
 });
 
 test("formatTokenCount keeps the badge short", () => {

@@ -187,6 +187,34 @@ export function formatDuration(milliseconds: number): string {
     : `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
+const bangkokTime = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+  timeZone: "Asia/Bangkok",
+});
+
+export function formatBangkokTime(isoString: string): string {
+  return bangkokTime.format(new Date(isoString));
+}
+
+/** "Last N Minute(s)/Hour(s)/Day(s)" within a week, otherwise the time in GMT+7. */
+export function formatStatusAge(isoString: string, now = new Date()): string {
+  const last = (amount: number, unit: string) =>
+    `Last ${amount} ${unit}${amount === 1 ? "" : "s"}`;
+  const minutes = Math.max(
+    1,
+    Math.floor((now.getTime() - Date.parse(isoString)) / 60_000),
+  );
+  if (minutes < 60) return last(minutes, "Minute");
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return last(hours, "Hour");
+  const days = Math.floor(hours / 24);
+  return days < 7 ? last(days, "Day") : formatBangkokTime(isoString);
+}
+
 export function formatTokenCount(tokens: number): string {
   if (tokens < 1_000) return `${tokens}`;
   if (tokens < 1_000_000) return `${(tokens / 1_000).toFixed(1)}k`;
