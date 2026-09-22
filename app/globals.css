@@ -840,7 +840,11 @@ button:focus-visible,
 }
 
 .kanban-column {
-  min-height: 460px;
+  /* 260px = page chrome around the column (shell padding, page header, Kanban header, board padding) so the board fits the viewport. */
+  display: flex;
+  min-height: min(460px, calc(100dvh - 260px));
+  max-height: calc(100dvh - 260px);
+  flex-direction: column;
   padding: 10px;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
@@ -877,7 +881,12 @@ button:focus-visible,
 
 .kanban-column__tasks {
   display: grid;
+  min-height: 0;
+  flex: 1;
+  align-content: start;
   gap: 8px;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .kanban-card {
@@ -2269,6 +2278,12 @@ button:focus-visible,
 
   .kanban-filter select {
     width: 100%;
+  }
+
+  /* Stacked page and Kanban headers make the chrome around the column taller. */
+  .kanban-column {
+    min-height: min(460px, calc(100dvh - 315px));
+    max-height: calc(100dvh - 315px);
   }
 
   .kanban-task-dialog {
