@@ -472,6 +472,13 @@ test("TaskStore reads the pull request number from the result when none is sent"
   );
   assert.equal(fromMention?.pullRequestNumber, 7);
 
+  const prose = await completedWith(
+    "No code change needed - already shipped in PR #1998",
+  );
+  assert.equal(prose?.pullRequestNumber, null);
+  assert.equal((await completedWith("see PR #0"))?.pullRequestNumber, null);
+  assert.equal((await completedWith("PR #0 opened"))?.pullRequestNumber, null);
+
   const reported = await completedWith(
     "PR #7 merged via https://github.com/o/r/pull/9",
     { pullRequestNumber: 11 },
@@ -511,7 +518,7 @@ test("TaskStore upgrades a database written before run details existed", async (
     ),
     (
       'legacy-2', 'Finished task', '', 'monitor-agents', 'done', 0,
-      'agent-1', '2026-08-04T00:01:00.000Z', 'https://github.com/o/r/pull/5',
+      'agent-1', '2026-08-04T00:01:00.000Z', 'PR #5 https://github.com/o/r/pull/5 - open',
       '2026-08-04T00:00:00.000Z', '2026-08-04T00:09:00.000Z'
     ),
     (

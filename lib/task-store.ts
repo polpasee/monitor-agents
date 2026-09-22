@@ -67,7 +67,9 @@ function statusHistoryFromRow(value: string): KanbanStatusEvent[] {
 /** Rows completed before the number was reported still name the PR in `result`. */
 function pullRequestNumberFromResult(result: string | null): number | null {
   const match =
-    result && (/PR #(\d+)/.exec(result) ?? /\/pull\/(\d+)/.exec(result));
+    result &&
+    (/^PR #([1-9]\d*)/.exec(result) ??
+      /^Pull request: \S*\/pull\/([1-9]\d*)/m.exec(result));
   return match ? Number(match[1]) : null;
 }
 
