@@ -839,6 +839,65 @@ button:focus-visible,
   overflow-x: auto;
 }
 
+.api-reference {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  box-shadow: var(--shadow);
+}
+
+.api-reference__notes {
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.api-reference__notes p {
+  margin: 4px 0;
+}
+
+.api-reference code {
+  color: var(--lime);
+}
+
+.api-table-wrap {
+  overflow-x: auto;
+}
+
+.api-table {
+  width: 100%;
+  min-width: 900px;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.api-table th,
+.api-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-soft);
+  text-align: left;
+  vertical-align: top;
+}
+
+.api-table th {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.api-table__method {
+  color: var(--lime);
+  font-weight: 700;
+}
+
+.api-table ul {
+  margin: 0;
+  padding-left: 16px;
+}
+
 .kanban-column {
   /* 260px = page chrome around the column (shell padding, page header, Kanban header, board padding) so the board fits the viewport. */
   display: flex;

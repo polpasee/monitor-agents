@@ -11,6 +11,7 @@ import {
 } from "@/lib/telemetry";
 
 import { AgentInspector } from "./agent-inspector";
+import { ApiReference } from "./api-reference";
 import { KanbanBoard } from "./kanban-board";
 import { Topology } from "./topology";
 
@@ -19,7 +20,7 @@ interface DashboardProps {
 }
 
 type MetricIconName = "agents" | "tokens" | "cost" | "health";
-type DashboardView = "topology" | "kanban";
+type DashboardView = "topology" | "kanban" | "api";
 
 const compactNumber = new Intl.NumberFormat("en-US", {
   notation: "compact",
@@ -387,6 +388,13 @@ export function Dashboard({ snapshot: initialSnapshot }: DashboardProps) {
           >
             Kanban
           </button>
+          <button
+            aria-current={view === "api" ? "page" : undefined}
+            onClick={() => setView("api")}
+            type="button"
+          >
+            API
+          </button>
         </nav>
       </header>
 
@@ -412,11 +420,13 @@ export function Dashboard({ snapshot: initialSnapshot }: DashboardProps) {
             onSelectAgent={selectAgent}
           />
         </div>
-      ) : (
+      ) : view === "kanban" ? (
         <KanbanBoard
           agents={snapshot.agents}
           capturedAt={snapshot.capturedAt}
         />
+      ) : (
+        <ApiReference />
       )}
 
       <section className="metric-grid" aria-label="Session summary">
