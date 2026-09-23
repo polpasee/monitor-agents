@@ -166,7 +166,7 @@ curl -sS http://127.0.0.1:5001/api/agent/tasks/TASK_ID/heartbeat \
   -d '{"agentId":"codex-worker-1","leaseSeconds":60}'
 ```
 
-Successful work moves to `review-queue` for a human decision:
+Successful work moves to `review-queue`, where a reviewer agent picks it up (see `/docs`):
 
 ```bash
 curl -sS http://127.0.0.1:5001/api/agent/tasks/TASK_ID/complete \
@@ -241,8 +241,8 @@ prompt tells Claude to queue unrelated work through `POST /api/agent/tasks`. Eac
 attempt gets its own branch and worktree (`task/<slug>`, then `task/<slug>-a2`
 on retry). Successful tasks move to `review-queue` with the pull request URL in the
 result and their worktree removed; failed tasks move to `review-queue` with the
-error and keep the worktree for inspection. Drag a failed task back to `todo` to
-retry it.
+error and keep the worktree for inspection. A reviewer agent sends a failed task
+back to `todo` (`PATCH /api/tasks/{id}`) to retry it.
 
 ## Quality checks
 
