@@ -842,6 +842,11 @@ button:focus-visible,
   overflow-x: auto;
 }
 
+.docs-page {
+  display: grid;
+  gap: 14px;
+}
+
 .api-reference {
   overflow: hidden;
   border: 1px solid var(--border);

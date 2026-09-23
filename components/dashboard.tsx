@@ -388,7 +388,7 @@ export function Dashboard({ snapshot: initialSnapshot }: DashboardProps) {
           >
             Kanban
           </button>
-          <Link href="/api-docs">API</Link>
+          <Link href="/docs">Docs</Link>
         </nav>
       </header>
 
