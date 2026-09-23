@@ -54,6 +54,7 @@ export interface ClaimTaskInput {
   repositories: string[];
   now?: Date;
   leaseMs?: number;
+  metadata?: TaskRunMetadata;
 }
 
 function statusHistoryFromRow(value: string): KanbanStatusEvent[] {
@@ -483,6 +484,7 @@ export class TaskStore {
               lease_until = ?,
               last_error = NULL,
               attempt_count = attempt_count + 1,
+              ${runMetadataSql},
               status_history = ${appendStatusSql},
               updated_at = ?
           WHERE id = ? AND status = 'todo'
@@ -491,6 +493,7 @@ export class TaskStore {
           input.agentId.trim(),
           nowIso,
           leaseUntil,
+          ...runMetadataValues(input.metadata),
           "in-progress",
           nowIso,
           nowIso,

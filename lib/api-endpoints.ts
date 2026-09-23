@@ -100,6 +100,7 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
       "agentId: string, 1–200 chars",
       "repositories: string[], 1–100 items, each 1–200 chars",
       "leaseSeconds?: integer 15–3600 (default 60)",
+      ...runMetadata,
     ],
     responses: [
       { status: 200, description: "KanbanTask in in-progress" },

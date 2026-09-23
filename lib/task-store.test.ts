@@ -303,6 +303,26 @@ test("TaskStore lists and claims higher priority first", async () => {
   }
 });
 
+test("TaskStore records the run a claim names", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-claim-run-"));
+  const store = new TaskStore(join(directory, "tasks.sqlite"));
+
+  try {
+    store.createTask({ title: "Run", repository: "monitor-agents" });
+    const claimed = store.claimTask({
+      agentId: "agent-1",
+      repositories: ["monitor-agents"],
+      metadata: { sessionId: "session-1", agentRunId: "claude:session-1:worker" },
+    });
+    assert.equal(claimed?.sessionId, "session-1");
+    assert.equal(claimed?.agentRunId, "claude:session-1:worker");
+    assert.equal(claimed?.usedTokens, null);
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("TaskStore releases an expired lease for another agent", async () => {
   const directory = await mkdtemp(join(tmpdir(), "monitor-task-lease-"));
   const store = new TaskStore(join(directory, "tasks.sqlite"));

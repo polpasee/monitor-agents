@@ -366,14 +366,21 @@ export function findTaskAgent(
 /**
  * The tokens a task has used: the total its agent reported, or while none is
  * reported yet, the live input and output of the run found for the task.
+ * A todo task's run belongs to an attempt that ended, and a session's own run
+ * found only by its id counts every task that session worked on, so neither
+ * stands in for the task.
  */
 export function kanbanTaskTokens(
   task: KanbanTask,
   agents: readonly AgentRun[],
 ): number | null {
   if (typeof task.usedTokens === "number") return task.usedTokens;
+  if (task.status === "todo") return null;
   const run = findTaskAgent(task, agents);
-  return run ? run.tokenUsage.input + run.tokenUsage.output : null;
+  if (!run || (run.parentId === null && run.id !== task.agentRunId)) {
+    return null;
+  }
+  return run.tokenUsage.input + run.tokenUsage.output;
 }
 
 export function kanbanRepositories(tasks: readonly KanbanTask[]): string[] {
