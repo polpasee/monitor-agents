@@ -363,6 +363,19 @@ export function findTaskAgent(
   return orchestrators[0]?.agent ?? root;
 }
 
+/**
+ * The tokens a task has used: the total its agent reported, or while none is
+ * reported yet, the live input and output of the run found for the task.
+ */
+export function kanbanTaskTokens(
+  task: KanbanTask,
+  agents: readonly AgentRun[],
+): number | null {
+  if (typeof task.usedTokens === "number") return task.usedTokens;
+  const run = findTaskAgent(task, agents);
+  return run ? run.tokenUsage.input + run.tokenUsage.output : null;
+}
+
 export function kanbanRepositories(tasks: readonly KanbanTask[]): string[] {
   return [...new Set(tasks.map((task) => task.repository))].sort((left, right) =>
     left.localeCompare(right),

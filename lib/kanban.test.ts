@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   findTaskAgent,
+  kanbanTaskTokens,
   formatBangkokTime,
   formatDuration,
   formatStatusAge,
@@ -668,4 +669,15 @@ test("compareKanbanColumnTasks orders review-queue, review and done by latest en
       .map(({ id }) => id),
     ["reentered", "once"],
   );
+});
+
+test("kanbanTaskTokens counts the live run until the agent reports a total", () => {
+  const run = agent("claude:session-1", null, {
+    tokenUsage: { input: 1_000, output: 234, cached: 50, contextUsed: 0, contextLimit: 0 },
+  });
+  const active = { ...task, status: "in-progress" as const, usedTokens: null };
+  assert.equal(kanbanTaskTokens(active, [run]), 1_234);
+  assert.equal(kanbanTaskTokens({ ...active, usedTokens: 9_000 }, [run]), 9_000);
+  assert.equal(kanbanTaskTokens({ ...active, sessionId: null }, [run]), null);
+  assert.equal(kanbanTaskTokens(active, []), null);
 });

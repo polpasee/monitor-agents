@@ -21,6 +21,7 @@ import {
   kanbanStatusDurations,
   kanbanStatusSince,
   kanbanStatuses,
+  kanbanTaskTokens,
   type KanbanPriority,
   type KanbanStatus,
   type KanbanTask,
@@ -656,9 +657,8 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
                   <div>
                     <dt>Used tokens</dt>
                     <dd>
-                      {typeof selectedTask.usedTokens === "number"
-                        ? selectedTask.usedTokens.toLocaleString()
-                        : "—"}
+                      {kanbanTaskTokens(selectedTask, agents)?.toLocaleString() ??
+                        "—"}
                     </dd>
                   </div>
                   <div>
@@ -784,7 +784,8 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
                   const isSaving = savingTaskId === task.id;
                   const isEditable = isKanbanTaskEditable(task);
                   const cardPriority = kanbanPriorityOf(task.priority);
-                  const showsTokens = typeof task.usedTokens === "number";
+                  const usedTokens = kanbanTaskTokens(task, agents);
+                  const showsTokens = usedTokens !== null;
                   const showsPullRequest =
                     showsCompletion(task) &&
                     typeof task.pullRequestNumber === "number";
@@ -822,12 +823,12 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
                         </span>
                         {(showsTokens || showsPullRequest) && (
                           <span className="kanban-card__badges">
-                            {typeof task.usedTokens === "number" && (
+                            {usedTokens !== null && (
                               <span
                                 className="kanban-card__tokens"
-                                title={`${task.usedTokens.toLocaleString()} tokens used`}
+                                title={`${usedTokens.toLocaleString()} tokens used`}
                               >
-                                {formatTokenCount(task.usedTokens)}
+                                {formatTokenCount(usedTokens)}
                               </span>
                             )}
                             {showsPullRequest && (
