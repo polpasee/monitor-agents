@@ -185,9 +185,10 @@ function kanbanStatusFirstAt(task: KanbanTask): string {
 }
 
 /**
- * Orders cards within one column: `todo` lists higher priority first, and every
- * column lists the task that first entered the status earliest first, so a task
- * sent back by an expired lease keeps its place.
+ * Orders cards within one column: `todo` lists higher priority first. `todo` and
+ * `in-progress` then list the task that first entered the status earliest, so a
+ * task sent back by an expired lease keeps its place; the later columns list the
+ * task that last entered earliest, so a re-queued task goes to the back.
  */
 export function compareKanbanColumnTasks(
   left: KanbanTask,
@@ -198,9 +199,13 @@ export function compareKanbanColumnTasks(
   // Grouping by status first keeps the order total when the board sorts every column at once.
   const byStatus = statusIndex(left) - statusIndex(right);
   if (byStatus) return byStatus;
+  const enteredAt =
+    left.status === "todo" || left.status === "in-progress"
+      ? kanbanStatusFirstAt
+      : kanbanStatusSince;
   return (
     (left.status === "todo" ? right.priority - left.priority : 0) ||
-    kanbanStatusFirstAt(left).localeCompare(kanbanStatusFirstAt(right))
+    enteredAt(left).localeCompare(enteredAt(right))
   );
 }
 
