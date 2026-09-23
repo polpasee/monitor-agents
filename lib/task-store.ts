@@ -143,9 +143,9 @@ const tasksIndexSql = `
     ON tasks (status, repository, priority DESC, created_at ASC);
 `;
 
-function tasksTableSql(name: string) {
+function tasksTableSql(target: string) {
   return `
-  CREATE TABLE ${name} (
+  CREATE TABLE ${target} (
     id TEXT PRIMARY KEY,
     title TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
