@@ -121,7 +121,7 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
       ...bearerErrors,
     ],
     description:
-      "Atomically claims the highest-priority, oldest Todo task in the given repositories and moves it to In progress.",
+      "Atomically claims the highest-priority, oldest Todo task in the given repositories and moves it to In Coding Progress.",
   },
   {
     method: "POST",

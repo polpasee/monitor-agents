@@ -3,9 +3,9 @@ import type { AgentRun } from "./telemetry.ts";
 
 export const kanbanStatuses = [
   { id: "todo", label: "Todo" },
-  { id: "in-progress", label: "In progress" },
+  { id: "in-progress", label: "In Coding Progress" },
   { id: "review-queue", label: "Review Queue" },
-  { id: "review", label: "Review" },
+  { id: "review", label: "In Review Progress" },
   { id: "done", label: "Done" },
 ] as const;
 
