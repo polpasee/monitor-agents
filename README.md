@@ -136,7 +136,7 @@ SQLite mode with one Next.js server instance; use an external transactional
 database before scaling the dashboard to multiple server instances.
 
 The dashboard can create tasks and move them between `todo`, `in-progress`,
-`review`, `done`, and `failed`. Each task has a priority of `low`, `normal` (the
+`review-queue`, `review`, and `done`. Each task has a priority of `low`, `normal` (the
 default for tasks added on the dashboard), or `high`. Agents claim higher
 priority first, and each column lists higher priority first. An Agent must claim
 a task before working on it.
@@ -173,7 +173,7 @@ curl -sS http://127.0.0.1:5000/api/agent/tasks/TASK_ID/heartbeat \
   -d '{"agentId":"codex-worker-1","leaseSeconds":60}'
 ```
 
-Successful work moves to `review` for a human decision:
+Successful work moves to `review-queue` for a human decision:
 
 ```bash
 curl -sS http://127.0.0.1:5000/api/agent/tasks/TASK_ID/complete \
@@ -182,9 +182,9 @@ curl -sS http://127.0.0.1:5000/api/agent/tasks/TASK_ID/complete \
   -d '{"agentId":"codex-worker-1","result":"Commit abc123; tests passed.","pullRequestNumber":42,"summary":"Added the repository filter; npm test passed."}'
 ```
 
-`pullRequestNumber` (positive integer) and `summary` (up to 10,000 characters) are optional; the board shows `PR #N` on the card and the summary in Run details. Without a number, the board reads it from a `result` that starts with `PR #N` or has a `Pull request: …/pull/N` line. Both are hidden unless the task is in Review or Done.
+`pullRequestNumber` (positive integer) and `summary` (up to 10,000 characters) are optional; the board shows `PR #N` on the card and the summary in Run details. Without a number, the board reads it from a `result` that starts with `PR #N` or has a `Pull request: …/pull/N` line. Both are hidden unless the task is in Review Queue, Review or Done.
 
-Failed work moves to `failed` and records the error:
+Failed work also moves to `review-queue` and records the error:
 
 ```bash
 curl -sS http://127.0.0.1:5000/api/agent/tasks/TASK_ID/fail \
@@ -250,9 +250,10 @@ with your full local privileges.
 The runner owns git, and the prompt tells Claude not to commit or push. The
 prompt tells Claude to queue unrelated work through `POST /api/agent/tasks`. Each
 attempt gets its own branch and worktree (`task/<slug>`, then `task/<slug>-a2`
-on retry). Successful tasks move to `review` with the pull request URL in the
-result and their worktree removed; failed tasks move to `failed` and keep the
-worktree for inspection. Move a failed task back to `todo` to retry it.
+on retry). Successful tasks move to `review-queue` with the pull request URL in the
+result and their worktree removed; failed tasks move to `review-queue` with the
+error and keep the worktree for inspection. Drag a failed task back to `todo` to
+retry it.
 
 ## Quality checks
 

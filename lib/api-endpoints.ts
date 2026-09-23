@@ -59,7 +59,7 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
     path: "/api/tasks/{id}",
     auth: "none",
     request: [
-      'Either { status: "todo" | "in-progress" | "review" | "done" | "failed" } alone',
+      'Either { status: "todo" | "in-progress" | "review-queue" | "review" | "done" } alone',
       "Or exactly { title, repository, description } (limits as POST) plus priority?; omitted keeps the current one, null resets it to normal",
     ],
     responses: [
@@ -153,12 +153,12 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
       ...runMetadata,
     ],
     responses: [
-      { status: 200, description: "KanbanTask in review" },
+      { status: 200, description: "KanbanTask in review-queue" },
       { status: 400, description: '{"error":"Invalid completion input."}' },
       inactiveClaim,
       ...bearerErrors,
     ],
-    description: "Moves the claimed task to Review (not Done) with its result.",
+    description: "Moves the claimed task to Review Queue (not Done) with its result.",
   },
   {
     method: "POST",
@@ -170,11 +170,11 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
       ...runMetadata,
     ],
     responses: [
-      { status: 200, description: "KanbanTask in failed" },
+      { status: 200, description: "KanbanTask in review-queue" },
       { status: 400, description: '{"error":"Invalid failure input."}' },
       inactiveClaim,
       ...bearerErrors,
     ],
-    description: "Moves the claimed task to Failed with its error.",
+    description: "Moves the claimed task to Review Queue with its error.",
   },
 ];
