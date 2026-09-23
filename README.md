@@ -157,16 +157,22 @@ Claim the highest-priority available task:
 ```bash
 curl -sS http://127.0.0.1:5001/api/agent/tasks/claim \
   -H "Content-Type: application/json" \
-  -d '{"agentId":"codex-worker-1","repositories":["monitor-agents"],"leaseSeconds":60}'
+  -d '{"agentId":"codex-worker-1","repositories":["monitor-agents"],"leaseSeconds":60,"sessionId":"SESSION_ID","agentRunId":"AGENT_RUN_ID"}'
 ```
 
+`sessionId` and `agentRunId` are optional and replace the previous attempt's.
+`agentRunId` must name a run that works on this task only. Until the Agent
+reports `usedTokens`, an active card shows that run's live tokens. A session
+that works on several tasks sends only `sessionId`: its own run counts every
+one of those tasks, so the card waits for `usedTokens` instead.
+
 An empty queue returns HTTP `204`. While working, renew the lease before it
-expires:
+expires, sending this attempt's running token total:
 
 ```bash
 curl -sS http://127.0.0.1:5001/api/agent/tasks/TASK_ID/heartbeat \
   -H "Content-Type: application/json" \
-  -d '{"agentId":"codex-worker-1","leaseSeconds":60}'
+  -d '{"agentId":"codex-worker-1","leaseSeconds":60,"usedTokens":12000}'
 ```
 
 Successful work moves to `review-queue`, where a reviewer agent picks it up (see `/docs`):

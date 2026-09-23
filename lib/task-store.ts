@@ -54,6 +54,7 @@ export interface ClaimTaskInput {
   repositories: string[];
   now?: Date;
   leaseMs?: number;
+  metadata?: TaskRunMetadata;
 }
 
 function statusHistoryFromRow(value: string): KanbanStatusEvent[] {
@@ -113,6 +114,20 @@ const appendStatusSql =
 const runMetadataSql = `
   session_id = COALESCE(?, session_id),
   agent_run_id = COALESCE(?, agent_run_id),
+  model = COALESCE(?, model),
+  effort = COALESCE(?, effort),
+  used_tokens = CASE
+    WHEN ? IS NULL THEN used_tokens ELSE carried_tokens + ?
+  END
+`;
+
+/**
+ * A claim starts a new attempt, so the run ids it names replace the last
+ * attempt's, even when it names none. Takes the same values as `runMetadataSql`.
+ */
+const claimRunMetadataSql = `
+  session_id = ?,
+  agent_run_id = ?,
   model = COALESCE(?, model),
   effort = COALESCE(?, effort),
   used_tokens = CASE
@@ -483,6 +498,7 @@ export class TaskStore {
               lease_until = ?,
               last_error = NULL,
               attempt_count = attempt_count + 1,
+              ${claimRunMetadataSql},
               status_history = ${appendStatusSql},
               updated_at = ?
           WHERE id = ? AND status = 'todo'
@@ -491,6 +507,7 @@ export class TaskStore {
           input.agentId.trim(),
           nowIso,
           leaseUntil,
+          ...runMetadataValues(input.metadata),
           "in-progress",
           nowIso,
           nowIso,
