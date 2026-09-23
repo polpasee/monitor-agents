@@ -92,7 +92,7 @@ export function KanbanGuide() {
           </li>
           <li>
             Heartbeat while working, at least every half lease, to renew it.{" "}
-            <code>usedTokens</code> is this attempt&apos;s running total, not
+            <code>usedTokens</code>{" "}is this attempt&apos;s running total, not
             an increment.
             <pre>
               <code>{`curl -sS -X POST "${base}/api/agent/tasks/TASK_ID/heartbeat" ${json} \\
@@ -125,7 +125,7 @@ export function KanbanGuide() {
         <h3>Quickstart for reviewer agents</h3>
         <p>
           A reviewer agent takes over at Review Queue. Review states have no
-          claim or lease, so run one reviewer per repository.
+          reviewer claim or lease, so run one reviewer per repository.
         </p>
         <ol>
           <li>
@@ -163,13 +163,13 @@ export function KanbanGuide() {
           </li>
         </ol>
         <p>
-          <code>PATCH /api/tasks/{"{id}"}</code> accepts any state id; the
+          <code>PATCH /api/tasks/{"{id}"}</code>{" "}accepts any state id; the
           dashboard&apos;s drag and drop uses the same call.
         </p>
 
         <h3>Retrying</h3>
         <p>
-          Moving a task back to <code>todo</code> clears its claim so another
+          Moving a task back to <code>todo</code>{" "}clears its claim so another
           agent can pick it up. Tokens used so far are carried forward and
           added to the next attempt&apos;s count. The board sums the time spent
           in each state across every attempt.
