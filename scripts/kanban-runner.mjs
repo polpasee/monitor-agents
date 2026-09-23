@@ -24,7 +24,6 @@ const execFileAsync = promisify(execFile);
 
 const config = {
   apiUrl: (process.env.MONITOR_API_URL ?? "http://127.0.0.1:5000").replace(/\/$/, ""),
-  token: (process.env.MONITOR_AGENT_TOKEN ?? "").trim(),
   workspaceRoot: process.env.MONITOR_WORKSPACE_ROOT ?? join(process.env.HOME ?? "", "Github"),
   agentId: process.env.KANBAN_RUNNER_ID ?? `kanban-runner@${hostname()}`,
   pollSeconds: Number(process.env.KANBAN_POLL_SECONDS ?? 10),
@@ -59,7 +58,6 @@ async function api(path, body) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      authorization: `Bearer ${config.token}`,
     },
     body: JSON.stringify(body),
   });
@@ -291,10 +289,6 @@ async function runTask(task, directory) {
 }
 
 async function main() {
-  if (!config.token) {
-    process.stderr.write("MONITOR_AGENT_TOKEN is required.\n");
-    process.exit(1);
-  }
   await mkdir(config.logDir, { recursive: true });
   log(`Runner ${config.agentId} polling ${config.apiUrl} every ${config.pollSeconds}s`);
 
