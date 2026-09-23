@@ -138,6 +138,43 @@ function runMetadataValues(metadata: TaskRunMetadata | undefined) {
   ] as const;
 }
 
+const tasksIndexSql = `
+  CREATE INDEX IF NOT EXISTS tasks_queue
+    ON tasks (status, repository, priority DESC, created_at ASC);
+`;
+
+function tasksTableSql(name: string) {
+  return `
+  CREATE TABLE ${name} (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    repository TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (
+      status IN ('todo', 'in-progress', 'review-queue', 'review', 'done')
+    ),
+    priority INTEGER NOT NULL DEFAULT 0,
+    claimed_by TEXT,
+    claimed_at TEXT,
+    lease_until TEXT,
+    result TEXT,
+    last_error TEXT,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    session_id TEXT,
+    agent_run_id TEXT,
+    model TEXT,
+    effort TEXT,
+    used_tokens INTEGER,
+    carried_tokens INTEGER NOT NULL DEFAULT 0,
+    pull_request_number INTEGER,
+    summary TEXT,
+    status_history TEXT NOT NULL DEFAULT '[]',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  `;
+}
+
 export class TaskStore {
   private readonly database: DatabaseSync;
 
@@ -148,36 +185,8 @@ export class TaskStore {
       PRAGMA journal_mode = WAL;
       PRAGMA busy_timeout = 5000;
 
-      CREATE TABLE IF NOT EXISTS tasks (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        description TEXT NOT NULL DEFAULT '',
-        repository TEXT NOT NULL,
-        status TEXT NOT NULL CHECK (
-          status IN ('todo', 'in-progress', 'review', 'done', 'failed')
-        ),
-        priority INTEGER NOT NULL DEFAULT 0,
-        claimed_by TEXT,
-        claimed_at TEXT,
-        lease_until TEXT,
-        result TEXT,
-        last_error TEXT,
-        attempt_count INTEGER NOT NULL DEFAULT 0,
-        session_id TEXT,
-        agent_run_id TEXT,
-        model TEXT,
-        effort TEXT,
-        used_tokens INTEGER,
-        carried_tokens INTEGER NOT NULL DEFAULT 0,
-        pull_request_number INTEGER,
-        summary TEXT,
-        status_history TEXT NOT NULL DEFAULT '[]',
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL
-      );
-
-      CREATE INDEX IF NOT EXISTS tasks_queue
-        ON tasks (status, repository, priority DESC, created_at ASC);
+      ${tasksTableSql("IF NOT EXISTS tasks")}
+      ${tasksIndexSql}
     `);
     this.migrate();
   }
@@ -213,6 +222,42 @@ export class TaskStore {
       }
     }
 
+    // Failed work now waits in the Review Queue. SQLite cannot alter a CHECK,
+    // so a table whose CHECK still allows 'failed' is rebuilt under the new one.
+    const { sql } = this.database
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'tasks'")
+      .get() as { sql: string };
+    if (sql.includes("'failed'")) {
+      const names = (
+        this.database.prepare("PRAGMA table_info(tasks)").all() as unknown as {
+          name: string;
+        }[]
+      ).map((column) => column.name);
+      const values = names.map((name) =>
+        name === "status"
+          ? "CASE status WHEN 'failed' THEN 'review-queue' ELSE status END"
+          : name,
+      );
+      this.database.exec("BEGIN IMMEDIATE");
+      try {
+        this.database.exec(`
+          ${tasksTableSql("tasks_next")}
+          INSERT INTO tasks_next (${names.join(", ")})
+            SELECT ${values.join(", ")} FROM tasks;
+          DROP TABLE tasks;
+          ALTER TABLE tasks_next RENAME TO tasks;
+          ${tasksIndexSql}
+        `);
+        this.database.exec("COMMIT");
+      } catch (error) {
+        this.database.exec("ROLLBACK");
+        throw error;
+      }
+    }
+    this.database.exec(
+      "UPDATE tasks SET status = 'review-queue' WHERE status = 'failed'",
+    );
+
     // A finished row still carries the moment it was claimed, so its run time
     // is booked to `in-progress` instead of collapsing into the final status.
     this.database.exec(`
@@ -237,6 +282,13 @@ export class TaskStore {
         )
       END
       WHERE status_history IS NULL OR status_history = '[]'
+    `);
+    this.database.exec(`
+      UPDATE tasks
+      SET status_history = REPLACE(
+        status_history, '"status":"failed"', '"status":"review-queue"'
+      )
+      WHERE status_history LIKE '%"status":"failed"%'
     `);
   }
 
@@ -491,7 +543,7 @@ export class TaskStore {
     const result = this.database
       .prepare(`
         UPDATE tasks
-        SET status = 'review',
+        SET status = 'review-queue',
             result = ?,
             pull_request_number = ?,
             summary = ?,
@@ -508,7 +560,7 @@ export class TaskStore {
         resultText.trim(),
         completion?.pullRequestNumber ?? null,
         completion?.summary?.trim() || null,
-        "review",
+        "review-queue",
         now.toISOString(),
         ...runMetadataValues(metadata),
         now.toISOString(),
@@ -529,7 +581,7 @@ export class TaskStore {
     const result = this.database
       .prepare(`
         UPDATE tasks
-        SET status = 'failed',
+        SET status = 'review-queue',
             last_error = ?,
             lease_until = NULL,
             status_history = ${appendStatusSql},
@@ -542,7 +594,7 @@ export class TaskStore {
       `)
       .run(
         errorText.trim(),
-        "failed",
+        "review-queue",
         now.toISOString(),
         ...runMetadataValues(metadata),
         now.toISOString(),

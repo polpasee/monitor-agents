@@ -4,9 +4,9 @@ import type { AgentRun } from "./telemetry.ts";
 export const kanbanStatuses = [
   { id: "todo", label: "Todo" },
   { id: "in-progress", label: "In progress" },
+  { id: "review-queue", label: "Review Queue" },
   { id: "review", label: "Review" },
   { id: "done", label: "Done" },
-  { id: "failed", label: "Failed" },
 ] as const;
 
 export type KanbanStatus = (typeof kanbanStatuses)[number]["id"];
@@ -128,7 +128,7 @@ export function parseKanbanTaskPatch(
 }
 
 /** Statuses where the work has stopped, so nothing is still being spent. */
-const terminalStatuses = new Set<KanbanStatus>(["done", "failed"]);
+const terminalStatuses = new Set<KanbanStatus>(["done"]);
 
 /**
  * `statusHistory` records the moment each status started, so the time spent in
