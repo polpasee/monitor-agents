@@ -13,6 +13,7 @@ import {
   kanbanRepositories,
   kanbanStatusDurations,
   kanbanStatusSince,
+  compareKanbanColumnTasks,
   kanbanStatuses,
   parseKanbanPriority,
   parseKanbanTaskPatch,
@@ -553,4 +554,56 @@ test("kanbanPriorityOf reads the level from the sign of the stored number", () =
   assert.equal(kanbanPriorityOf(-5).id, "low");
   assert.equal(kanbanPriorityOf(0).id, "normal");
   assert.equal(kanbanPriorityOf(1).label, "High");
+});
+
+test("compareKanbanColumnTasks orders todo by priority, then first entry into todo", () => {
+  const todo = (id: string, priority: number, at: string): KanbanTask => ({
+    ...task,
+    id,
+    status: "todo",
+    priority,
+    statusHistory: [{ status: "todo", at }],
+  });
+  const tasks: KanbanTask[] = [
+    todo("normal-old", 0, "2026-08-04T00:00:00.000Z"),
+    todo("high-new", 1, "2026-08-04T00:09:00.000Z"),
+    todo("high-old", 1, "2026-08-04T00:01:00.000Z"),
+    // Sent back by an expired lease, it keeps its first place in the queue.
+    {
+      ...todo("low-requeued", -1, "2026-08-04T00:02:00.000Z"),
+      statusHistory: [
+        { status: "todo", at: "2026-08-04T00:02:00.000Z" },
+        { status: "in-progress", at: "2026-08-04T00:03:00.000Z" },
+        { status: "todo", at: "2026-08-04T00:04:00.000Z" },
+      ],
+    },
+    todo("low-new", -1, "2026-08-04T00:03:00.000Z"),
+  ];
+  assert.deepEqual(
+    tasks.sort(compareKanbanColumnTasks).map(({ id }) => id),
+    ["high-old", "high-new", "normal-old", "low-requeued", "low-new"],
+  );
+});
+
+test("compareKanbanColumnTasks orders other columns by first entry, ignoring priority", () => {
+  const reviewed = (id: string, priority: number, at: string): KanbanTask => ({
+    ...task,
+    id,
+    status: "review",
+    priority,
+    statusHistory: [
+      { status: "todo", at: "2026-08-04T00:00:00.000Z" },
+      { status: "review", at },
+    ],
+  });
+  const tasks: KanbanTask[] = [
+    reviewed("high-new", 1, "2026-08-04T00:09:00.000Z"),
+    // Without a history the last update stands in for the entry time.
+    { ...reviewed("no-history", 0, ""), statusHistory: [], updatedAt: "2026-08-04T00:05:00.000Z" },
+    reviewed("low-old", -1, "2026-08-04T00:01:00.000Z"),
+  ];
+  assert.deepEqual(
+    tasks.sort(compareKanbanColumnTasks).map(({ id }) => id),
+    ["low-old", "no-history", "high-new"],
+  );
 });

@@ -137,7 +137,9 @@ database before scaling the dashboard to multiple server instances.
 The dashboard can create tasks and move them between `todo`, `in-progress`,
 `review-queue`, `review`, and `done`. Each task has a priority of `low`, `normal` (the
 default for tasks added on the dashboard), or `high`. Agents claim higher
-priority first, and each column lists higher priority first. An Agent must claim
+priority first. The Todo column lists higher priority first, then the task that
+entered Todo earliest; every other column lists the task that first entered it
+earliest first. An Agent must claim
 a task before working on it.
 The claim is atomic, so two Agents cannot receive the same task. Agents only
 receive tasks matching the repository names they send in the claim request.

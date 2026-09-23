@@ -176,6 +176,33 @@ export function kanbanStatusSince(task: KanbanTask): string {
   );
 }
 
+/** When the task first entered its current status; tasks without a history fall back to their last update. */
+function kanbanStatusFirstAt(task: KanbanTask): string {
+  const history = task.statusHistory ?? [];
+  return (
+    history.find((event) => event.status === task.status)?.at ?? task.updatedAt
+  );
+}
+
+/**
+ * Orders cards within one column: `todo` lists higher priority first, and every
+ * column lists the task that first entered the status earliest first, so a task
+ * sent back by an expired lease keeps its place.
+ */
+export function compareKanbanColumnTasks(
+  left: KanbanTask,
+  right: KanbanTask,
+): number {
+  const byPriority =
+    left.status === "todo" && right.status === "todo"
+      ? right.priority - left.priority
+      : 0;
+  return (
+    byPriority ||
+    kanbanStatusFirstAt(left).localeCompare(kanbanStatusFirstAt(right))
+  );
+}
+
 export function formatDuration(milliseconds: number): string {
   const seconds = Math.floor(milliseconds / 1_000);
   if (seconds < 60) return `${seconds}s`;

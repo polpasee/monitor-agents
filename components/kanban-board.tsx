@@ -8,6 +8,7 @@ import {
 } from "@/lib/repository-list";
 import type { AgentRun } from "@/lib/telemetry";
 import {
+  compareKanbanColumnTasks,
   findTaskAgent,
   formatBangkokTime,
   formatDuration,
@@ -78,11 +79,7 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
       (repositoryFilter === "all"
         ? [...tasks]
         : tasks.filter((task) => task.repository === repositoryFilter)
-      ).sort(
-        (left, right) =>
-          right.priority - left.priority ||
-          left.createdAt.localeCompare(right.createdAt),
-      ),
+      ).sort(compareKanbanColumnTasks),
     [repositoryFilter, tasks],
   );
   const [inspectedAgentId, setInspectedAgentId] = useState<string | null>(null);
