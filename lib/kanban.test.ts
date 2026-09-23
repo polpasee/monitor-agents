@@ -635,3 +635,37 @@ test("compareKanbanColumnTasks keeps todo in priority order when columns are sor
     ["todo-high-new", "todo-low-old"],
   );
 });
+
+test("compareKanbanColumnTasks orders review-queue, review and done by latest entry, in-progress by first", () => {
+  const reentered = (id: string, status: KanbanStatus): KanbanTask => ({
+    ...task,
+    id,
+    status,
+    statusHistory: [
+      { status, at: "2026-08-04T00:01:00.000Z" },
+      { status: "todo", at: "2026-08-04T00:02:00.000Z" },
+      { status, at: "2026-08-04T00:05:00.000Z" },
+    ],
+  });
+  const once = (id: string, status: KanbanStatus): KanbanTask => ({
+    ...task,
+    id,
+    status,
+    statusHistory: [{ status, at: "2026-08-04T00:03:00.000Z" }],
+  });
+  for (const status of ["review-queue", "review", "done"] as const) {
+    assert.deepEqual(
+      [reentered("reentered", status), once("once", status)]
+        .sort(compareKanbanColumnTasks)
+        .map(({ id }) => id),
+      ["once", "reentered"],
+      status,
+    );
+  }
+  assert.deepEqual(
+    [once("once", "in-progress"), reentered("reentered", "in-progress")]
+      .sort(compareKanbanColumnTasks)
+      .map(({ id }) => id),
+    ["reentered", "once"],
+  );
+});
