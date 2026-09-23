@@ -127,9 +127,9 @@ test("TaskStore deletes tasks in every status", async () => {
     for (const status of [
       "todo",
       "in-progress",
+      "review-queue",
       "review",
       "done",
-      "failed",
     ] as const) {
       const task = store.createTask({
         title: `Delete ${status} task`,
@@ -193,7 +193,7 @@ test(
   },
 );
 
-test("TaskStore claims a task once and completes it into review", async () => {
+test("TaskStore claims a task once and completes it into review-queue", async () => {
   const directory = await mkdtemp(join(tmpdir(), "monitor-task-claim-"));
   const store = new TaskStore(join(directory, "tasks.sqlite"));
 
@@ -223,8 +223,43 @@ test("TaskStore claims a task once and completes it into review", async () => {
     );
     assert.equal(
       store.completeTask(task.id, "codex-1", "Tests passed", now)?.status,
-      "review",
+      "review-queue",
     );
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("TaskStore moves a failed task to review-queue with its error", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-fail-"));
+  const store = new TaskStore(join(directory, "tasks.sqlite"));
+
+  try {
+    const task = store.createTask(
+      { title: "Fails", repository: "monitor-agents" },
+      new Date("2026-08-04T00:00:00.000Z"),
+    );
+    store.claimTask({
+      agentId: "codex-1",
+      repositories: ["monitor-agents"],
+      now: new Date("2026-08-04T00:01:00.000Z"),
+      leaseMs: 600_000,
+    });
+    const failed = store.failTask(
+      task.id,
+      "codex-1",
+      "  Tests failed  ",
+      new Date("2026-08-04T00:02:00.000Z"),
+    );
+
+    assert.equal(failed?.status, "review-queue");
+    assert.equal(failed?.lastError, "Tests failed");
+    assert.equal(failed?.leaseUntil, null);
+    assert.deepEqual(failed?.statusHistory.at(-1), {
+      status: "review-queue",
+      at: "2026-08-04T00:02:00.000Z",
+    });
   } finally {
     store.close();
     await rm(directory, { recursive: true, force: true });
@@ -366,7 +401,7 @@ test("TaskStore records every status a task passes through", async () => {
     assert.deepEqual(completed?.statusHistory, [
       { status: "todo", at: "2026-08-04T00:00:00.000Z" },
       { status: "in-progress", at: "2026-08-04T00:01:00.000Z" },
-      { status: "review", at: "2026-08-04T00:03:00.000Z" },
+      { status: "review-queue", at: "2026-08-04T00:03:00.000Z" },
     ]);
     assert.equal(completed?.sessionId, "session-1");
     assert.equal(completed?.agentRunId, "claude:session-1");
@@ -794,6 +829,100 @@ test("TaskStore reopens an already migrated database without losing history", as
     ]);
   } finally {
     second.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("TaskStore moves failed tasks of a database that still allows failed to review-queue", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-review-queue-"));
+  const path = join(directory, "tasks.sqlite");
+  const old = new DatabaseSync(path);
+  old.exec(`
+    CREATE TABLE tasks (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      repository TEXT NOT NULL,
+      status TEXT NOT NULL CHECK (
+        status IN ('todo', 'in-progress', 'review', 'done', 'failed')
+      ),
+      priority INTEGER NOT NULL DEFAULT 0,
+      claimed_by TEXT,
+      claimed_at TEXT,
+      lease_until TEXT,
+      result TEXT,
+      last_error TEXT,
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      session_id TEXT,
+      agent_run_id TEXT,
+      model TEXT,
+      effort TEXT,
+      used_tokens INTEGER,
+      carried_tokens INTEGER NOT NULL DEFAULT 0,
+      pull_request_number INTEGER,
+      summary TEXT,
+      status_history TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX tasks_queue
+      ON tasks (status, repository, priority DESC, created_at ASC);
+    INSERT INTO tasks (
+      id, title, repository, status, last_error, status_history,
+      created_at, updated_at
+    ) VALUES
+    (
+      'old-failed', 'Broke', 'monitor-agents', 'failed', 'Tests failed',
+      json_array(
+        json_object('status', 'todo', 'at', '2026-08-04T00:00:00.000Z'),
+        json_object('status', 'failed', 'at', '2026-08-04T00:02:00.000Z')
+      ),
+      '2026-08-04T00:00:00.000Z', '2026-08-04T00:02:00.000Z'
+    ),
+    (
+      'old-done', 'Shipped', 'monitor-agents', 'done', NULL,
+      json_array(
+        json_object('status', 'todo', 'at', '2026-08-04T00:00:00.000Z'),
+        json_object('status', 'done', 'at', '2026-08-04T00:03:00.000Z')
+      ),
+      '2026-08-04T00:00:00.000Z', '2026-08-04T00:03:00.000Z'
+    );
+  `);
+  old.close();
+
+  const store = new TaskStore(path);
+  try {
+    const failed = store.getTask("old-failed");
+    assert.equal(failed?.status, "review-queue");
+    assert.equal(failed?.lastError, "Tests failed");
+    assert.deepEqual(failed?.statusHistory, [
+      { status: "todo", at: "2026-08-04T00:00:00.000Z" },
+      { status: "review-queue", at: "2026-08-04T00:02:00.000Z" },
+    ]);
+    assert.equal(store.getTask("old-done")?.status, "done");
+
+    assert.equal(
+      store.updateTaskStatus("old-done", "review-queue")?.status,
+      "review-queue",
+    );
+  } finally {
+    store.close();
+  }
+
+  const reopened = new DatabaseSync(path);
+  try {
+    assert.throws(() =>
+      reopened.exec("UPDATE tasks SET status = 'failed' WHERE id = 'old-done'"),
+    );
+    assert.deepEqual(
+      reopened
+        .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'tasks' AND sql IS NOT NULL")
+        .all()
+        .map((row) => row.name),
+      ["tasks_queue"],
+    );
+  } finally {
+    reopened.close();
     await rm(directory, { recursive: true, force: true });
   }
 });

@@ -74,7 +74,8 @@ const tasks: KanbanTask[] = [
 
 test("isKanbanStatus accepts only board states", () => {
   assert.equal(isKanbanStatus("in-progress"), true);
-  assert.equal(isKanbanStatus("failed"), true);
+  assert.equal(isKanbanStatus("review-queue"), true);
+  assert.equal(isKanbanStatus("failed"), false);
   assert.equal(isKanbanStatus("unknown"), false);
 });
 
