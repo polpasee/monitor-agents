@@ -682,6 +682,14 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
                     </p>
                   </>
                 )}
+                {selectedTask.lastError && (
+                  <>
+                    <h4>Error</h4>
+                    <p className="kanban-run-details__summary">
+                      {selectedTask.lastError}
+                    </p>
+                  </>
+                )}
                 <h4>Time in each state</h4>
                 {kanbanStatusDurations(selectedTask).length === 0 ? (
                   <p className="kanban-run-details__empty">
