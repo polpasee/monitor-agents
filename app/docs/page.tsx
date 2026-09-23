@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { ApiReference } from "@/components/api-reference";
+import { KanbanGuide } from "@/components/kanban-guide";
 
 export const metadata: Metadata = {
   title: "Docs · Monitor Agents",
@@ -31,6 +32,11 @@ export default function DocsPage() {
       </header>
 
       <div className="docs-page">
+        <nav className="docs-contents" aria-label="Contents">
+          <a href="#kanban-title">Kanban board</a>
+          <a href="#api-title">Kanban task API</a>
+        </nav>
+        <KanbanGuide />
         <ApiReference />
       </div>
     </main>
