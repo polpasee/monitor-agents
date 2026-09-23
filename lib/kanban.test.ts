@@ -18,6 +18,7 @@ import {
   parseKanbanPriority,
   parseKanbanTaskPatch,
   parseTaskRunMetadata,
+  type KanbanStatus,
   type KanbanTask,
 } from "./kanban.ts";
 import type { AgentRun } from "./telemetry.ts";
@@ -605,5 +606,32 @@ test("compareKanbanColumnTasks orders other columns by first entry, ignoring pri
   assert.deepEqual(
     tasks.sort(compareKanbanColumnTasks).map(({ id }) => id),
     ["low-old", "no-history", "high-new"],
+  );
+});
+
+test("compareKanbanColumnTasks keeps todo in priority order when columns are sorted together", () => {
+  const at = (
+    id: string,
+    status: KanbanStatus,
+    priority: number,
+    time: string,
+  ): KanbanTask => ({
+    ...task,
+    id,
+    status,
+    priority,
+    statusHistory: [{ status, at: time }],
+  });
+  const tasks: KanbanTask[] = [
+    at("review-mid", "review", 0, "2026-08-04T00:02:00.000Z"),
+    at("todo-low-old", "todo", -1, "2026-08-04T00:01:00.000Z"),
+    at("todo-high-new", "todo", 1, "2026-08-04T00:03:00.000Z"),
+  ];
+  assert.deepEqual(
+    tasks
+      .sort(compareKanbanColumnTasks)
+      .filter(({ status }) => status === "todo")
+      .map(({ id }) => id),
+    ["todo-high-new", "todo-low-old"],
   );
 });

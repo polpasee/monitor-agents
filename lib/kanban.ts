@@ -193,12 +193,13 @@ export function compareKanbanColumnTasks(
   left: KanbanTask,
   right: KanbanTask,
 ): number {
-  const byPriority =
-    left.status === "todo" && right.status === "todo"
-      ? right.priority - left.priority
-      : 0;
+  const statusIndex = (task: KanbanTask) =>
+    kanbanStatuses.findIndex((status) => status.id === task.status);
+  // Grouping by status first keeps the order total when the board sorts every column at once.
+  const byStatus = statusIndex(left) - statusIndex(right);
+  if (byStatus) return byStatus;
   return (
-    byPriority ||
+    (left.status === "todo" ? right.priority - left.priority : 0) ||
     kanbanStatusFirstAt(left).localeCompare(kanbanStatusFirstAt(right))
   );
 }
