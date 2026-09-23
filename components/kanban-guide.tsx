@@ -3,7 +3,7 @@ import { kanbanStatuses, type KanbanStatus } from "@/lib/kanban";
 const statusDescriptions: Record<KanbanStatus, string> = {
   todo: "Waiting to be claimed. New tasks start here, and only Todo tasks can be edited. An expired lease or a person moving the card back also returns a task here.",
   "in-progress":
-    "An agent claimed the task and holds a lease on it. The agent renews the lease with heartbeats and leaves this state by calling complete or fail.",
+    "An agent claimed the task and holds a lease on it. The agent renews the lease with heartbeats and leaves this state by calling complete or fail; an expired lease or a person moving the card also ends it.",
   "review-queue":
     "The agent has stopped. Complete stores the result (plus an optional PR number and summary); fail stores the error, shown in Run details. The task waits for a person.",
   review: "A person drags the card here when they start reviewing it.",
