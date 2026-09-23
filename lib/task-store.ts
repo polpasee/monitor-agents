@@ -121,6 +121,20 @@ const runMetadataSql = `
   END
 `;
 
+/**
+ * A claim starts a new attempt, so the run ids it names replace the last
+ * attempt's, even when it names none. Takes the same values as `runMetadataSql`.
+ */
+const claimRunMetadataSql = `
+  session_id = ?,
+  agent_run_id = ?,
+  model = COALESCE(?, model),
+  effort = COALESCE(?, effort),
+  used_tokens = CASE
+    WHEN ? IS NULL THEN used_tokens ELSE carried_tokens + ?
+  END
+`;
+
 /** Banks the current total before an attempt that starts counting again. */
 const carryTokensSql = `
   carried_tokens = COALESCE(used_tokens, carried_tokens),
@@ -484,7 +498,7 @@ export class TaskStore {
               lease_until = ?,
               last_error = NULL,
               attempt_count = attempt_count + 1,
-              ${runMetadataSql},
+              ${claimRunMetadataSql},
               status_history = ${appendStatusSql},
               updated_at = ?
           WHERE id = ? AND status = 'todo'

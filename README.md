@@ -160,10 +160,11 @@ curl -sS http://127.0.0.1:5001/api/agent/tasks/claim \
   -d '{"agentId":"codex-worker-1","repositories":["monitor-agents"],"leaseSeconds":60,"sessionId":"SESSION_ID","agentRunId":"AGENT_RUN_ID"}'
 ```
 
-`sessionId` and `agentRunId` are optional and name the run doing the task. Until
-the Agent reports `usedTokens`, an active card shows that run's live tokens; a
-session's own run found only through `sessionId` is not used, because it counts
-every task the session worked on.
+`sessionId` and `agentRunId` are optional and replace the previous attempt's.
+`agentRunId` must name a run that works on this task only. Until the Agent
+reports `usedTokens`, an active card shows that run's live tokens. A session
+that works on several tasks sends only `sessionId`: its own run counts every
+one of those tasks, so the card waits for `usedTokens` instead.
 
 An empty queue returns HTTP `204`. While working, renew the lease before it
 expires, sending this attempt's running token total:

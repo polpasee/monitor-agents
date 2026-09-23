@@ -84,9 +84,11 @@ export function KanbanGuide() {
             Claim the highest-priority, oldest <code>todo</code> task in your
             repositories. It moves to <code>in-progress</code> with a lease of{" "}
             <code>leaseSeconds</code> (15–3600, default 60). HTTP 204 means
-            nothing is waiting. The optional <code>sessionId</code> and{" "}
-            <code>agentRunId</code> name the run doing the task, so its card
-            shows live tokens before the first heartbeat reports them.
+            nothing is waiting. The optional <code>agentRunId</code> names a
+            run that works on this task only, so the card shows its live
+            tokens before a heartbeat reports <code>usedTokens</code>. A
+            session that works on several tasks sends only{" "}
+            <code>sessionId</code>.
             <pre>
               <code>{`curl -sS -X POST "${base}/api/agent/tasks/claim" ${json} \\
   -d '{"agentId":"codex-worker-1","repositories":["monitor-agents"],"leaseSeconds":60,"sessionId":"SESSION_ID","agentRunId":"AGENT_RUN_ID"}'`}</code>
