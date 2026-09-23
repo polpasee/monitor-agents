@@ -842,6 +842,49 @@ button:focus-visible,
   overflow-x: auto;
 }
 
+.docs-page {
+  display: grid;
+  gap: 14px;
+}
+
+.docs-contents {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+}
+
+.docs-contents a {
+  color: var(--text-soft);
+}
+
+.kanban-guide {
+  padding: 4px 18px 18px;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.kanban-guide h3 {
+  margin: 18px 0 6px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 640;
+}
+
+.kanban-guide ol {
+  padding-left: 18px;
+}
+
+.kanban-guide pre {
+  margin: 6px 0 12px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--color-zinc-950);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+}
+
 .api-reference {
   overflow: hidden;
   border: 1px solid var(--border);
