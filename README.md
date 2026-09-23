@@ -119,7 +119,6 @@ MONITOR_MAX_AGENTS=24                           # Codex agent cap across recent 
 AGY_TELEMETRY_FILE="/absolute/path/to/agy.json"
 ANTIGRAVITY_CLI_DIR="$HOME/.gemini/antigravity-cli" # optional non-default location
 MONITOR_TASK_DB="/absolute/path/to/monitor-tasks.sqlite"
-MONITOR_AGENT_TOKEN="replace-with-a-long-random-token"
 GITHUB_TOKEN="ghp_..."                          # repository list; falls back to `gh auth token`
 ```
 
@@ -150,15 +149,10 @@ reads `GITHUB_TOKEN` or `GH_TOKEN`, falling back to `gh auth token`, and caches
 the result for five minutes. Without credentials the dashboard still works and
 falls back to the repositories seen on existing tasks.
 
-Agent endpoints fail closed unless `MONITOR_AGENT_TOKEN` is configured. The
-token belongs only in the Agent process environment and must not be exposed to
-browser code.
-
 Claim the highest-priority available task:
 
 ```bash
 curl -sS http://127.0.0.1:5000/api/agent/tasks/claim \
-  -H "Authorization: Bearer $MONITOR_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"agentId":"codex-worker-1","repositories":["monitor-agents"],"leaseSeconds":60}'
 ```
@@ -168,7 +162,6 @@ expires:
 
 ```bash
 curl -sS http://127.0.0.1:5000/api/agent/tasks/TASK_ID/heartbeat \
-  -H "Authorization: Bearer $MONITOR_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"agentId":"codex-worker-1","leaseSeconds":60}'
 ```
@@ -177,7 +170,6 @@ Successful work moves to `review-queue` for a human decision:
 
 ```bash
 curl -sS http://127.0.0.1:5000/api/agent/tasks/TASK_ID/complete \
-  -H "Authorization: Bearer $MONITOR_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"agentId":"codex-worker-1","result":"Commit abc123; tests passed.","pullRequestNumber":42,"summary":"Added the repository filter; npm test passed."}'
 ```
@@ -188,7 +180,6 @@ Failed work also moves to `review-queue` and records the error:
 
 ```bash
 curl -sS http://127.0.0.1:5000/api/agent/tasks/TASK_ID/fail \
-  -H "Authorization: Bearer $MONITOR_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"agentId":"codex-worker-1","error":"Required repository was unavailable."}'
 ```
@@ -198,7 +189,6 @@ Such tasks are always `low` priority, whatever the request sends:
 
 ```bash
 curl -sS -X POST http://127.0.0.1:5000/api/agent/tasks \
-  -H "Authorization: Bearer $MONITOR_AGENT_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"title":"Fix the flaky topology test","repository":"monitor-agents","description":"It times out on slow machines."}'
 ```
@@ -219,7 +209,6 @@ Claude Code headless inside it, commits the result, pushes the branch, and opens
 a pull request.
 
 ```bash
-export MONITOR_AGENT_TOKEN="the-same-token-the-dashboard-uses"
 npm run runner                      # poll forever
 npm run runner -- --once            # handle at most one task, then exit
 npm run runner -- --once --dry-run  # claim and report without running Claude

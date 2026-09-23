@@ -1,4 +1,3 @@
-import { agentAuthError } from "@/lib/agent-auth";
 import {
   optionalString,
   readJsonObject,
@@ -10,9 +9,6 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const authError = agentAuthError(request);
-  if (authError) return authError;
-
   const body = await readJsonObject(request);
   const title = requiredString(body?.title, 200);
   const repository = requiredString(body?.repository, 200);

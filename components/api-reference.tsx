@@ -34,11 +34,6 @@ export function ApiReference() {
           Base URL: <code>{origin || "this dashboard's origin"}</code> (runners
           read it from <code>MONITOR_API_URL</code>).
         </p>
-        <p>
-          Bearer endpoints need{" "}
-          <code>Authorization: Bearer $MONITOR_AGENT_TOKEN</code>; keep the
-          token out of browser code.
-        </p>
         <p>Successful task responses return the full KanbanTask JSON.</p>
       </div>
 
@@ -48,7 +43,6 @@ export function ApiReference() {
             <tr>
               <th scope="col">Method</th>
               <th scope="col">Endpoint</th>
-              <th scope="col">Auth</th>
               <th scope="col">Request</th>
               <th scope="col">Response</th>
               <th scope="col">Description</th>
@@ -61,7 +55,6 @@ export function ApiReference() {
                 <td>
                   <code>{endpoint.path}</code>
                 </td>
-                <td>{endpoint.auth === "bearer" ? "Bearer" : "None"}</td>
                 <td>
                   {endpoint.request.length > 0 ? (
                     <ul>

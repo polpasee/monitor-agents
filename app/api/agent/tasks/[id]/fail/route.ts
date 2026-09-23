@@ -1,4 +1,3 @@
-import { agentAuthError } from "@/lib/agent-auth";
 import { readJsonObject, requiredString } from "@/lib/api-input";
 import { parseTaskRunMetadata } from "@/lib/kanban";
 import { getTaskStore } from "@/lib/task-store";
@@ -10,9 +9,6 @@ export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const authError = agentAuthError(request);
-  if (authError) return authError;
-
   const body = await readJsonObject(request);
   const agentId = requiredString(body?.agentId, 200);
   const error = requiredString(body?.error, 10_000);

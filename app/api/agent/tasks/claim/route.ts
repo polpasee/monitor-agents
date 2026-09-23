@@ -1,4 +1,3 @@
-import { agentAuthError } from "@/lib/agent-auth";
 import { readJsonObject, requiredString, stringArray } from "@/lib/api-input";
 import { getTaskStore } from "@/lib/task-store";
 
@@ -6,9 +5,6 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  const authError = agentAuthError(request);
-  if (authError) return authError;
-
   const body = await readJsonObject(request);
   const agentId = requiredString(body?.agentId, 200);
   const repositories = stringArray(body?.repositories, 100, 200);
