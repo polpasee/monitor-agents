@@ -275,7 +275,7 @@ async function runTask(task, directory) {
       summary: truncate(result, maxResultLength) || undefined,
       ...metadata,
     });
-    log(`Task ${task.id} moved to review${published.pullRequestUrl ? ` (${published.pullRequestUrl})` : ""}`);
+    log(`Task ${task.id} moved to review queue${published.pullRequestUrl ? ` (${published.pullRequestUrl})` : ""}`);
 
     await execFileAsync("git", ["worktree", "remove", worktree, "--force"], { cwd: directory })
       .catch((error) => log(`Worktree cleanup skipped: ${error.message}`));

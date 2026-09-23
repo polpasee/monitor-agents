@@ -34,7 +34,11 @@ interface KanbanBoardProps {
 
 /** A reset, retry, or failure keeps the details of the last completion. */
 function showsCompletion(task: KanbanTask): boolean {
-  return task.status === "review" || task.status === "done";
+  return (
+    task.status === "review-queue" ||
+    task.status === "review" ||
+    task.status === "done"
+  );
 }
 
 export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
@@ -675,6 +679,14 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
                     <h4>Summary</h4>
                     <p className="kanban-run-details__summary">
                       {selectedTask.summary}
+                    </p>
+                  </>
+                )}
+                {selectedTask.lastError && (
+                  <>
+                    <h4>Error</h4>
+                    <p className="kanban-run-details__summary">
+                      {selectedTask.lastError}
                     </p>
                   </>
                 )}
