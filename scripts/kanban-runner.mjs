@@ -23,7 +23,7 @@ import {
 const execFileAsync = promisify(execFile);
 
 const config = {
-  apiUrl: (process.env.MONITOR_API_URL ?? "http://127.0.0.1:5000").replace(/\/$/, ""),
+  apiUrl: (process.env.MONITOR_API_URL ?? "http://127.0.0.1:5001").replace(/\/$/, ""),
   workspaceRoot: process.env.MONITOR_WORKSPACE_ROOT ?? join(process.env.HOME ?? "", "Github"),
   agentId: process.env.KANBAN_RUNNER_ID ?? `kanban-runner@${hostname()}`,
   pollSeconds: Number(process.env.KANBAN_POLL_SECONDS ?? 10),

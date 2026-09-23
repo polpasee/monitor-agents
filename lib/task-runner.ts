@@ -57,7 +57,7 @@ export function buildTaskPrompt(task: KanbanTask): string {
     "- The current directory is a dedicated git worktree already on a fresh branch for this task.",
     "- Make the code changes needed to finish the task, and verify them with the repository's own build, lint, or test commands when they exist.",
     "- Do not run git commit, git push, or open a pull request. The task runner commits and publishes your work.",
-    `- If you notice other work outside this task, do not do it now. Queue it instead: curl -sS -X POST "\${MONITOR_API_URL:-http://127.0.0.1:5000}/api/agent/tasks" -H "Content-Type: application/json" -d '{"title":"...","repository":"${task.repository}","description":"..."}'`,
+    `- If you notice other work outside this task, do not do it now. Queue it instead: curl -sS -X POST "\${MONITOR_API_URL:-http://127.0.0.1:5001}/api/agent/tasks" -H "Content-Type: application/json" -d '{"title":"...","repository":"${task.repository}","description":"..."}'`,
     "- Finish with a short summary of what you changed and how you verified it.",
   ]
     .filter((line) => line !== "")
