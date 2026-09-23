@@ -91,22 +91,22 @@ Requires Node.js 24 or newer.
 
 ```bash
 npm install
-npm run dev -- --hostname 127.0.0.1 --port 5000
+npm run dev -- --hostname 127.0.0.1 --port 5001
 ```
 
-Open [http://127.0.0.1:5000](http://127.0.0.1:5000).
+Open [http://127.0.0.1:5001](http://127.0.0.1:5001).
 
 ## Run in production
 
 ```bash
 npm run build
-npm run start -- --hostname 127.0.0.1 --port 5000
+npm run start -- --hostname 127.0.0.1 --port 5001
 ```
 
-Open [http://127.0.0.1:5000](http://127.0.0.1:5000). On macOS, using the
-explicit IPv4 address also avoids the AirPlay service that may own IPv6 port
-5000 and return HTTP 403. Run the service as the same operating-system user that
-owns the provider state directories and runs Antigravity CLI.
+Open [http://127.0.0.1:5001](http://127.0.0.1:5001). The app uses port 5001 because
+macOS's AirPlay Receiver already listens on port 5000. Run the service as the
+same operating-system user that owns the provider state directories and runs
+Antigravity CLI.
 
 Optional environment variables:
 
@@ -152,7 +152,7 @@ falls back to the repositories seen on existing tasks.
 Claim the highest-priority available task:
 
 ```bash
-curl -sS http://127.0.0.1:5000/api/agent/tasks/claim \
+curl -sS http://127.0.0.1:5001/api/agent/tasks/claim \
   -H "Content-Type: application/json" \
   -d '{"agentId":"codex-worker-1","repositories":["monitor-agents"],"leaseSeconds":60}'
 ```
@@ -161,7 +161,7 @@ An empty queue returns HTTP `204`. While working, renew the lease before it
 expires:
 
 ```bash
-curl -sS http://127.0.0.1:5000/api/agent/tasks/TASK_ID/heartbeat \
+curl -sS http://127.0.0.1:5001/api/agent/tasks/TASK_ID/heartbeat \
   -H "Content-Type: application/json" \
   -d '{"agentId":"codex-worker-1","leaseSeconds":60}'
 ```
@@ -169,7 +169,7 @@ curl -sS http://127.0.0.1:5000/api/agent/tasks/TASK_ID/heartbeat \
 Successful work moves to `review-queue` for a human decision:
 
 ```bash
-curl -sS http://127.0.0.1:5000/api/agent/tasks/TASK_ID/complete \
+curl -sS http://127.0.0.1:5001/api/agent/tasks/TASK_ID/complete \
   -H "Content-Type: application/json" \
   -d '{"agentId":"codex-worker-1","result":"Commit abc123; tests passed.","pullRequestNumber":42,"summary":"Added the repository filter; npm test passed."}'
 ```
@@ -179,7 +179,7 @@ curl -sS http://127.0.0.1:5000/api/agent/tasks/TASK_ID/complete \
 Failed work also moves to `review-queue` and records the error:
 
 ```bash
-curl -sS http://127.0.0.1:5000/api/agent/tasks/TASK_ID/fail \
+curl -sS http://127.0.0.1:5001/api/agent/tasks/TASK_ID/fail \
   -H "Content-Type: application/json" \
   -d '{"agentId":"codex-worker-1","error":"Required repository was unavailable."}'
 ```
@@ -188,7 +188,7 @@ Work an Agent notices while doing another task is queued, not done on the spot.
 Such tasks are always `low` priority, whatever the request sends:
 
 ```bash
-curl -sS -X POST http://127.0.0.1:5000/api/agent/tasks \
+curl -sS -X POST http://127.0.0.1:5001/api/agent/tasks \
   -H "Content-Type: application/json" \
   -d '{"title":"Fix the flaky topology test","repository":"monitor-agents","description":"It times out on slow machines."}'
 ```
@@ -217,7 +217,7 @@ npm run runner -- --once --dry-run  # claim and report without running Claude
 Runner environment variables:
 
 ```bash
-MONITOR_API_URL="http://127.0.0.1:5000"     # dashboard base URL
+MONITOR_API_URL="http://127.0.0.1:5001"     # dashboard base URL
 MONITOR_WORKSPACE_ROOT="$HOME/Github"       # where repository checkouts live
 KANBAN_RUNNER_ID="kanban-runner@$(hostname)" # agent id recorded on each claim
 KANBAN_REPOSITORIES=""                      # comma list; empty means every accessible repo

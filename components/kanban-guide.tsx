@@ -11,7 +11,7 @@ const statusDescriptions: Record<KanbanStatus, string> = {
 };
 
 // The same fallback the runner and task prompts use, so the commands work as plain text.
-const base = "${MONITOR_API_URL:-http://127.0.0.1:5000}";
+const base = "${MONITOR_API_URL:-http://127.0.0.1:5001}";
 const json = `-H "Content-Type: application/json"`;
 
 export function KanbanGuide() {
