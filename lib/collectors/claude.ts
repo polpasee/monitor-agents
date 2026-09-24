@@ -1238,9 +1238,11 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
   const agents: AgentRun[] = [];
   const externalSpawns: ExternalSpawn[] = [];
   const subagentCandidates: SubagentCandidate[] = [];
+  let hiddenRoots = 0;
 
-  for (const session of sessions) {
+  for (const [index, session] of sessions.entries()) {
     if (agents.length >= MAX_ROOTS) {
+      hiddenRoots = sessions.length - index;
       break;
     }
     const job = await loadJobState(claudeDirectory, session, diagnostics);
@@ -1496,6 +1498,9 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
   }
 
   const running = agents.some((agent) => agent.status === "running");
+  const hidden = hiddenRoots > 0
+    ? ` ${hiddenRoots} more session${hiddenRoots === 1 ? " is" : "s are"} hidden.`
+    : "";
   const pruned = prunedSubagentCount > 0
     ? ` ${prunedSubagentCount} older subagent${prunedSubagentCount === 1 ? " is" : "s are"} hidden.`
     : "";
@@ -1510,8 +1515,9 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
     source: {
       provider: "claude",
       connection: running ? "connected" : "idle",
-      detail: `Loaded ${rootCount} Claude session${rootCount === 1 ? "" : "s"} and ${agents.length - rootCount} direct subagent${agents.length - rootCount === 1 ? "" : "s"}.${pruned}${warning}`,
+      detail: `Loaded ${rootCount} Claude session${rootCount === 1 ? "" : "s"} and ${agents.length - rootCount} direct subagent${agents.length - rootCount === 1 ? "" : "s"}.${hidden}${pruned}${warning}`,
       agentCount: agents.length,
+      hiddenAgents: hiddenRoots + prunedSubagentCount,
     },
   };
 }

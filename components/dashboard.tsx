@@ -407,6 +407,7 @@ export function Dashboard({ snapshot: initialSnapshot }: DashboardProps) {
               onToggleCollapsed={toggleCollapsed}
               quotaLimits={snapshot.quotaLimits}
               selectedAgentId={selectedAgentId}
+              sources={snapshot.sources}
             />
             <ActivityPanel snapshot={snapshot} />
           </div>

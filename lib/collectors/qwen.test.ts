@@ -172,12 +172,14 @@ test("Qwen collector skips malformed lines and caps sessions by MONITOR_MAX_AGEN
     assert.equal(uncapped.agents.length, 2);
     assert.equal(uncapped.agents[0].task, "Reply with exactly: ok");
     assert.doesNotMatch(uncapped.source.detail, /Limited from/u);
+    assert.equal(uncapped.source.hiddenAgents, 0);
 
     process.env.MONITOR_MAX_AGENTS = "1";
     const capped = await collectQwenTelemetry();
     assert.equal(capped.agents.length, 1);
     assert.equal(capped.agents[0].id, "qwen:session-b");
     assert.match(capped.source.detail, /Limited from 3 by MONITOR_MAX_AGENTS\./u);
+    assert.equal(capped.source.hiddenAgents, 2);
   } finally {
     if (previousHome === undefined) {
       delete process.env.QWEN_HOME;

@@ -342,6 +342,7 @@ export async function collectQwenTelemetry(): Promise<CollectorResult> {
       connection: agents.length > 0 ? "connected" : "idle",
       detail: notes.join(" "),
       agentCount: agents.length,
+      hiddenAgents: total - selected.length,
     },
   };
 }

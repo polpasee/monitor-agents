@@ -11,6 +11,7 @@ import {
   getAgentDepths,
   getAgentGroup,
   getProviderQuota,
+  hiddenAgentCounts,
   linkExternalRootsToClaudeSpawns,
   applyDeclaredSpawnLinks,
   linkCodexRootsToClaudeWorktrees,
@@ -918,4 +919,20 @@ test("percent returns a value clamped to the zero-to-100 range", () => {
   assert.equal(percent(125, 100), 100);
   assert.equal(percent(-5, 100), 0);
   assert.equal(percent(25, 0), 0);
+});
+
+test("hiddenAgentCounts lists only sources that left agents out, in order", () => {
+  const source = demoSnapshot.sources[0];
+  assert.deepEqual(
+    hiddenAgentCounts([
+      { ...source, provider: "codex", hiddenAgents: 284 },
+      { ...source, provider: "agy" },
+      { ...source, provider: "qwen", hiddenAgents: 0 },
+      { ...source, provider: "claude", hiddenAgents: 1 },
+    ]),
+    [
+      { provider: "codex", hidden: 284 },
+      { provider: "claude", hidden: 1 },
+    ],
+  );
 });
