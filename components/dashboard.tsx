@@ -252,17 +252,21 @@ export function Dashboard({ snapshot: initialSnapshot }: DashboardProps) {
     () => retainTopologyAgents(snapshot.agents, snapshot.capturedAt),
     [snapshot.agents, snapshot.capturedAt],
   );
+  const topologyKpis = useMemo(
+    () => calculateKpis(topologyAgents),
+    [topologyAgents],
+  );
   const selectedAgent =
     snapshot.agents.find((agent) => agent.id === selectedAgentId) ??
     snapshot.agents[0] ??
     null;
   const queuedAgents =
-    kpis.totalAgents -
-    kpis.runningAgents -
-    kpis.idleAgents -
-    kpis.completedAgents -
-    kpis.abortedAgents -
-    kpis.failedAgents;
+    topologyKpis.totalAgents -
+    topologyKpis.runningAgents -
+    topologyKpis.idleAgents -
+    topologyKpis.completedAgents -
+    topologyKpis.abortedAgents -
+    topologyKpis.failedAgents;
   const unhealthyAgents = kpis.failedAgents + kpis.abortedAgents;
   const toolCallDetail =
     kpis.knownToolCallAgents === 0
@@ -280,8 +284,8 @@ export function Dashboard({ snapshot: initialSnapshot }: DashboardProps) {
   }> = [
     {
       label: "Active agents",
-      value: `${kpis.runningAgents} / ${kpis.totalAgents}`,
-      detail: `${kpis.idleAgents} idle · ${kpis.completedAgents} completed · ${queuedAgents} queued`,
+      value: `${topologyKpis.runningAgents} / ${topologyKpis.totalAgents}`,
+      detail: `${topologyKpis.idleAgents} idle · ${topologyKpis.completedAgents} completed · ${queuedAgents} queued`,
       icon: "agents",
       tone: "cyan",
     },
