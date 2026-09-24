@@ -1748,3 +1748,171 @@ test("Claude collector reads a subagent's own effort before falling back to the 
     await rm(directory, { force: true, recursive: true });
   }
 });
+
+test("Claude collector keeps a subagent running while a background task it started is still in the fan-out", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-claude-parked-"));
+  const workspace = "/workspace/parked";
+  const sessionId = "parked-session";
+  const projectDirectory = join(directory, "projects", "-workspace-parked");
+  const subagentsDirectory = join(projectDirectory, sessionId, "subagents");
+  const previousDirectory = process.env.CLAUDE_CONFIG_DIR;
+  const previousRateLimitsFile = process.env.CLAUDE_RATE_LIMITS_FILE;
+  const previousWorkspace = process.env.MONITOR_WORKSPACE;
+  const now = Date.now();
+  const line = (secondsAgo: number, value: Record<string, unknown>) =>
+    `${JSON.stringify({
+      ...value,
+      timestamp: new Date(now - secondsAgo * 1_000).toISOString(),
+    })}\n`;
+  const launch = (tool: string, result: unknown) =>
+    line(6, {
+      type: "assistant",
+      message: {
+        model: "claude-sonnet",
+        stop_reason: "tool_use",
+        content: [{ type: "tool_use", id: "t1", name: tool, input: {} }],
+      },
+    }) +
+    line(5, {
+      type: "user",
+      message: {
+        content: [{ type: "tool_result", tool_use_id: "t1", content: result }],
+      },
+    }) +
+    line(4, {
+      type: "assistant",
+      message: {
+        model: "claude-sonnet",
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: "Waiting on the background task." }],
+      },
+    });
+  const bash = (taskId: string) =>
+    launch(
+      "Bash",
+      `Command running in background with ID: ${taskId}. Output is being written to: /tmp/${taskId}.output`,
+    );
+  const transcripts = {
+    live: bash("b1"),
+    done: bash("b2"),
+    unknown: bash("b3"),
+    read: launch(
+      "Read",
+      "Command running in background with ID: b4. Output is being written to: /tmp/b4.output",
+    ),
+    agent: launch("Agent", [
+      {
+        type: "text",
+        text: "Async agent launched successfully.\nagentId: child5 (use SendMessage to continue)",
+      },
+    ]),
+    notified: bash("b6"),
+  };
+  const fanAt = new Date(now - 4_000).toISOString();
+
+  try {
+    process.env.CLAUDE_CONFIG_DIR = directory;
+    delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    process.env.MONITOR_WORKSPACE = workspace;
+    await mkdir(join(directory, "sessions"), { recursive: true });
+    await mkdir(join(directory, "jobs", "job-parked"), { recursive: true });
+    await mkdir(subagentsDirectory, { recursive: true });
+    await writeFile(
+      join(directory, "sessions", "parked.json"),
+      JSON.stringify({
+        sessionId,
+        jobId: "job-parked",
+        pid: process.pid,
+        cwd: workspace,
+        status: "busy",
+        startedAt: new Date(now - 60_000).toISOString(),
+        updatedAt: new Date(now - 1_000).toISOString(),
+      }),
+    );
+    await writeFile(
+      join(directory, "jobs", "job-parked", "state.json"),
+      JSON.stringify({
+        state: "working",
+        tempo: "active",
+        createdAt: new Date(now - 60_000).toISOString(),
+        updatedAt: new Date(now - 1_000).toISOString(),
+        // Each subagent's own entry gets a doneAt when it parks; only the
+        // background tasks it started say whether it is really finished.
+        fan: [
+          ...Object.keys(transcripts).map((id) => ({
+            id,
+            kind: "agent",
+            label: id,
+            startedAt: fanAt,
+            doneAt: fanAt,
+          })),
+          { id: "b1", kind: "shell", label: "b1", startedAt: fanAt },
+          {
+            id: "b2",
+            kind: "shell",
+            label: "b2",
+            startedAt: fanAt,
+            doneAt: fanAt,
+          },
+          { id: "b4", kind: "shell", label: "b4", startedAt: fanAt },
+          { id: "child5", kind: "agent", label: "child5", startedAt: fanAt },
+          { id: "b6", kind: "shell", label: "b6", startedAt: fanAt },
+        ],
+      }),
+    );
+    // The session is told "completed" each time a subagent parks.
+    await writeFile(
+      join(projectDirectory, `${sessionId}.jsonl`),
+      line(3, {
+        type: "user",
+        message: {
+          content:
+            "<task-notification>\n<task-id>notified</task-id>\n<status>completed</status>\n</task-notification>",
+        },
+      }),
+    );
+    for (const [id, transcript] of Object.entries(transcripts)) {
+      await writeFile(join(subagentsDirectory, `agent-${id}.jsonl`), transcript);
+      await writeFile(
+        join(subagentsDirectory, `agent-${id}.meta.json`),
+        JSON.stringify({ agentType: "worker" }),
+      );
+    }
+
+    const result = await collectClaudeTelemetry();
+    const statuses = Object.fromEntries(
+      Object.keys(transcripts).map((id) => [
+        id,
+        result.agents.find(
+          (agent) => agent.id === `claude:${sessionId}:${id}`,
+        )?.status,
+      ]),
+    );
+
+    assert.deepEqual(statuses, {
+      live: "running",
+      done: "completed",
+      unknown: "completed",
+      read: "completed",
+      agent: "running",
+      notified: "running",
+    });
+  } finally {
+    if (previousDirectory === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = previousDirectory;
+    }
+    if (previousRateLimitsFile === undefined) {
+      delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    } else {
+      process.env.CLAUDE_RATE_LIMITS_FILE = previousRateLimitsFile;
+    }
+    if (previousWorkspace === undefined) {
+      delete process.env.MONITOR_WORKSPACE;
+    } else {
+      process.env.MONITOR_WORKSPACE = previousWorkspace;
+    }
+    await rm(directory, { force: true, recursive: true });
+  }
+});

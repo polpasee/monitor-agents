@@ -94,6 +94,7 @@ interface JobState {
   task: string | null;
   fanLabels: Map<string, string>;
   fanDoneAts: Map<string, number>;
+  fanLiveIds: Set<string>;
   resumeSessionId: string | null;
   createdAtMs: number | null;
   updatedAtMs: number | null;
@@ -117,6 +118,7 @@ interface TranscriptSummary {
   costUsd: number | null;
   externalSpawns: ExternalSpawnMark[];
   taskNotifications: Map<string, ProviderAgentState>;
+  launchedTaskIds: string[];
 }
 
 interface ExternalSpawnMark {
@@ -145,6 +147,7 @@ interface SubagentCandidate {
   transcriptPath: string;
   modifiedAtMs: number;
   providerStatus: AgentStatus | null;
+  providerFromNotification: boolean;
   providerLastActivityAtMs: number | null;
 }
 
@@ -369,6 +372,21 @@ function fanDoneAts(value: JsonRecord): Map<string, number> {
   return doneAts;
 }
 
+// Fan entries without a doneAt are still out, including background Bash
+// commands and async agents a subagent launched.
+function fanLiveIds(value: JsonRecord): Set<string> {
+  const ids = new Set<string>();
+  const fan = Array.isArray(value.fan) ? value.fan : [];
+  for (const item of fan) {
+    const entry = record(item);
+    const id = entry ? stringValue(entry.id) : null;
+    if (id && timestampMs(entry?.doneAt) === null) {
+      ids.add(id);
+    }
+  }
+  return ids;
+}
+
 function isControlText(text: string): boolean {
   return (
     text.startsWith("<") ||
@@ -544,6 +562,7 @@ async function loadJobState(
     task: truncateTask(stringValue(value.detail) ?? stringValue(value.intent)),
     fanLabels: fanLabels(value),
     fanDoneAts: fanDoneAts(value),
+    fanLiveIds: fanLiveIds(value),
     resumeSessionId: stringValue(value.resumeSessionId),
     createdAtMs: timestampMs(value.createdAt),
     updatedAtMs: timestampMs(value.updatedAt),
@@ -755,6 +774,8 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
   const longContextModels = new Set<string>();
   const externalSpawns: ExternalSpawnMark[] = [];
   const taskNotifications = new Map<string, ProviderAgentState>();
+  const toolUseNames = new Map<string, string>();
+  const launchedTaskIds: string[] = [];
 
   const lines = createInterface({
     input: createReadStream(path, { encoding: "utf8" }),
@@ -802,6 +823,14 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
       if (text) {
         notificationTexts.push(text);
       }
+      const launchedId = backgroundTaskId(
+        record(block),
+        toolUseNames,
+        record(value.toolUseResult),
+      );
+      if (launchedId) {
+        launchedTaskIds.push(launchedId);
+      }
     }
     for (const text of notificationTexts) {
       if (!text.includes("<task-notification>")) {
@@ -848,6 +877,14 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
     const toolCalls = content.filter(
       (block) => record(block)?.type === "tool_use",
     ).length;
+    for (const block of content) {
+      const toolUse = record(block);
+      const id = stringValue(toolUse?.id);
+      const name = stringValue(toolUse?.name);
+      if (toolUse?.type === "tool_use" && id && name) {
+        toolUseNames.set(id, name);
+      }
+    }
     if (atMs !== null) {
       for (const block of content) {
         const toolUse = record(block);
@@ -928,7 +965,43 @@ async function summarizeTranscript(path: string): Promise<TranscriptSummary> {
     costUsd,
     externalSpawns,
     taskNotifications,
+    launchedTaskIds,
   };
+}
+
+// The task id of a background Bash command or async agent a tool_result
+// reports launching, or null for any other tool result.
+function backgroundTaskId(
+  block: JsonRecord | null,
+  toolUseNames: ReadonlyMap<string, string>,
+  toolUseResult: JsonRecord | null,
+): string | null {
+  const toolUseId = stringValue(block?.tool_use_id);
+  if (block?.type !== "tool_result" || !toolUseId) {
+    return null;
+  }
+  const content = block.content;
+  const text =
+    typeof content === "string"
+      ? content
+      : (Array.isArray(content) ? content : [])
+          .map((part) => stringValue(record(part)?.text) ?? "")
+          .join("\n");
+  const name = toolUseNames.get(toolUseId);
+  if (name === "Bash") {
+    return (
+      stringValue(toolUseResult?.backgroundTaskId) ??
+      text.match(/^Command running in background with ID: (\w+)/u)?.[1] ??
+      null
+    );
+  }
+  if (
+    (name === "Agent" || name === "Task") &&
+    text.startsWith("Async agent launched successfully")
+  ) {
+    return text.match(/agentId: (\w+)/u)?.[1] ?? null;
+  }
+  return null;
 }
 
 async function collectSubagentsInDirectory(
@@ -998,6 +1071,8 @@ async function collectSubagentsInDirectory(
           transcriptPath: transcript,
           modifiedAtMs: (await stat(transcript)).mtimeMs,
           providerStatus: providerState?.status ?? null,
+          providerFromNotification:
+            workflowState === undefined && providerState !== undefined,
           providerLastActivityAtMs:
             providerState?.lastActivityAtMs ?? null,
         };
@@ -1079,12 +1154,21 @@ function subagentStatus(
   stopReason: string | null,
   rootStatus: AgentStatus,
   providerStatus: AgentStatus | null,
+  providerFromNotification: boolean,
   modifiedAtMs: number,
   nowMs: number,
   fanDoneAtMs: number | null,
+  backgroundTaskLive: boolean,
 ): AgentStatus {
+  // A subagent that ends its turn while a background task it started is
+  // still in the job's fan-out is parked, not finished: the harness wakes
+  // it when the task ends. Its parent is notified "completed" and its fan
+  // entry gets a doneAt each time it parks, so neither can end it.
+  const parked = backgroundTaskLive && isLiveStatus(rootStatus);
   if (providerStatus !== null) {
-    return providerStatus;
+    return providerStatus === "completed" && providerFromNotification && parked
+      ? "running"
+      : providerStatus;
   }
   const reason = stopReason?.toLowerCase() ?? "";
   if (["error", "failed", "refusal"].includes(reason)) {
@@ -1094,10 +1178,10 @@ function subagentStatus(
     return "aborted";
   }
   if (["end_turn", "stop", "stop_sequence"].includes(reason)) {
-    return "completed";
+    return parked ? "running" : "completed";
   }
   if (fanDoneAtMs !== null) {
-    return "completed";
+    return parked ? "running" : "completed";
   }
   if (["completed", "failed", "aborted"].includes(rootStatus)) {
     return rootStatus;
@@ -1238,6 +1322,7 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
   const agents: AgentRun[] = [];
   const externalSpawns: ExternalSpawn[] = [];
   const subagentCandidates: SubagentCandidate[] = [];
+  const fanLiveIdsByRoot = new Map<string, ReadonlySet<string>>();
   let hiddenRoots = 0;
 
   for (const [index, session] of sessions.entries()) {
@@ -1322,6 +1407,7 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
       toolCalls: transcript?.toolCalls ?? null,
     };
     agents.push(root);
+    fanLiveIdsByRoot.set(root.id, job?.fanLiveIds ?? new Set());
     for (const mark of transcript?.externalSpawns ?? []) {
       externalSpawns.push({
         parentId: root.id,
@@ -1442,9 +1528,13 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
       transcript.stopReason,
       candidate.rootStatus,
       providerStatus,
+      candidate.providerFromNotification || parentNotification !== undefined,
       candidate.modifiedAtMs,
       nowMs,
       candidate.fanDoneAtMs,
+      transcript.launchedTaskIds.some((id) =>
+        fanLiveIdsByRoot.get(candidate.rootId)?.has(id),
+      ),
     );
     const startedAtMs = transcript.firstAtMs ?? candidate.modifiedAtMs;
     const lastActivityAtMs = Math.max(
