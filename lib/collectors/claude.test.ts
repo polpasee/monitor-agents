@@ -465,6 +465,7 @@ test("Claude collector drops stale subagents once the session has finished", asy
 
     assert.deepEqual(subagentIds, [`claude:${sessionId}:current`]);
     assert.ok(result.source.detail.includes("3 older subagents are hidden."));
+    assert.equal(result.source.hiddenAgents, 3);
   } finally {
     if (previousDirectory === undefined) {
       delete process.env.CLAUDE_CONFIG_DIR;
@@ -1069,6 +1070,63 @@ test("Claude collector distinguishes resumed, stalled, and spare sessions", asyn
       false,
     );
     assert.match(result.source.detail, /Loaded 2 Claude sessions/u);
+  } finally {
+    if (previousDirectory === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = previousDirectory;
+    }
+    if (previousRateLimitsFile === undefined) {
+      delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    } else {
+      process.env.CLAUDE_RATE_LIMITS_FILE = previousRateLimitsFile;
+    }
+    if (previousWorkspace === undefined) {
+      delete process.env.MONITOR_WORKSPACE;
+    } else {
+      process.env.MONITOR_WORKSPACE = previousWorkspace;
+    }
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
+test("Claude collector counts the sessions past its root cap as hidden", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-claude-cap-"));
+  const workspace = "/workspace/cap";
+  const previousDirectory = process.env.CLAUDE_CONFIG_DIR;
+  const previousRateLimitsFile = process.env.CLAUDE_RATE_LIMITS_FILE;
+  const previousWorkspace = process.env.MONITOR_WORKSPACE;
+  const now = Date.now();
+
+  try {
+    process.env.CLAUDE_CONFIG_DIR = directory;
+    delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    process.env.MONITOR_WORKSPACE = workspace;
+    await mkdir(join(directory, "sessions"), { recursive: true });
+    await mkdir(join(directory, "projects"), { recursive: true });
+    for (let index = 0; index < 9; index += 1) {
+      await writeFile(
+        join(directory, "sessions", `session-${index}.json`),
+        JSON.stringify({
+          sessionId: `session-${index}`,
+          pid: process.pid,
+          cwd: workspace,
+          status: "busy",
+          startedAt: new Date(now - 60_000).toISOString(),
+          updatedAt: new Date(now - index * 1_000).toISOString(),
+        }),
+      );
+    }
+
+    const result = await collectClaudeTelemetry();
+
+    assert.equal(result.agents.length, 8);
+    assert.equal(
+      result.agents.some((agent) => agent.id === "claude:session-8"),
+      false,
+    );
+    assert.equal(result.source.hiddenAgents, 1);
+    assert.ok(result.source.detail.includes("1 more session is hidden."));
   } finally {
     if (previousDirectory === undefined) {
       delete process.env.CLAUDE_CONFIG_DIR;

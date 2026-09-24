@@ -106,6 +106,7 @@ export interface SourceStatus {
   connection: SourceConnection;
   detail: string;
   agentCount: number;
+  hiddenAgents?: number;
 }
 
 export interface DashboardSnapshot {
@@ -487,6 +488,17 @@ export function buildAgentForest(agents: AgentRun[]): AgentTreeNode[] {
   }
 
   return roots;
+}
+
+export function hiddenAgentCounts(
+  sources: SourceStatus[],
+): { provider: Provider; hidden: number }[] {
+  return sources
+    .filter((source) => (source.hiddenAgents ?? 0) > 0)
+    .map((source) => ({
+      provider: source.provider,
+      hidden: source.hiddenAgents ?? 0,
+    }));
 }
 
 export function calculateKpis(agents: AgentRun[]): DashboardKpis {

@@ -720,6 +720,7 @@ export async function collectCodexTelemetry(): Promise<CollectorResult> {
         connection: "connected",
         detail: notes.join(" "),
         agentCount: agents.length,
+        hiddenAgents: Math.max(0, total.count - rows.length),
       },
     };
   } catch {

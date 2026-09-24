@@ -31,6 +31,7 @@ const EVENT_KINDS: EventKind[] = [
   "usage.recorded",
 ];
 const QUOTA_PERIODS: QuotaPeriod[] = ["hour", "week"];
+const DEFAULT_MAX_AGENTS = 24;
 
 class ValidationError extends Error {}
 
@@ -311,6 +312,17 @@ function parseSnapshot(value: unknown): Omit<CollectorResult, "source"> {
   return { agents, events, quotaLimits };
 }
 
+function maxAgents(): number {
+  const parsed = Number.parseInt(process.env.MONITOR_MAX_AGENTS ?? "", 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : DEFAULT_MAX_AGENTS;
+}
+
+function agyHome(): string {
+  return (
+    process.env.AGY_HOME?.trim() || join(homedir(), ".gemini", "antigravity-cli")
+  );
+}
+
 function emptyResult(
   connection: "unconfigured" | "error" | "idle",
   detail: string,
@@ -326,7 +338,7 @@ function emptyResult(
 async function parseLocalAgyAgent(
   conversationId: string,
 ): Promise<AgentRun | null> {
-  const brainDir = join(homedir(), ".gemini", "antigravity-cli", "brain");
+  const brainDir = join(agyHome(), "brain");
   const transcriptPath = join(
     brainDir,
     conversationId,
@@ -398,7 +410,7 @@ async function parseLocalAgyAgent(
     status: isCompleted ? "completed" : "running",
     task: task.substring(0, 200),
     spawnMethod: "root",
-    cwd: process.cwd(),
+    cwd: "",
     startedAt,
     endedAt: isCompleted ? lastActivityAt : null,
     lastActivityAt,
@@ -414,25 +426,34 @@ async function parseLocalAgyAgent(
   };
 }
 
-async function collectLocalAgyAgents(): Promise<AgentRun[]> {
-  const brainDir = join(homedir(), ".gemini", "antigravity-cli", "brain");
+async function collectLocalAgyAgents(): Promise<{
+  agents: AgentRun[];
+  total: number;
+}> {
+  const brainDir = join(agyHome(), "brain");
   let entries: string[] = [];
   try {
     entries = await readdir(brainDir);
   } catch {
-    return [];
+    return { agents: [], total: 0 };
   }
   const agents = (await Promise.all(entries.map(parseLocalAgyAgent))).filter(
     (agent): agent is AgentRun => agent !== null,
   );
-  return agents;
+  const selected = agents
+    .sort(
+      (left, right) =>
+        Date.parse(right.lastActivityAt) - Date.parse(left.lastActivityAt),
+    )
+    .slice(0, maxAgents());
+  return { agents: selected, total: agents.length };
 }
 
 export async function collectAgyTelemetry(): Promise<CollectorResult> {
   const file = process.env.AGY_TELEMETRY_FILE?.trim();
   if (!file) {
     try {
-      const agents = await collectLocalAgyAgents();
+      const { agents, total } = await collectLocalAgyAgents();
       if (agents.length === 0) {
         return emptyResult(
           "idle",
@@ -446,8 +467,13 @@ export async function collectAgyTelemetry(): Promise<CollectorResult> {
         source: {
           provider: "agy",
           connection: "connected",
-          detail: `Loaded ${agents.length} agents from local transcript logs.`,
+          detail: `Loaded ${agents.length} agents from local transcript logs.${
+            total > agents.length
+              ? ` Limited from ${total} by MONITOR_MAX_AGENTS.`
+              : ""
+          }`,
           agentCount: agents.length,
+          hiddenAgents: total - agents.length,
         },
       };
     } catch {

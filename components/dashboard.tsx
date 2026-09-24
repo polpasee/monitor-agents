@@ -257,8 +257,8 @@ export function Dashboard({ snapshot: initialSnapshot }: DashboardProps) {
     [topologyAgents],
   );
   const selectedAgent =
-    snapshot.agents.find((agent) => agent.id === selectedAgentId) ??
-    snapshot.agents[0] ??
+    topologyAgents.find((agent) => agent.id === selectedAgentId) ??
+    topologyAgents[0] ??
     null;
   const queuedAgents =
     topologyKpis.totalAgents -
@@ -407,13 +407,14 @@ export function Dashboard({ snapshot: initialSnapshot }: DashboardProps) {
               onToggleCollapsed={toggleCollapsed}
               quotaLimits={snapshot.quotaLimits}
               selectedAgentId={selectedAgentId}
+              sources={snapshot.sources}
             />
             <ActivityPanel snapshot={snapshot} />
           </div>
 
           <AgentInspector
             agent={selectedAgent}
-            agents={snapshot.agents}
+            agents={topologyAgents}
             capturedAt={snapshot.capturedAt}
             onSelectAgent={selectAgent}
           />

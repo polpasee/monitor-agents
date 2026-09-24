@@ -29,9 +29,11 @@ import {
   buildAgentForest,
   getAgentDepths,
   getAgentGroup,
+  hiddenAgentCounts,
   type AgentRun,
   type Provider,
   type QuotaLimit,
+  type SourceStatus,
 } from "@/lib/telemetry";
 import {
   assignTopologyNodeColors,
@@ -77,6 +79,7 @@ interface TopologyProps {
   agents: AgentRun[];
   capturedAt: string;
   quotaLimits: QuotaLimit[];
+  sources: SourceStatus[];
   selectedAgentId: string | null;
   collapsedAgentIds: ReadonlySet<string>;
   onSelectAgent: (agentId: string) => void;
@@ -301,6 +304,7 @@ export function Topology({
   agents,
   capturedAt,
   quotaLimits,
+  sources,
   selectedAgentId,
   collapsedAgentIds,
   onSelectAgent,
@@ -392,6 +396,7 @@ export function Topology({
       })),
     [agents],
   );
+  const hiddenCounts = hiddenAgentCounts(sources);
   const agentGroupIds = useMemo(
     () => new Set(agentGroups.map((group) => group.root.id)),
     [agentGroups],
@@ -1085,6 +1090,23 @@ export function Topology({
         >
           Live session
         </h2>
+        {hiddenCounts.length > 0 ? (
+          <span
+            className="topology-panel__hidden-note"
+            title={sources
+              .filter((source) => (source.hiddenAgents ?? 0) > 0)
+              .map((source) => source.detail)
+              .join("\n")}
+          >
+            Older agents not loaded:{" "}
+            {hiddenCounts
+              .map(
+                ({ provider, hidden }) =>
+                  `${providerLabels[provider]} ${hidden}`,
+              )
+              .join(" · ")}
+          </span>
+        ) : null}
         <label className="sr-only" htmlFor="topology-agent-group">
           Agent group
         </label>

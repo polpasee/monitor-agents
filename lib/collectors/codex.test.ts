@@ -160,6 +160,7 @@ test("Codex collector loads multiple recent native families under one agent cap"
     assert.notEqual(result.agents[1].endedAt, null);
     assert.equal(result.agents.length, 5);
     assert.match(result.source.detail, /Limited from 6 by MONITOR_MAX_AGENTS/);
+    assert.equal(result.source.hiddenAgents, 1);
 
     process.env.MONITOR_MAX_AGENTS = "1";
     const singleCandidate = await collectCodexTelemetry();

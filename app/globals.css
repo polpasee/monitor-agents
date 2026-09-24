@@ -1301,6 +1301,17 @@ button:focus-visible,
   outline-offset: 2px;
 }
 
+.topology-panel__hidden-note {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .force-graph-viewport {
   position: relative;
   isolation: isolate;
