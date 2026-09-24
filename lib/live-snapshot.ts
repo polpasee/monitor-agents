@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import {
   applyDeclaredSpawnLinks,
   linkExternalRootsToClaudeSpawns,
@@ -10,25 +10,27 @@ import {
   type AgentRun,
   type DashboardSnapshot,
   type SpawnLink,
-} from "./telemetry";
-import { collectAgyTelemetry } from "./collectors/agy";
-import { collectClaudeTelemetry } from "./collectors/claude";
-import { collectCodexTelemetry } from "./collectors/codex";
-import { collectGeminiTelemetry } from "./collectors/gemini";
-import { collectQwenTelemetry } from "./collectors/qwen";
+} from "./telemetry.ts";
+import { collectAgyTelemetry } from "./collectors/agy.ts";
+import { collectClaudeTelemetry } from "./collectors/claude.ts";
+import { collectCodexTelemetry } from "./collectors/codex.ts";
+import { collectGeminiTelemetry } from "./collectors/gemini.ts";
+import { collectQwenTelemetry } from "./collectors/qwen.ts";
 
 // A linked worktree keeps a `.git` file rather than a directory:
 // `gitdir: /repo/.git/worktrees/<name>`.
 const WORKTREE_GITDIR_PATTERN =
   /^gitdir:[\t ]*(.+?)[\\/]\.git[\\/]worktrees[\\/][^\\/\n]+\s*$/u;
 
-async function resolveWorktreeMainRepos(
+export async function resolveWorktreeMainRepos(
   agents: readonly AgentRun[],
 ): Promise<Map<string, string>> {
   const cwds = new Set(
     agents
       .filter((agent) => agent.provider !== "claude" && agent.parentId === null)
-      .map((agent) => agent.cwd),
+      .map((agent) => agent.cwd)
+      // An agent with no known cwd must not resolve against the monitor's own.
+      .filter((cwd) => isAbsolute(cwd)),
   );
 
   const mainRepoByCwd = new Map<string, string>();
