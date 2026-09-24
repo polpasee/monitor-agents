@@ -890,6 +890,68 @@ test("Claude collector keeps only the newest registry record per session id", as
   }
 });
 
+test("Claude collector reads a registry file with leftover bytes after its JSON", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-claude-trailing-"));
+  const workspace = "/workspace/repo";
+  const previousDirectory = process.env.CLAUDE_CONFIG_DIR;
+  const previousRateLimitsFile = process.env.CLAUDE_RATE_LIMITS_FILE;
+  const previousWorkspace = process.env.MONITOR_WORKSPACE;
+  const now = Date.now();
+
+  try {
+    process.env.CLAUDE_CONFIG_DIR = directory;
+    delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    process.env.MONITOR_WORKSPACE = workspace;
+    await mkdir(join(directory, "sessions"), { recursive: true });
+    await writeFile(
+      join(directory, "sessions", "26980.json"),
+      `${JSON.stringify({
+        sessionId: "trailing-session",
+        pid: process.pid,
+        cwd: workspace,
+        name: 'Task "pickup" }]',
+        status: "busy",
+        startedAt: new Date(now - 60_000).toISOString(),
+        updatedAt: new Date(now - 1_000).toISOString(),
+      })}}`,
+    );
+
+    const loaded = await collectClaudeTelemetry();
+    assert.ok(
+      loaded.agents.some((agent) => agent.id === "claude:trailing-session"),
+    );
+    assert.doesNotMatch(loaded.source.detail, /unreadable/u);
+
+    await writeFile(join(directory, "sessions", "broken.json"), '{"pid":');
+
+    const broken = await collectClaudeTelemetry();
+    assert.ok(
+      broken.agents.some((agent) => agent.id === "claude:trailing-session"),
+    );
+    assert.match(
+      broken.source.detail,
+      /1 optional telemetry file was unreadable/u,
+    );
+  } finally {
+    if (previousDirectory === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = previousDirectory;
+    }
+    if (previousRateLimitsFile === undefined) {
+      delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    } else {
+      process.env.CLAUDE_RATE_LIMITS_FILE = previousRateLimitsFile;
+    }
+    if (previousWorkspace === undefined) {
+      delete process.env.MONITOR_WORKSPACE;
+    } else {
+      process.env.MONITOR_WORKSPACE = previousWorkspace;
+    }
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
 test("Claude collector closes an unresolved child with its completed parent", async () => {
   const directory = await mkdtemp(join(tmpdir(), "monitor-claude-child-"));
   const workspace = "/workspace/repo";

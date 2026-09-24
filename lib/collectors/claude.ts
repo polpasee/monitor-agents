@@ -278,7 +278,20 @@ async function readJsonRecord(
   missingIsError = false,
 ): Promise<JsonRecord | null> {
   try {
-    const parsed: unknown = JSON.parse(await readFile(path, "utf8"));
+    const text = await readFile(path, "utf8");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch (error) {
+      // Claude Code can rewrite a session file shorter without truncating it,
+      // leaving stray bytes after a complete JSON value.
+      const leading =
+        error instanceof SyntaxError ? leadingJsonText(text) : null;
+      if (leading === null) {
+        throw error;
+      }
+      parsed = JSON.parse(leading);
+    }
     const value = record(parsed);
     if (!value) {
       diagnostics.errors += 1;
@@ -290,6 +303,35 @@ async function readJsonRecord(
     }
     return null;
   }
+}
+
+function leadingJsonText(text: string): string | null {
+  const start = text.search(/\S/u);
+  if (text[start] !== "{" && text[start] !== "[") {
+    return null;
+  }
+  let depth = 0;
+  let inString = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (char === "\\") {
+        index += 1;
+      } else if (char === '"') {
+        inString = false;
+      }
+    } else if (char === '"') {
+      inString = true;
+    } else if (char === "{" || char === "[") {
+      depth += 1;
+    } else if (char === "}" || char === "]") {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(start, index + 1);
+      }
+    }
+  }
+  return null;
 }
 
 function safeAgentType(value: unknown): string {
