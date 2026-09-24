@@ -1090,6 +1090,23 @@ export function Topology({
         >
           Live session
         </h2>
+        {hiddenCounts.length > 0 ? (
+          <span
+            className="topology-panel__hidden-note"
+            title={sources
+              .filter((source) => (source.hiddenAgents ?? 0) > 0)
+              .map((source) => source.detail)
+              .join("\n")}
+          >
+            Older agents not loaded:{" "}
+            {hiddenCounts
+              .map(
+                ({ provider, hidden }) =>
+                  `${providerLabels[provider]} ${hidden}`,
+              )
+              .join(" · ")}
+          </span>
+        ) : null}
         <label className="sr-only" htmlFor="topology-agent-group">
           Agent group
         </label>
@@ -1118,23 +1135,6 @@ export function Topology({
             </option>
           ))}
         </select>
-        {hiddenCounts.length > 0 ? (
-          <span
-            className="topology-panel__hidden-note"
-            title={sources
-              .filter((source) => (source.hiddenAgents ?? 0) > 0)
-              .map((source) => source.detail)
-              .join("\n")}
-          >
-            Older agents not loaded:{" "}
-            {hiddenCounts
-              .map(
-                ({ provider, hidden }) =>
-                  `${providerLabels[provider]} ${hidden}`,
-              )
-              .join(" · ")}
-          </span>
-        ) : null}
       </header>
 
       {displayedAgents.length > 0 ? (
