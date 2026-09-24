@@ -283,8 +283,8 @@ async function readJsonRecord(
     try {
       parsed = JSON.parse(text);
     } catch (error) {
-      // Claude Code can rewrite a session file shorter without truncating it,
-      // leaving stray bytes after a complete JSON value.
+      // A session file written by Claude Code can end up with stray bytes
+      // after a complete JSON value.
       const leading =
         error instanceof SyntaxError ? leadingJsonText(text) : null;
       if (leading === null) {
