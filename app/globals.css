@@ -945,10 +945,10 @@ button:focus-visible,
 }
 
 .kanban-column {
-  /* 260px = page chrome around the column (shell padding, page header, Kanban header, board padding) so the board fits the viewport. */
+  /* 288px = page chrome around the column (shell padding, page header, Kanban header, board padding) so the board fits the viewport. */
   display: flex;
-  min-height: min(460px, calc(100dvh - 260px));
-  max-height: calc(100dvh - 260px);
+  min-height: min(432px, calc(100dvh - 288px));
+  max-height: calc(100dvh - 288px);
   flex-direction: column;
   padding: 10px;
   border: 1px solid var(--border);
@@ -2266,6 +2266,16 @@ button:focus-visible,
   gap: 8px;
 }
 
+.provider-limits-overlay--inline {
+  position: static;
+  z-index: auto;
+  width: min(360px, 100%);
+}
+
+.provider-limits-overlay--inline .provider-limits-overlay__providers {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .provider-limits-overlay__provider {
   min-width: 0;
 }
@@ -2406,8 +2416,8 @@ button:focus-visible,
 
   /* Stacked page and Kanban headers make the chrome around the column taller. */
   .kanban-column {
-    min-height: min(460px, calc(100dvh - 315px));
-    max-height: calc(100dvh - 315px);
+    min-height: min(460px, calc(100dvh - 415px));
+    max-height: calc(100dvh - 415px);
   }
 
   .kanban-task-dialog {

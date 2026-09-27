@@ -6,16 +6,18 @@ import {
   type QuotaLimit,
 } from "@/lib/telemetry";
 
-interface ProviderLimitsProps {
-  capturedAt: string;
-  quotaLimits: QuotaLimit[];
-}
-
 const displayedProviders = [
   "codex",
   "claude",
   "gemini",
 ] as const satisfies readonly Provider[];
+
+interface ProviderLimitsProps {
+  capturedAt: string;
+  className?: string;
+  providers?: readonly (typeof displayedProviders)[number][];
+  quotaLimits: QuotaLimit[];
+}
 
 const displayedPeriods = [
   { period: "hour", label: "5h" },
@@ -51,12 +53,21 @@ function quotaUsagePercent(quota: QuotaLimit | undefined): number | null {
 
 export function ProviderLimits({
   capturedAt,
+  className,
+  providers = displayedProviders,
   quotaLimits,
 }: ProviderLimitsProps) {
   return (
-    <aside className="provider-limits-overlay" aria-label="Provider limits">
+    <aside
+      className={
+        className
+          ? `provider-limits-overlay ${className}`
+          : "provider-limits-overlay"
+      }
+      aria-label="Provider limits"
+    >
       <div className="provider-limits-overlay__providers">
-        {displayedProviders.map((provider) => {
+        {providers.map((provider) => {
           const providerQuotasByPeriod = {
             hour: getProviderQuota(quotaLimits, provider, "hour"),
             week: getProviderQuota(quotaLimits, provider, "week"),
