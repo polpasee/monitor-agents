@@ -947,7 +947,7 @@ button:focus-visible,
 .kanban-column {
   /* 288px = page chrome around the column (shell padding, page header, Kanban header, board padding) so the board fits the viewport. */
   display: flex;
-  min-height: min(460px, calc(100dvh - 288px));
+  min-height: min(432px, calc(100dvh - 288px));
   max-height: calc(100dvh - 288px);
   flex-direction: column;
   padding: 10px;
