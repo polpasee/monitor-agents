@@ -423,6 +423,7 @@ export function Dashboard({ snapshot: initialSnapshot }: DashboardProps) {
         <KanbanBoard
           agents={snapshot.agents}
           capturedAt={snapshot.capturedAt}
+          quotaLimits={snapshot.quotaLimits}
         />
       )}
 

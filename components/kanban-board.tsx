@@ -6,7 +6,7 @@ import {
   mergeRepositoryNames,
   type RepositoryList,
 } from "@/lib/repository-list";
-import type { AgentRun } from "@/lib/telemetry";
+import type { AgentRun, QuotaLimit } from "@/lib/telemetry";
 import {
   compareKanbanColumnTasks,
   findTaskAgent,
@@ -28,10 +28,12 @@ import {
 } from "@/lib/kanban";
 
 import { AgentInspector } from "./agent-inspector";
+import { ProviderLimits } from "./provider-limits";
 
 interface KanbanBoardProps {
   agents: AgentRun[];
   capturedAt: string;
+  quotaLimits: QuotaLimit[];
 }
 
 /** A reset, retry, or failure keeps the details of the last completion. */
@@ -43,7 +45,11 @@ function showsCompletion(task: KanbanTask): boolean {
   );
 }
 
-export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
+export function KanbanBoard({
+  agents,
+  capturedAt,
+  quotaLimits,
+}: KanbanBoardProps) {
   const addTaskButtonRef = useRef<HTMLButtonElement>(null);
   const addTaskDialogRef = useRef<HTMLDialogElement>(null);
   const editTaskButtonRef = useRef<HTMLButtonElement>(null);
@@ -404,6 +410,12 @@ export function KanbanBoard({ agents, capturedAt }: KanbanBoardProps) {
             Task board
           </h2>
         </div>
+        <ProviderLimits
+          capturedAt={capturedAt}
+          className="provider-limits-overlay--inline"
+          providers={["codex", "claude"]}
+          quotaLimits={quotaLimits}
+        />
         <div className="kanban-header__actions">
           <label className="kanban-filter">
             <span>Repository</span>
