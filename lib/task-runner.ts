@@ -66,32 +66,68 @@ export function buildTaskPrompt(task: KanbanTask): string {
 
 export type RunnerProvider = "claude" | "codex";
 
+export type RunnerModel =
+  | { provider: "claude"; cli: string | null }
+  | { provider: "codex"; family: string; fallback: string };
+
 /**
  * Claude takes the CLI aliases, which follow new releases on their own. Codex
- * slugs are pinned: only Sol has a 6.1 build, Astra and Luna stay on 6.
+ * resolves the newest listed slug of each family at run time; the fallback is
+ * used when the catalog cannot be read.
  */
-const runnerModels: Record<string, { provider: RunnerProvider; cli: string }> = {
+const runnerModels: Record<string, RunnerModel> = {
   "claude-fable": { provider: "claude", cli: "fable" },
   "claude-opus": { provider: "claude", cli: "opus" },
   "claude-sonnet": { provider: "claude", cli: "sonnet" },
   "claude-haiku": { provider: "claude", cli: "haiku" },
-  "codex-astra": { provider: "codex", cli: "gpt-6-astra" },
-  "codex-sol": { provider: "codex", cli: "gpt-6.1-sol" },
-  "codex-luna": { provider: "codex", cli: "gpt-6-luna" },
+  "codex-astra": { provider: "codex", family: "astra", fallback: "gpt-6-astra" },
+  "codex-sol": { provider: "codex", family: "sol", fallback: "gpt-6.1-sol" },
+  "codex-luna": { provider: "codex", family: "luna", fallback: "gpt-6-luna" },
 };
 
 /**
  * A task without a requested model runs on Claude with its default model. The
  * API validates model ids, so an unknown one only means this map is stale.
  */
-export function runnerModel(requestedModel: string | null): {
-  provider: RunnerProvider;
-  cli: string | null;
-} {
+export function runnerModel(requestedModel: string | null): RunnerModel {
   if (requestedModel === null) return { provider: "claude", cli: null };
   const model = runnerModels[requestedModel];
   if (!model) throw new Error(`Unknown requested model: ${requestedModel}`);
   return model;
+}
+
+/**
+ * Picks the newest `gpt-<major>[.<minor>]-<family>` slug from the output of
+ * `codex debug models`, skipping hidden models and ones marked for upgrade.
+ * Versions compare as numbers, so 6.10 is newer than 6.9.
+ */
+export function latestCodexSlug(
+  catalogJson: string,
+  family: string,
+  fallback: string,
+): string {
+  let models: unknown;
+  try {
+    models = (JSON.parse(catalogJson) as { models?: unknown })?.models;
+  } catch {
+    return fallback;
+  }
+  if (!Array.isArray(models)) return fallback;
+
+  const pattern = new RegExp(`^gpt-(\\d+)(?:\\.(\\d+))?-${family}$`);
+  let best: { slug: string; major: number; minor: number } | null = null;
+  for (const model of models) {
+    const { slug, visibility, upgrade } = (model ?? {}) as Record<string, unknown>;
+    if (typeof slug !== "string" || visibility !== "list" || upgrade != null) continue;
+    const match = pattern.exec(slug);
+    if (!match) continue;
+    const major = Number(match[1]);
+    const minor = Number(match[2] ?? 0);
+    if (!best || major > best.major || (major === best.major && minor > best.minor)) {
+      best = { slug, major, minor };
+    }
+  }
+  return best?.slug ?? fallback;
 }
 
 export function claudeArgs(
@@ -113,7 +149,8 @@ export function claudeArgs(
 
 /**
  * `--ephemeral` is left out on purpose: an ephemeral thread is never stored,
- * so the topology could not link the task to its run.
+ * so the topology could not link the task to its run. The sandbox keeps writes
+ * inside the worktree but leaves the network open, and never asks to approve.
  */
 export function codexArgs(
   prompt: string,
@@ -124,7 +161,12 @@ export function codexArgs(
   return [
     "exec",
     "--json",
-    "--dangerously-bypass-approvals-and-sandbox",
+    "-s",
+    "workspace-write",
+    "-c",
+    'approval_policy="never"',
+    "-c",
+    "sandbox_workspace_write.network_access=true",
     "-m",
     model,
     ...(effort ? ["-c", `model_reasoning_effort="${effort}"`] : []),

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { execFile, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { hostname, homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -12,6 +12,7 @@ import {
   codexArgs,
   formatCompletionResult,
   formatFailure,
+  latestCodexSlug,
   maxResultLength,
   parseClaudeOutput,
   parseClaudeRunMetadata,
@@ -138,15 +139,38 @@ async function readEffort(sessionId) {
   }
 }
 
+/** Asks Codex for its model catalog and picks the family's newest slug. */
+function codexSlug(family, fallback) {
+  let slug = fallback;
+  try {
+    const catalog = execFileSync(config.codexBin, ["debug", "models"], {
+      encoding: "utf8",
+      timeout: 10_000,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+    slug = latestCodexSlug(catalog, family, fallback);
+    if (slug === fallback && !catalog.includes(`"${fallback}"`)) {
+      log(`Warning: codex-${family} not found in the Codex model catalog, using ${fallback}`);
+    }
+  } catch (error) {
+    log(`Warning: could not read the Codex model catalog, using ${fallback}: ${error.message}`);
+  }
+  log(`codex-${family} → ${slug}`);
+  return slug;
+}
+
 /**
  * The requested model picks the CLI. A task without one runs Claude on its
  * default model, as every task did before models could be requested.
  */
 function agentCommand(task, worktree, prompt) {
-  const { provider, cli } = runnerModel(task.requestedModel);
-  return provider === "codex"
-    ? { provider, cli, bin: config.codexBin, args: codexArgs(prompt, cli, task.requestedEffort, worktree) }
-    : { provider, cli, bin: config.claudeBin, args: claudeArgs(prompt, cli, task.requestedEffort) };
+  const model = runnerModel(task.requestedModel);
+  if (model.provider === "codex") {
+    const cli = codexSlug(model.family, model.fallback);
+    return { provider: "codex", cli, bin: config.codexBin, args: codexArgs(prompt, cli, task.requestedEffort, worktree) };
+  }
+  const { provider, cli } = model;
+  return { provider, cli, bin: config.claudeBin, args: claudeArgs(prompt, cli, task.requestedEffort) };
 }
 
 /**
@@ -313,6 +337,17 @@ async function runTask(task, directory) {
   }
 }
 
+/**
+ * A dry run must leave the queue untouched, so it reads the task the claim
+ * would pick instead of claiming it. The list is already in claim order.
+ */
+async function nextTodoTask(targets) {
+  const response = await fetch(`${config.apiUrl}/api/tasks`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Task list failed with ${response.status}`);
+  const repositories = new Set(targets.map((target) => target.repository));
+  return (await response.json()).find((task) => task.status === "todo" && repositories.has(task.repository));
+}
+
 async function main() {
   await mkdir(config.logDir, { recursive: true });
   log(`Runner ${config.agentId} polling ${config.apiUrl} every ${config.pollSeconds}s`);
@@ -322,6 +357,19 @@ async function main() {
       const targets = await claimableRepositories();
       if (targets.length === 0) {
         log(`No checkouts found under ${config.workspaceRoot}.`);
+      } else if (config.dryRun) {
+        const task = await nextTodoTask(targets);
+        if (task) {
+          const target = targets.find((entry) => entry.repository === task.repository);
+          log(`Dry run: next is ${task.id} — ${task.title} (${task.repository})`);
+          const prompt = buildTaskPrompt(task);
+          const { provider, bin, args } = agentCommand(task, "<worktree>", prompt);
+          log(
+            `Dry run: would run ${provider} in ${target.directory}: ${bin} ${args.map((arg) => (arg === prompt ? "<prompt>" : arg)).join(" ")}`,
+          );
+        } else {
+          log("Dry run: nothing to run.");
+        }
       } else {
         const task = await api("/api/agent/tasks/claim", {
           agentId: config.agentId,
@@ -332,15 +380,7 @@ async function main() {
         if (task) {
           const target = targets.find((entry) => entry.repository === task.repository);
           log(`Claimed ${task.id} — ${task.title} (${task.repository})`);
-          if (config.dryRun) {
-            const prompt = buildTaskPrompt(task);
-            const { provider, bin, args } = agentCommand(task, "<worktree>", prompt);
-            log(
-              `Dry run: would run ${provider} in ${target.directory}: ${bin} ${args.map((arg) => (arg === prompt ? "<prompt>" : arg)).join(" ")}`,
-            );
-          } else {
-            await runTask(task, target.directory);
-          }
+          await runTask(task, target.directory);
         }
       }
     } catch (error) {

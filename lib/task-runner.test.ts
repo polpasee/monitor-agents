@@ -7,6 +7,7 @@ import {
   claudeArgs,
   codexArgs,
   formatCompletionResult,
+  latestCodexSlug,
   maxResultLength,
   parseClaudeOutput,
   parseClaudeRunMetadata,
@@ -342,10 +343,87 @@ test("runnerModel maps each Kanban model to its provider and CLI name", () => {
   assert.deepEqual(runnerModel("claude-opus"), { provider: "claude", cli: "opus" });
   assert.deepEqual(runnerModel("claude-sonnet"), { provider: "claude", cli: "sonnet" });
   assert.deepEqual(runnerModel("claude-haiku"), { provider: "claude", cli: "haiku" });
-  assert.deepEqual(runnerModel("codex-astra"), { provider: "codex", cli: "gpt-6-astra" });
-  assert.deepEqual(runnerModel("codex-sol"), { provider: "codex", cli: "gpt-6.1-sol" });
-  assert.deepEqual(runnerModel("codex-luna"), { provider: "codex", cli: "gpt-6-luna" });
+  assert.deepEqual(runnerModel("codex-astra"), {
+    provider: "codex",
+    family: "astra",
+    fallback: "gpt-6-astra",
+  });
+  assert.deepEqual(runnerModel("codex-sol"), {
+    provider: "codex",
+    family: "sol",
+    fallback: "gpt-6.1-sol",
+  });
+  assert.deepEqual(runnerModel("codex-luna"), {
+    provider: "codex",
+    family: "luna",
+    fallback: "gpt-6-luna",
+  });
   assert.throws(() => runnerModel("codex-nova"), /Unknown requested model/);
+});
+
+// `codex debug models` trimmed to the fields the runner reads.
+const codexCatalog = JSON.stringify({
+  models: [
+    { slug: "gpt-6.1-sol", visibility: "list", upgrade: null },
+    { slug: "gpt-6-astra", visibility: "list", upgrade: null },
+    { slug: "gpt-6-sol", visibility: "list", upgrade: null },
+    { slug: "gpt-6-luna", visibility: "list", upgrade: null },
+    { slug: "gpt-reserve", visibility: "hide", upgrade: null },
+    { slug: "gpt-5.6-sol", visibility: "list", upgrade: null },
+    { slug: "gpt-5.6-terra", visibility: "list", upgrade: null },
+    { slug: "gpt-5.6-luna", visibility: "list", upgrade: null },
+    { slug: "gpt-5.5", visibility: "list", upgrade: { model: "gpt-6.1-sol" } },
+    { slug: "codex-auto-review", visibility: "hide", upgrade: null },
+  ],
+});
+
+function catalog(...models: { slug: string; visibility?: string; upgrade?: unknown }[]) {
+  return JSON.stringify({
+    models: models.map((model) => ({ visibility: "list", upgrade: null, ...model })),
+  });
+}
+
+test("latestCodexSlug picks each family's newest listed slug", () => {
+  assert.equal(latestCodexSlug(codexCatalog, "sol", "x"), "gpt-6.1-sol");
+  assert.equal(latestCodexSlug(codexCatalog, "astra", "x"), "gpt-6-astra");
+  assert.equal(latestCodexSlug(codexCatalog, "luna", "x"), "gpt-6-luna");
+});
+
+test("latestCodexSlug follows a newer release and skips hidden or retiring ones", () => {
+  assert.equal(
+    latestCodexSlug(catalog({ slug: "gpt-6-astra" }, { slug: "gpt-6.1-astra" }), "astra", "x"),
+    "gpt-6.1-astra",
+  );
+  assert.equal(
+    latestCodexSlug(
+      catalog({ slug: "gpt-6-astra" }, { slug: "gpt-6.1-astra", visibility: "hide" }),
+      "astra",
+      "x",
+    ),
+    "gpt-6-astra",
+  );
+  assert.equal(
+    latestCodexSlug(
+      catalog({ slug: "gpt-6-astra" }, { slug: "gpt-6.1-astra", upgrade: { model: "gpt-7-astra" } }),
+      "astra",
+      "x",
+    ),
+    "gpt-6-astra",
+  );
+});
+
+test("latestCodexSlug compares versions as numbers", () => {
+  assert.equal(
+    latestCodexSlug(catalog({ slug: "gpt-6.10-sol" }, { slug: "gpt-6.9-sol" }), "sol", "x"),
+    "gpt-6.10-sol",
+  );
+});
+
+test("latestCodexSlug falls back when the catalog is unreadable or has no match", () => {
+  assert.equal(latestCodexSlug("not json", "sol", "gpt-6.1-sol"), "gpt-6.1-sol");
+  assert.equal(latestCodexSlug('{"models":[]}', "sol", "gpt-6.1-sol"), "gpt-6.1-sol");
+  assert.equal(latestCodexSlug("null", "sol", "gpt-6.1-sol"), "gpt-6.1-sol");
+  assert.equal(latestCodexSlug(codexCatalog, "nova", "gpt-6-nova"), "gpt-6-nova");
 });
 
 test("claudeArgs keeps today's command and adds model and effort when asked", () => {
@@ -368,11 +446,17 @@ test("claudeArgs keeps today's command and adds model and effort when asked", ()
   assert.ok(!effortOnly.includes("--model"));
 });
 
-test("codexArgs runs a stored, unsandboxed exec in the worktree", () => {
-  assert.deepEqual(codexArgs("p", "gpt-6.1-sol", "xhigh", "/wt"), [
+test("codexArgs runs a stored, sandboxed exec with network in the worktree", () => {
+  const args = codexArgs("p", "gpt-6.1-sol", "xhigh", "/wt");
+  assert.deepEqual(args, [
     "exec",
     "--json",
-    "--dangerously-bypass-approvals-and-sandbox",
+    "-s",
+    "workspace-write",
+    "-c",
+    'approval_policy="never"',
+    "-c",
+    "sandbox_workspace_write.network_access=true",
     "-m",
     "gpt-6.1-sol",
     "-c",
@@ -381,8 +465,9 @@ test("codexArgs runs a stored, unsandboxed exec in the worktree", () => {
     "/wt",
     "p",
   ]);
+  assert.ok(!args.includes("--dangerously-bypass-approvals-and-sandbox"));
   const noEffort = codexArgs("p", "gpt-6-luna", null, "/wt");
-  assert.ok(!noEffort.includes("-c"));
+  assert.ok(!noEffort.some((arg) => arg.startsWith("model_reasoning_effort=")));
   assert.ok(!noEffort.includes("--ephemeral"));
   assert.ok(!noEffort.includes("--skip-git-repo-check"));
   assert.equal(noEffort.at(-1), "p");
