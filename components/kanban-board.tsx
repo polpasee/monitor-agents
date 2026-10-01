@@ -541,34 +541,36 @@ export function KanbanBoard({
               ))}
             </select>
           </label>
-          <label>
-            <span>Requested model</span>
-            <select
-              onChange={(event) => setModel(event.target.value as KanbanModel)}
-              value={model}
-            >
-              {kanbanModels.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            <span>Effort / Thinking</span>
-            <select
-              onChange={(event) =>
-                setEffort(event.target.value as KanbanEffort)
-              }
-              value={effort}
-            >
-              {kanbanEfforts.map((option) => (
-                <option key={option.id} value={option.id}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="kanban-task-dialog__row">
+            <label>
+              <span>Requested model</span>
+              <select
+                onChange={(event) => setModel(event.target.value as KanbanModel)}
+                value={model}
+              >
+                {kanbanModels.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Effort / Thinking</span>
+              <select
+                onChange={(event) =>
+                  setEffort(event.target.value as KanbanEffort)
+                }
+                value={effort}
+              >
+                {kanbanEfforts.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
           <label>
             <span>Description for agent</span>
             <textarea
@@ -697,46 +699,48 @@ export function KanbanBoard({
                 ))}
               </select>
             </label>
-            <label>
-              <span>Requested model</span>
-              <select
-                disabled={isTaskDialogReadOnly}
-                onChange={(event) =>
-                  setEditModel(event.target.value as KanbanModel)
-                }
-                value={
-                  isTaskDialogReadOnly && selectedTask
-                    ? requestedModelOf(selectedTask)
-                    : editModel
-                }
-              >
-                {kanbanModels.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span>Effort / Thinking</span>
-              <select
-                disabled={isTaskDialogReadOnly}
-                onChange={(event) =>
-                  setEditEffort(event.target.value as KanbanEffort)
-                }
-                value={
-                  isTaskDialogReadOnly && selectedTask
-                    ? requestedEffortOf(selectedTask)
-                    : editEffort
-                }
-              >
-                {kanbanEfforts.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="kanban-task-dialog__row">
+              <label>
+                <span>Requested model</span>
+                <select
+                  disabled={isTaskDialogReadOnly}
+                  onChange={(event) =>
+                    setEditModel(event.target.value as KanbanModel)
+                  }
+                  value={
+                    isTaskDialogReadOnly && selectedTask
+                      ? requestedModelOf(selectedTask)
+                      : editModel
+                  }
+                >
+                  {kanbanModels.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Effort / Thinking</span>
+                <select
+                  disabled={isTaskDialogReadOnly}
+                  onChange={(event) =>
+                    setEditEffort(event.target.value as KanbanEffort)
+                  }
+                  value={
+                    isTaskDialogReadOnly && selectedTask
+                      ? requestedEffortOf(selectedTask)
+                      : editEffort
+                  }
+                >
+                  {kanbanEfforts.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
             <label>
               <span>Description for agent</span>
               <textarea
