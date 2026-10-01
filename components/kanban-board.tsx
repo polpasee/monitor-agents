@@ -49,6 +49,23 @@ function requestedEffortOf(task: KanbanTask): KanbanEffort {
   return (task.requestedEffort as KanbanEffort | null) ?? "inherit";
 }
 
+/** The runner-reported model, else the requested one; null for an unrun Inherit task. */
+function cardModelOf(task: KanbanTask): string | null {
+  if (task.model) return task.model;
+  return (
+    kanbanModels.find((option) => option.id === task.requestedModel)?.label ??
+    null
+  );
+}
+
+function cardEffortOf(task: KanbanTask): string | null {
+  if (task.effort) return task.effort;
+  return (
+    kanbanEfforts.find((option) => option.id === task.requestedEffort)
+      ?.label ?? null
+  );
+}
+
 /** A reset, retry, or failure keeps the details of the last completion. */
 function showsCompletion(task: KanbanTask): boolean {
   return (
@@ -903,6 +920,8 @@ export function KanbanBoard({
                   const cardPriority = kanbanPriorityOf(task.priority);
                   const usedTokens = kanbanTaskTokens(task, agents);
                   const showsTokens = usedTokens !== null;
+                  const cardModel = cardModelOf(task);
+                  const cardEffort = cardEffortOf(task);
                   const showsPullRequest =
                     showsCompletion(task) &&
                     typeof task.pullRequestNumber === "number";
@@ -938,7 +957,10 @@ export function KanbanBoard({
                         <span className="kanban-card__title">
                           {task.title}
                         </span>
-                        {(showsTokens || showsPullRequest) && (
+                        {(showsTokens ||
+                          cardModel ||
+                          cardEffort ||
+                          showsPullRequest) && (
                           <span className="kanban-card__badges">
                             {usedTokens !== null && (
                               <span
@@ -946,6 +968,28 @@ export function KanbanBoard({
                                 title={`${usedTokens.toLocaleString()} tokens used`}
                               >
                                 {formatTokenCount(usedTokens)}
+                              </span>
+                            )}
+                            {cardModel && (
+                              <span
+                                className="kanban-card__model"
+                                title={
+                                  task.model ? "Model" : "Requested model"
+                                }
+                              >
+                                {cardModel}
+                              </span>
+                            )}
+                            {cardEffort && (
+                              <span
+                                className="kanban-card__effort"
+                                title={
+                                  task.effort
+                                    ? "Effort / Thinking"
+                                    : "Requested effort / thinking"
+                                }
+                              >
+                                {cardEffort}
                               </span>
                             )}
                             {showsPullRequest && (
