@@ -368,11 +368,17 @@ test("claudeArgs keeps today's command and adds model and effort when asked", ()
   assert.ok(!effortOnly.includes("--model"));
 });
 
-test("codexArgs runs a stored, unsandboxed exec in the worktree", () => {
-  assert.deepEqual(codexArgs("p", "gpt-6.1-sol", "xhigh", "/wt"), [
+test("codexArgs runs a stored, sandboxed exec with network in the worktree", () => {
+  const args = codexArgs("p", "gpt-6.1-sol", "xhigh", "/wt");
+  assert.deepEqual(args, [
     "exec",
     "--json",
-    "--dangerously-bypass-approvals-and-sandbox",
+    "-s",
+    "workspace-write",
+    "-c",
+    'approval_policy="never"',
+    "-c",
+    "sandbox_workspace_write.network_access=true",
     "-m",
     "gpt-6.1-sol",
     "-c",
@@ -381,8 +387,9 @@ test("codexArgs runs a stored, unsandboxed exec in the worktree", () => {
     "/wt",
     "p",
   ]);
+  assert.ok(!args.includes("--dangerously-bypass-approvals-and-sandbox"));
   const noEffort = codexArgs("p", "gpt-6-luna", null, "/wt");
-  assert.ok(!noEffort.includes("-c"));
+  assert.ok(!noEffort.some((arg) => arg.startsWith("model_reasoning_effort=")));
   assert.ok(!noEffort.includes("--ephemeral"));
   assert.ok(!noEffort.includes("--skip-git-repo-check"));
   assert.equal(noEffort.at(-1), "p");

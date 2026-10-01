@@ -113,7 +113,8 @@ export function claudeArgs(
 
 /**
  * `--ephemeral` is left out on purpose: an ephemeral thread is never stored,
- * so the topology could not link the task to its run.
+ * so the topology could not link the task to its run. The sandbox keeps writes
+ * inside the worktree but leaves the network open, and never asks to approve.
  */
 export function codexArgs(
   prompt: string,
@@ -124,7 +125,12 @@ export function codexArgs(
   return [
     "exec",
     "--json",
-    "--dangerously-bypass-approvals-and-sandbox",
+    "-s",
+    "workspace-write",
+    "-c",
+    'approval_policy="never"',
+    "-c",
+    "sandbox_workspace_write.network_access=true",
     "-m",
     model,
     ...(effort ? ["-c", `model_reasoning_effort="${effort}"`] : []),
