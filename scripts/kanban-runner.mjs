@@ -143,8 +143,15 @@ async function readEffort(sessionId) {
 function codexSlug(family, fallback) {
   let slug = fallback;
   try {
-    const catalog = execFileSync(config.codexBin, ["debug", "models"], { encoding: "utf8", timeout: 10_000 });
+    const catalog = execFileSync(config.codexBin, ["debug", "models"], {
+      encoding: "utf8",
+      timeout: 10_000,
+      maxBuffer: 16 * 1024 * 1024,
+    });
     slug = latestCodexSlug(catalog, family, fallback);
+    if (slug === fallback && !catalog.includes(`"${fallback}"`)) {
+      log(`Warning: codex-${family} not found in the Codex model catalog, using ${fallback}`);
+    }
   } catch (error) {
     log(`Warning: could not read the Codex model catalog, using ${fallback}: ${error.message}`);
   }
