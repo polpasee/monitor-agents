@@ -8,13 +8,18 @@ import { promisify } from "node:util";
 
 import {
   buildTaskPrompt,
+  claudeArgs,
+  codexArgs,
   formatCompletionResult,
   formatFailure,
   maxResultLength,
   parseClaudeOutput,
   parseClaudeRunMetadata,
+  parseCodexOutput,
+  parseCodexRunMetadata,
   pullRequestNumberFromUrl,
   repositoryDirectoryName,
+  runnerModel,
   stagePathspecs,
   taskBranchName,
   truncate,
@@ -30,6 +35,7 @@ const config = {
   leaseSeconds: Number(process.env.KANBAN_LEASE_SECONDS ?? 300),
   taskTimeoutSeconds: Number(process.env.KANBAN_TASK_TIMEOUT_SECONDS ?? 3_600),
   claudeBin: process.env.KANBAN_CLAUDE_BIN ?? "claude",
+  codexBin: process.env.KANBAN_CODEX_BIN ?? "codex",
   commitExcludes: (process.env.KANBAN_COMMIT_EXCLUDE ?? ".serena,.claude")
     .split(",")
     .map((entry) => entry.trim())
@@ -132,20 +138,35 @@ async function readEffort(sessionId) {
   }
 }
 
-async function runClaude(worktree, prompt, logPath, output) {
+/**
+ * The requested model picks the CLI. A task without one runs Claude on its
+ * default model, as every task did before models could be requested.
+ */
+function agentCommand(task, worktree, prompt) {
+  const { provider, cli } = runnerModel(task.requestedModel);
+  return provider === "codex"
+    ? { provider, cli, bin: config.codexBin, args: codexArgs(prompt, cli, task.requestedEffort, worktree) }
+    : { provider, cli, bin: config.claudeBin, args: claudeArgs(prompt, cli, task.requestedEffort) };
+}
+
+/**
+ * Codex never names its model in the stream, so the slug the runner passed is
+ * reported, and its effort is the one requested (the collector reads the real
+ * value from the thread). Claude's effort comes from the statusline file when
+ * that still describes this session.
+ */
+async function runMetadata(task, provider, cli, stdout) {
+  const requestedEffort = task.requestedEffort ? { effort: task.requestedEffort } : {};
+  if (provider === "codex") {
+    return { ...parseCodexRunMetadata(stdout), model: cli, ...requestedEffort };
+  }
+  const metadata = parseClaudeRunMetadata(stdout);
+  return { ...metadata, ...requestedEffort, ...(await readEffort(metadata.sessionId)) };
+}
+
+async function runAgent(bin, args, worktree, logPath, output) {
   return new Promise((resolvePromise) => {
-    const child = spawn(
-      config.claudeBin,
-      [
-        "-p",
-        prompt,
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--dangerously-skip-permissions",
-      ],
-      { cwd: worktree, stdio: ["ignore", "pipe", "pipe"] },
-    );
+    const child = spawn(bin, args, { cwd: worktree, stdio: ["ignore", "pipe", "pipe"] });
 
     // Token accounting parses every line, so a multi-byte character split
     // across two chunks must not corrupt the JSON it lands in.
@@ -175,7 +196,8 @@ async function runClaude(worktree, prompt, logPath, output) {
   });
 }
 
-async function publishChanges(worktree, branch, task) {
+/** Codex runs carry no Claude attribution in the commit or pull request. */
+async function publishChanges(worktree, branch, task, provider) {
   await git(worktree, ["add", "-A", "--", ...stagePathspecs(config.commitExcludes)]);
   const staged = await git(worktree, ["diff", "--cached", "--name-only"]);
   const changedFiles = staged.split("\n").filter(Boolean).length;
@@ -184,7 +206,9 @@ async function publishChanges(worktree, branch, task) {
   await git(worktree, [
     "commit",
     "-m",
-    `${task.title}\n\nQueued Kanban task ${task.id}.\n\nCo-Authored-By: Claude <noreply@anthropic.com>`,
+    provider === "codex"
+      ? `${task.title}\n\nQueued Kanban task ${task.id}.`
+      : `${task.title}\n\nQueued Kanban task ${task.id}.\n\nCo-Authored-By: Claude <noreply@anthropic.com>`,
   ]);
   await git(worktree, ["push", "-u", "origin", branch]);
 
@@ -200,7 +224,9 @@ async function publishChanges(worktree, branch, task) {
         "--title",
         task.title,
         "--body",
-        `Queued Kanban task \`${task.id}\`.\n\n${task.description || "No description provided."}\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)`,
+        provider === "codex"
+          ? `Queued Kanban task \`${task.id}\`.\n\n${task.description || "No description provided."}`
+          : `Queued Kanban task \`${task.id}\`.\n\n${task.description || "No description provided."}\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)`,
       ],
       { cwd: worktree },
     );
@@ -219,38 +245,37 @@ async function runTask(task, directory) {
   const worktree = resolve(directory, ".claude/worktrees", name);
   const logPath = join(config.logDir, `${name}.jsonl`);
   const output = { stdout: "" };
-  const heartbeat = setInterval(() => {
-    const metadata = parseClaudeRunMetadata(output.stdout);
-    readEffort(metadata.sessionId)
-      .then((effort) =>
-        api(`/api/agent/tasks/${encodeURIComponent(task.id)}/heartbeat`, {
-          agentId: config.agentId,
-          leaseSeconds: config.leaseSeconds,
-          ...metadata,
-          ...effort,
-        }),
-      )
-      .catch((error) => log(`Heartbeat failed: ${error.message}`));
-  }, Math.max(15, Math.floor(config.leaseSeconds / 2)) * 1_000);
+  let heartbeat;
 
   try {
+    // An unknown model must reach the fail report below, so this runs inside
+    // the try and the heartbeat starts once the provider is known.
+    const { provider, cli, bin, args } = agentCommand(task, worktree, buildTaskPrompt(task));
+    heartbeat = setInterval(() => {
+      runMetadata(task, provider, cli, output.stdout)
+        .then((metadata) =>
+          api(`/api/agent/tasks/${encodeURIComponent(task.id)}/heartbeat`, {
+            agentId: config.agentId,
+            leaseSeconds: config.leaseSeconds,
+            ...metadata,
+          }),
+        )
+        .catch((error) => log(`Heartbeat failed: ${error.message}`));
+    }, Math.max(15, Math.floor(config.leaseSeconds / 2)) * 1_000);
+
     const base = await defaultBaseRef(directory);
     await git(directory, ["worktree", "add", "-b", branch, worktree, base]);
     log(`Worktree ${worktree} on ${branch} from ${base}`);
 
-    const run = await runClaude(worktree, buildTaskPrompt(task), logPath, output);
-    const { result, isError } = parseClaudeOutput(run.stdout);
-    const streamMetadata = parseClaudeRunMetadata(run.stdout);
-    const metadata = {
-      ...streamMetadata,
-      ...(await readEffort(streamMetadata.sessionId)),
-    };
+    const run = await runAgent(bin, args, worktree, logPath, output);
+    const { result, isError } = (provider === "codex" ? parseCodexOutput : parseClaudeOutput)(run.stdout);
+    const metadata = await runMetadata(task, provider, cli, run.stdout);
 
     if (run.code !== 0 || isError) {
       await api(`/api/agent/tasks/${encodeURIComponent(task.id)}/fail`, {
         agentId: config.agentId,
         error: formatFailure(
-          `claude exited with code ${run.code}. Worktree kept at ${worktree}.`,
+          `${provider} exited with code ${run.code}. Worktree kept at ${worktree}.`,
           `${result}\n${truncate(run.stderr, 1_000)}`,
         ),
         ...metadata,
@@ -259,7 +284,7 @@ async function runTask(task, directory) {
       return;
     }
 
-    const published = await publishChanges(worktree, branch, task);
+    const published = await publishChanges(worktree, branch, task, provider);
     await api(`/api/agent/tasks/${encodeURIComponent(task.id)}/complete`, {
       agentId: config.agentId,
       result: formatCompletionResult({
@@ -308,7 +333,11 @@ async function main() {
           const target = targets.find((entry) => entry.repository === task.repository);
           log(`Claimed ${task.id} — ${task.title} (${task.repository})`);
           if (config.dryRun) {
-            log(`Dry run: would run claude in ${target.directory}`);
+            const prompt = buildTaskPrompt(task);
+            const { provider, bin, args } = agentCommand(task, "<worktree>", prompt);
+            log(
+              `Dry run: would run ${provider} in ${target.directory}: ${bin} ${args.map((arg) => (arg === prompt ? "<prompt>" : arg)).join(" ")}`,
+            );
           } else {
             await runTask(task, target.directory);
           }

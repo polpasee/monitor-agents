@@ -64,6 +64,76 @@ export function buildTaskPrompt(task: KanbanTask): string {
     .join("\n");
 }
 
+export type RunnerProvider = "claude" | "codex";
+
+/**
+ * Claude takes the CLI aliases, which follow new releases on their own. Codex
+ * slugs are pinned: only Sol has a 6.1 build, Astra and Luna stay on 6.
+ */
+const runnerModels: Record<string, { provider: RunnerProvider; cli: string }> = {
+  "claude-fable": { provider: "claude", cli: "fable" },
+  "claude-opus": { provider: "claude", cli: "opus" },
+  "claude-sonnet": { provider: "claude", cli: "sonnet" },
+  "claude-haiku": { provider: "claude", cli: "haiku" },
+  "codex-astra": { provider: "codex", cli: "gpt-6-astra" },
+  "codex-sol": { provider: "codex", cli: "gpt-6.1-sol" },
+  "codex-luna": { provider: "codex", cli: "gpt-6-luna" },
+};
+
+/**
+ * A task without a requested model runs on Claude with its default model. The
+ * API validates model ids, so an unknown one only means this map is stale.
+ */
+export function runnerModel(requestedModel: string | null): {
+  provider: RunnerProvider;
+  cli: string | null;
+} {
+  if (requestedModel === null) return { provider: "claude", cli: null };
+  const model = runnerModels[requestedModel];
+  if (!model) throw new Error(`Unknown requested model: ${requestedModel}`);
+  return model;
+}
+
+export function claudeArgs(
+  prompt: string,
+  model: string | null,
+  effort: string | null,
+): string[] {
+  return [
+    "-p",
+    prompt,
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--dangerously-skip-permissions",
+    ...(model ? ["--model", model] : []),
+    ...(effort ? ["--effort", effort] : []),
+  ];
+}
+
+/**
+ * `--ephemeral` is left out on purpose: an ephemeral thread is never stored,
+ * so the topology could not link the task to its run.
+ */
+export function codexArgs(
+  prompt: string,
+  model: string,
+  effort: string | null,
+  worktree: string,
+): string[] {
+  return [
+    "exec",
+    "--json",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "-m",
+    model,
+    ...(effort ? ["-c", `model_reasoning_effort="${effort}"`] : []),
+    "-C",
+    worktree,
+    prompt,
+  ];
+}
+
 /**
  * `--output-format json` emits one result object, while `stream-json` emits one
  * JSON object per line and only the final `result` event carries the summary.
@@ -95,7 +165,10 @@ export function parseClaudeOutput(stdout: string): {
   return { result: result || truncate(stdout, 2_000), isError };
 }
 
-/** The stream reports no effort level; the runner reads that separately. */
+/**
+ * The stream reports no effort level; the runner reads that separately. Codex
+ * runs report the same shape.
+ */
 export interface ClaudeRunMetadata {
   sessionId?: string;
   agentRunId?: string;
@@ -223,6 +296,94 @@ export function parseClaudeRunMetadata(stdout: string): ClaudeRunMetadata {
   // `claude:<sessionId>`, so the board needs no guess about which run it is.
   if (metadata.sessionId) {
     metadata.agentRunId = `claude:${metadata.sessionId}`;
+  }
+
+  return metadata;
+}
+
+/**
+ * `codex exec --json` ends with the last `agent_message` as its answer. Warning
+ * items and top-level `error` events can be retried, so only `turn.failed`
+ * marks the run as failed.
+ */
+export function parseCodexOutput(stdout: string): {
+  result: string;
+  isError: boolean;
+} {
+  let message: string | undefined;
+  let failure: string | undefined;
+
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    let event: unknown;
+    try {
+      event = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (typeof event !== "object" || event === null) continue;
+    const value = event as Record<string, unknown>;
+    const item = value.item as Record<string, unknown> | undefined;
+    const error = value.error as Record<string, unknown> | undefined;
+
+    if (
+      value.type === "item.completed" &&
+      typeof item === "object" &&
+      item !== null &&
+      item.type === "agent_message" &&
+      typeof item.text === "string"
+    ) {
+      message = item.text;
+    } else if (value.type === "turn.failed") {
+      failure =
+        (typeof error === "object" && error !== null
+          ? stringField(error.message)
+          : undefined) ?? "The Codex turn failed.";
+    }
+  }
+
+  return {
+    result: failure ?? (message || truncate(stdout, 2_000)),
+    isError: failure !== undefined,
+  };
+}
+
+/**
+ * The stream never names the model, so the runner adds the one it passed. A
+ * thread is named `codex:<threadId>` in the topology, and usage only arrives
+ * when a turn completes: `input_tokens` already counts cached input and
+ * `output_tokens` already counts reasoning.
+ */
+export function parseCodexRunMetadata(stdout: string): ClaudeRunMetadata {
+  const metadata: ClaudeRunMetadata = {};
+
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    let event: unknown;
+    try {
+      event = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    if (typeof event !== "object" || event === null) continue;
+    const value = event as Record<string, unknown>;
+
+    if (value.type === "thread.started") {
+      metadata.sessionId = stringField(value.thread_id) ?? metadata.sessionId;
+    } else if (value.type === "turn.completed") {
+      const usage = value.usage as Record<string, unknown> | undefined;
+      if (typeof usage === "object" && usage !== null) {
+        metadata.usedTokens =
+          (metadata.usedTokens ?? 0) +
+          sumTokens(usage, ["input_tokens", "output_tokens"]);
+      }
+    }
+  }
+
+  if (metadata.sessionId) {
+    metadata.agentRunId = `codex:${metadata.sessionId}`;
   }
 
   return metadata;
