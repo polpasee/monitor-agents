@@ -330,6 +330,17 @@ async function runTask(task, directory) {
   }
 }
 
+/**
+ * A dry run must leave the queue untouched, so it reads the task the claim
+ * would pick instead of claiming it. The list is already in claim order.
+ */
+async function nextTodoTask(targets) {
+  const response = await fetch(`${config.apiUrl}/api/tasks`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Task list failed with ${response.status}`);
+  const repositories = new Set(targets.map((target) => target.repository));
+  return (await response.json()).find((task) => task.status === "todo" && repositories.has(task.repository));
+}
+
 async function main() {
   await mkdir(config.logDir, { recursive: true });
   log(`Runner ${config.agentId} polling ${config.apiUrl} every ${config.pollSeconds}s`);
@@ -339,6 +350,19 @@ async function main() {
       const targets = await claimableRepositories();
       if (targets.length === 0) {
         log(`No checkouts found under ${config.workspaceRoot}.`);
+      } else if (config.dryRun) {
+        const task = await nextTodoTask(targets);
+        if (task) {
+          const target = targets.find((entry) => entry.repository === task.repository);
+          log(`Dry run: next is ${task.id} — ${task.title} (${task.repository})`);
+          const prompt = buildTaskPrompt(task);
+          const { provider, bin, args } = agentCommand(task, "<worktree>", prompt);
+          log(
+            `Dry run: would run ${provider} in ${target.directory}: ${bin} ${args.map((arg) => (arg === prompt ? "<prompt>" : arg)).join(" ")}`,
+          );
+        } else {
+          log("Dry run: nothing to run.");
+        }
       } else {
         const task = await api("/api/agent/tasks/claim", {
           agentId: config.agentId,
@@ -349,15 +373,7 @@ async function main() {
         if (task) {
           const target = targets.find((entry) => entry.repository === task.repository);
           log(`Claimed ${task.id} — ${task.title} (${task.repository})`);
-          if (config.dryRun) {
-            const prompt = buildTaskPrompt(task);
-            const { provider, bin, args } = agentCommand(task, "<worktree>", prompt);
-            log(
-              `Dry run: would run ${provider} in ${target.directory}: ${bin} ${args.map((arg) => (arg === prompt ? "<prompt>" : arg)).join(" ")}`,
-            );
-          } else {
-            await runTask(task, target.directory);
-          }
+          await runTask(task, target.directory);
         }
       }
     } catch (error) {
