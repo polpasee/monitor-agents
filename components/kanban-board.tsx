@@ -542,7 +542,7 @@ export function KanbanBoard({
             </select>
           </label>
           <label>
-            <span>Model</span>
+            <span>Requested model</span>
             <select
               onChange={(event) => setModel(event.target.value as KanbanModel)}
               value={model}
@@ -698,7 +698,7 @@ export function KanbanBoard({
               </select>
             </label>
             <label>
-              <span>Model</span>
+              <span>Requested model</span>
               <select
                 disabled={isTaskDialogReadOnly}
                 onChange={(event) =>
