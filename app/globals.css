@@ -675,6 +675,12 @@ button:focus-visible,
   padding: 18px;
 }
 
+.kanban-task-dialog__row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .kanban-task-dialog__form input,
 .kanban-task-dialog__form select {
   width: 100%;
