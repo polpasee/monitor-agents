@@ -15,6 +15,8 @@ import {
   formatStatusAge,
   formatTokenCount,
   isKanbanTaskEditable,
+  kanbanEfforts,
+  kanbanModels,
   kanbanPriorities,
   kanbanPriorityOf,
   kanbanRepositories,
@@ -22,6 +24,8 @@ import {
   kanbanStatusSince,
   kanbanStatuses,
   kanbanTaskTokens,
+  type KanbanEffort,
+  type KanbanModel,
   type KanbanPriority,
   type KanbanStatus,
   type KanbanTask,
@@ -34,6 +38,15 @@ interface KanbanBoardProps {
   agents: AgentRun[];
   capturedAt: string;
   quotaLimits: QuotaLimit[];
+}
+
+/** Inherit is stored as null. */
+function requestedModelOf(task: KanbanTask): KanbanModel {
+  return (task.requestedModel as KanbanModel | null) ?? "inherit";
+}
+
+function requestedEffortOf(task: KanbanTask): KanbanEffort {
+  return (task.requestedEffort as KanbanEffort | null) ?? "inherit";
 }
 
 /** A reset, retry, or failure keeps the details of the last completion. */
@@ -65,11 +78,15 @@ export function KanbanBoard({
   const [repository, setRepository] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<KanbanPriority>("normal");
+  const [model, setModel] = useState<KanbanModel>("inherit");
+  const [effort, setEffort] = useState<KanbanEffort>("inherit");
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editRepository, setEditRepository] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editPriority, setEditPriority] = useState<KanbanPriority>("normal");
+  const [editModel, setEditModel] = useState<KanbanModel>("inherit");
+  const [editEffort, setEditEffort] = useState<KanbanEffort>("inherit");
   const [editError, setEditError] = useState<string | null>(null);
   const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
@@ -197,6 +214,8 @@ export function KanbanBoard({
           repository: nextRepository,
           description: description.trim(),
           priority,
+          requestedModel: model,
+          requestedEffort: effort,
         }),
       });
       if (!response.ok) {
@@ -207,6 +226,8 @@ export function KanbanBoard({
       setTitle("");
       setDescription("");
       setPriority("normal");
+      setModel("inherit");
+      setEffort("inherit");
       setRepository(nextRepository);
       setError(null);
       addTaskDialogRef.current?.close();
@@ -236,6 +257,8 @@ export function KanbanBoard({
     setEditRepository(task.repository);
     setEditDescription(task.description);
     setEditPriority(kanbanPriorityOf(task.priority).id);
+    setEditModel(requestedModelOf(task));
+    setEditEffort(requestedEffortOf(task));
     setEditError(null);
     editTaskDialogRef.current?.showModal();
     if (isKanbanTaskEditable(task)) {
@@ -270,6 +293,8 @@ export function KanbanBoard({
     setEditRepository("");
     setEditDescription("");
     setEditPriority("normal");
+    setEditModel("inherit");
+    setEditEffort("inherit");
     setEditError(null);
 
     const trigger = editTaskButtonRef.current;
@@ -305,6 +330,14 @@ export function KanbanBoard({
           ...(selectedTask &&
             editPriority !== kanbanPriorityOf(selectedTask.priority).id && {
               priority: editPriority,
+            }),
+          ...(selectedTask &&
+            editModel !== requestedModelOf(selectedTask) && {
+              requestedModel: editModel,
+            }),
+          ...(selectedTask &&
+            editEffort !== requestedEffortOf(selectedTask) && {
+              requestedEffort: editEffort,
             }),
         }),
       });
@@ -509,6 +542,34 @@ export function KanbanBoard({
             </select>
           </label>
           <label>
+            <span>Model</span>
+            <select
+              onChange={(event) => setModel(event.target.value as KanbanModel)}
+              value={model}
+            >
+              {kanbanModels.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span>Effort / Thinking</span>
+            <select
+              onChange={(event) =>
+                setEffort(event.target.value as KanbanEffort)
+              }
+              value={effort}
+            >
+              {kanbanEfforts.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
             <span>Description for agent</span>
             <textarea
               maxLength={5_000}
@@ -632,6 +693,46 @@ export function KanbanBoard({
                 {kanbanPriorities.map((level) => (
                   <option key={level.id} value={level.id}>
                     {level.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Model</span>
+              <select
+                disabled={isTaskDialogReadOnly}
+                onChange={(event) =>
+                  setEditModel(event.target.value as KanbanModel)
+                }
+                value={
+                  isTaskDialogReadOnly && selectedTask
+                    ? requestedModelOf(selectedTask)
+                    : editModel
+                }
+              >
+                {kanbanModels.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Effort / Thinking</span>
+              <select
+                disabled={isTaskDialogReadOnly}
+                onChange={(event) =>
+                  setEditEffort(event.target.value as KanbanEffort)
+                }
+                value={
+                  isTaskDialogReadOnly && selectedTask
+                    ? requestedEffortOf(selectedTask)
+                    : editEffort
+                }
+              >
+                {kanbanEfforts.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
                   </option>
                 ))}
               </select>

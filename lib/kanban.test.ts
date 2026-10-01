@@ -15,7 +15,11 @@ import {
   kanbanStatusDurations,
   kanbanStatusSince,
   compareKanbanColumnTasks,
+  kanbanEfforts,
+  kanbanModels,
   kanbanStatuses,
+  parseKanbanEffort,
+  parseKanbanModel,
   parseKanbanPriority,
   parseKanbanTaskPatch,
   parseTaskRunMetadata,
@@ -32,6 +36,8 @@ const tasks: KanbanTask[] = [
     repository: "monitor-agents",
     status: "todo",
     priority: 0,
+    requestedModel: null,
+    requestedEffort: null,
     claimedBy: null,
     claimedAt: null,
     leaseUntil: null,
@@ -56,6 +62,8 @@ const tasks: KanbanTask[] = [
     repository: "cacti-api",
     status: "review",
     priority: 0,
+    requestedModel: null,
+    requestedEffort: null,
     claimedBy: null,
     claimedAt: null,
     leaseUntil: null,
@@ -184,6 +192,91 @@ test("parseKanbanTaskPatch validates exact editable task details", () => {
   );
 });
 
+test("parseKanbanModel and parseKanbanEffort store Inherit as null", () => {
+  for (const parse of [parseKanbanModel, parseKanbanEffort]) {
+    assert.equal(parse(undefined), null);
+    assert.equal(parse(null), null);
+    assert.equal(parse("inherit"), null);
+    assert.equal(parse("unknown"), false);
+    assert.equal(parse(""), false);
+    assert.equal(parse(1), false);
+  }
+  assert.deepEqual(
+    kanbanModels.map((model) => parseKanbanModel(model.id)),
+    [
+      null,
+      "claude-fable",
+      "claude-opus",
+      "claude-sonnet",
+      "claude-haiku",
+      "codex-astra",
+      "codex-sol",
+      "codex-luna",
+    ],
+  );
+  assert.deepEqual(
+    kanbanEfforts.map((effort) => parseKanbanEffort(effort.id)),
+    [null, "xhigh", "high", "medium", "low"],
+  );
+  assert.equal(parseKanbanModel("xhigh"), false);
+  assert.equal(parseKanbanEffort("claude-opus"), false);
+});
+
+test("parseKanbanTaskPatch carries the requested model and effort", () => {
+  const details = {
+    title: "Pick a model",
+    repository: "monitor-agents",
+    description: "",
+  };
+  assert.deepEqual(
+    parseKanbanTaskPatch({
+      ...details,
+      priority: "low",
+      requestedModel: "codex-sol",
+      requestedEffort: "xhigh",
+    }),
+    {
+      ...details,
+      priority: -1,
+      requestedModel: "codex-sol",
+      requestedEffort: "xhigh",
+    },
+  );
+  // An explicit Inherit resets the stored value, unlike an omitted key.
+  assert.deepEqual(
+    parseKanbanTaskPatch({
+      ...details,
+      requestedModel: "inherit",
+      requestedEffort: null,
+    }),
+    { ...details, requestedModel: null, requestedEffort: null },
+  );
+  assert.deepEqual(
+    parseKanbanTaskPatch({ ...details, requestedEffort: "medium" }),
+    { ...details, requestedEffort: "medium" },
+  );
+  assert.equal(
+    parseKanbanTaskPatch({ ...details, requestedModel: "gpt-9" }),
+    null,
+  );
+  assert.equal(
+    parseKanbanTaskPatch({ ...details, requestedEffort: "max" }),
+    null,
+  );
+  assert.equal(
+    parseKanbanTaskPatch({ ...details, model: "claude-opus" }),
+    null,
+  );
+  assert.equal(
+    parseKanbanTaskPatch({
+      requestedModel: "claude-opus",
+      title: "Missing description",
+      repository: "monitor-agents",
+    }),
+    null,
+  );
+});
+
 test("kanbanRepositories returns sorted unique repository names", () => {
   assert.deepEqual(
     kanbanRepositories([...tasks, { ...tasks[0], id: "task-3" }]),
@@ -197,6 +290,8 @@ const task: KanbanTask = {
   repository: "monitor-agents",
   status: "review",
   priority: 0,
+  requestedModel: null,
+  requestedEffort: null,
   claimedBy: null,
   claimedAt: null,
   leaseUntil: null,

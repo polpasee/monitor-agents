@@ -17,6 +17,8 @@ interface TaskRow {
   repository: string;
   status: KanbanStatus;
   priority: number;
+  requested_model: string | null;
+  requested_effort: string | null;
   claimed_by: string | null;
   claimed_at: string | null;
   lease_until: string | null;
@@ -40,6 +42,8 @@ export interface CreateTaskInput {
   description?: string;
   repository: string;
   priority?: number;
+  requestedModel?: string | null;
+  requestedEffort?: string | null;
 }
 
 export interface UpdateTaskDetailsInput {
@@ -47,6 +51,8 @@ export interface UpdateTaskDetailsInput {
   description: string;
   repository: string;
   priority?: number;
+  requestedModel?: string | null;
+  requestedEffort?: string | null;
 }
 
 export interface ClaimTaskInput {
@@ -83,6 +89,8 @@ function taskFromRow(row: TaskRow): KanbanTask {
     repository: row.repository,
     status: row.status,
     priority: row.priority,
+    requestedModel: row.requested_model,
+    requestedEffort: row.requested_effort,
     claimedBy: row.claimed_by,
     claimedAt: row.claimed_at,
     leaseUntil: row.lease_until,
@@ -169,6 +177,8 @@ function tasksTableSql(target: string) {
       status IN ('todo', 'in-progress', 'review-queue', 'review', 'done')
     ),
     priority INTEGER NOT NULL DEFAULT 0,
+    requested_model TEXT,
+    requested_effort TEXT,
     claimed_by TEXT,
     claimed_at TEXT,
     lease_until TEXT,
@@ -230,6 +240,8 @@ export class TaskStore {
       ["pull_request_number", "INTEGER"],
       ["summary", "TEXT"],
       ["status_history", "TEXT NOT NULL DEFAULT '[]'"],
+      ["requested_model", "TEXT"],
+      ["requested_effort", "TEXT"],
     ];
     for (const [name, definition] of additions) {
       if (!columns.has(name)) {
@@ -318,9 +330,11 @@ export class TaskStore {
       .prepare(`
         INSERT INTO tasks (
           id, title, description, repository, status, priority,
+          requested_model, requested_effort,
           status_history, created_at, updated_at
         ) VALUES (
           ?, ?, ?, ?, 'todo', ?,
+          ?, ?,
           json_array(json_object('status', 'todo', 'at', ?)), ?, ?
         )
       `)
@@ -330,6 +344,8 @@ export class TaskStore {
         input.description?.trim() ?? "",
         input.repository.trim(),
         input.priority ?? 0,
+        input.requestedModel ?? null,
+        input.requestedEffort ?? null,
         timestamp,
         timestamp,
         timestamp,
@@ -415,7 +431,10 @@ export class TaskStore {
       .prepare(`
         UPDATE tasks
         SET title = ?, description = ?, repository = ?,
-            priority = COALESCE(?, priority), updated_at = ?
+            priority = COALESCE(?, priority),
+            requested_model = CASE WHEN ? THEN ? ELSE requested_model END,
+            requested_effort = CASE WHEN ? THEN ? ELSE requested_effort END,
+            updated_at = ?
         WHERE id = ? AND status = 'todo'
         RETURNING *
       `)
@@ -424,6 +443,11 @@ export class TaskStore {
         input.description.trim(),
         input.repository.trim(),
         input.priority ?? null,
+        // An omitted key keeps the stored value; null resets it to Inherit.
+        input.requestedModel === undefined ? 0 : 1,
+        input.requestedModel ?? null,
+        input.requestedEffort === undefined ? 0 : 1,
+        input.requestedEffort ?? null,
         now.toISOString(),
         id,
       ) as unknown as TaskRow | undefined;

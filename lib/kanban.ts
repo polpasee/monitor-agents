@@ -20,6 +20,31 @@ export const kanbanPriorities = [
 
 export type KanbanPriority = (typeof kanbanPriorities)[number]["id"];
 
+/** The model a task asks its agent to run; Inherit is stored as NULL. */
+export const kanbanModels = [
+  { id: "inherit", label: "Inherit" },
+  { id: "claude-fable", label: "Claude-Fable" },
+  { id: "claude-opus", label: "Claude-Opus" },
+  { id: "claude-sonnet", label: "Claude-Sonnet" },
+  { id: "claude-haiku", label: "Claude-Haiku" },
+  { id: "codex-astra", label: "Codex-Astra" },
+  { id: "codex-sol", label: "Codex-Sol" },
+  { id: "codex-luna", label: "Codex-Luna" },
+] as const;
+
+export type KanbanModel = (typeof kanbanModels)[number]["id"];
+
+/** The effort / thinking level a task asks for; Inherit is stored as NULL. */
+export const kanbanEfforts = [
+  { id: "inherit", label: "Inherit" },
+  { id: "xhigh", label: "xHigh" },
+  { id: "high", label: "High" },
+  { id: "medium", label: "Medium" },
+  { id: "low", label: "Low" },
+] as const;
+
+export type KanbanEffort = (typeof kanbanEfforts)[number]["id"];
+
 export interface KanbanStatusEvent {
   status: KanbanStatus;
   at: string;
@@ -32,6 +57,8 @@ export interface KanbanTask {
   repository: string;
   status: KanbanStatus;
   priority: number;
+  requestedModel: string | null;
+  requestedEffort: string | null;
   claimedBy: string | null;
   claimedAt: string | null;
   leaseUntil: string | null;
@@ -66,6 +93,8 @@ export type KanbanTaskPatch =
       repository: string;
       description: string;
       priority?: number;
+      requestedModel?: string | null;
+      requestedEffort?: string | null;
     };
 
 const statusIds = new Set<KanbanStatus>(
@@ -91,6 +120,35 @@ export function parseKanbanPriority(value: unknown): number | null {
   return kanbanPriorities.find((priority) => priority.id === value)?.value ?? null;
 }
 
+/**
+ * A missing value or "inherit" means Inherit, stored as null; `false` marks
+ * anything but a known option, so the caller can reject it.
+ */
+function parseRequestedOption(
+  options: readonly { id: string }[],
+  value: unknown,
+): string | null | false {
+  if (value === undefined || value === null || value === "inherit") return null;
+  return options.some((option) => option.id === value) ? (value as string) : false;
+}
+
+export function parseKanbanModel(value: unknown): string | null | false {
+  return parseRequestedOption(kanbanModels, value);
+}
+
+export function parseKanbanEffort(value: unknown): string | null | false {
+  return parseRequestedOption(kanbanEfforts, value);
+}
+
+const taskDetailKeys = new Set([
+  "title",
+  "repository",
+  "description",
+  "priority",
+  "requestedModel",
+  "requestedEffort",
+]);
+
 export function parseKanbanTaskPatch(
   body: Record<string, unknown> | null,
 ): KanbanTaskPatch | null {
@@ -101,9 +159,8 @@ export function parseKanbanTaskPatch(
     return isKanbanStatus(body.status) ? { status: body.status } : null;
   }
 
-  const hasPriority = Object.hasOwn(body, "priority");
   if (
-    keys.length !== (hasPriority ? 4 : 3) ||
+    !keys.every((key) => taskDetailKeys.has(key)) ||
     !["title", "repository", "description"].every((key) =>
       Object.hasOwn(body, key),
     )
@@ -111,8 +168,17 @@ export function parseKanbanTaskPatch(
     return null;
   }
 
+  const hasPriority = Object.hasOwn(body, "priority");
   const priority = hasPriority ? parseKanbanPriority(body.priority) : undefined;
   if (priority === null) return null;
+
+  const hasModel = Object.hasOwn(body, "requestedModel");
+  const requestedModel = hasModel ? parseKanbanModel(body.requestedModel) : undefined;
+  const hasEffort = Object.hasOwn(body, "requestedEffort");
+  const requestedEffort = hasEffort
+    ? parseKanbanEffort(body.requestedEffort)
+    : undefined;
+  if (requestedModel === false || requestedEffort === false) return null;
 
   const title = requiredString(body.title, 200);
   const repository = requiredString(body.repository, 200);
@@ -123,6 +189,8 @@ export function parseKanbanTaskPatch(
         repository,
         description,
         ...(priority !== undefined && { priority }),
+        ...(hasModel && { requestedModel }),
+        ...(hasEffort && { requestedEffort }),
       }
     : null;
 }
