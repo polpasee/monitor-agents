@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { execFile, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { hostname, homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -12,6 +12,7 @@ import {
   codexArgs,
   formatCompletionResult,
   formatFailure,
+  latestCodexSlug,
   maxResultLength,
   parseClaudeOutput,
   parseClaudeRunMetadata,
@@ -138,15 +139,31 @@ async function readEffort(sessionId) {
   }
 }
 
+/** Asks Codex for its model catalog and picks the family's newest slug. */
+function codexSlug(family, fallback) {
+  let slug = fallback;
+  try {
+    const catalog = execFileSync(config.codexBin, ["debug", "models"], { encoding: "utf8", timeout: 10_000 });
+    slug = latestCodexSlug(catalog, family, fallback);
+  } catch (error) {
+    log(`Warning: could not read the Codex model catalog, using ${fallback}: ${error.message}`);
+  }
+  log(`codex-${family} → ${slug}`);
+  return slug;
+}
+
 /**
  * The requested model picks the CLI. A task without one runs Claude on its
  * default model, as every task did before models could be requested.
  */
 function agentCommand(task, worktree, prompt) {
-  const { provider, cli } = runnerModel(task.requestedModel);
-  return provider === "codex"
-    ? { provider, cli, bin: config.codexBin, args: codexArgs(prompt, cli, task.requestedEffort, worktree) }
-    : { provider, cli, bin: config.claudeBin, args: claudeArgs(prompt, cli, task.requestedEffort) };
+  const model = runnerModel(task.requestedModel);
+  if (model.provider === "codex") {
+    const cli = codexSlug(model.family, model.fallback);
+    return { provider: "codex", cli, bin: config.codexBin, args: codexArgs(prompt, cli, task.requestedEffort, worktree) };
+  }
+  const { provider, cli } = model;
+  return { provider, cli, bin: config.claudeBin, args: claudeArgs(prompt, cli, task.requestedEffort) };
 }
 
 /**
