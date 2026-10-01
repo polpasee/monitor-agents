@@ -22,6 +22,8 @@ const task: KanbanTask = {
   repository: "polpasee/monitor-agents",
   status: "todo",
   priority: 0,
+  requestedModel: null,
+  requestedEffort: null,
   claimedBy: null,
   claimedAt: null,
   leaseUntil: null,
