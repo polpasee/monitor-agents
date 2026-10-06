@@ -971,7 +971,11 @@ button:focus-visible,
 }
 
 .kanban-column__header h3 {
+  min-width: 0;
+  overflow: hidden;
   margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text-soft);
   font-size: 11px;
   font-weight: 700;
@@ -992,6 +996,7 @@ button:focus-visible,
 
 .kanban-column__limit {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: 4px;
   margin-left: auto;

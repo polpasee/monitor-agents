@@ -77,6 +77,8 @@ function cardEffortOf(task: KanbanTask): string | null {
   );
 }
 
+const boardLimitError = "Unable to update the board limit.";
+
 /** A reset, retry, or failure keeps the details of the last completion. */
 function showsCompletion(task: KanbanTask): boolean {
   return (
@@ -162,7 +164,24 @@ export function KanbanBoard({
     let stopped = false;
     let timeoutId: number | undefined;
 
+    /** Polled with the tasks, so a failed load retries and other clients' changes show up. */
+    async function refreshBoardSettings() {
+      try {
+        const response = await fetch("/api/board-settings", {
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          throw new Error(`Board settings request failed with ${response.status}`);
+        }
+        const settings = (await response.json()) as BoardSettings;
+        if (!stopped) setBoardSettings(settings);
+      } catch {
+        // The limit selects keep their last value until the next poll succeeds.
+      }
+    }
+
     async function refresh() {
+      void refreshBoardSettings();
       try {
         const response = await fetch("/api/tasks", { cache: "no-store" });
         if (!response.ok) {
@@ -231,30 +250,6 @@ export function KanbanBoard({
     };
   }, []);
 
-  useEffect(() => {
-    let stopped = false;
-
-    async function loadBoardSettings() {
-      try {
-        const response = await fetch("/api/board-settings", {
-          cache: "no-store",
-        });
-        if (!response.ok) {
-          throw new Error(`Board settings request failed with ${response.status}`);
-        }
-        const settings = (await response.json()) as BoardSettings;
-        if (!stopped) setBoardSettings(settings);
-      } catch {
-        if (!stopped) setError("Unable to load the board limits.");
-      }
-    }
-
-    void loadBoardSettings();
-    return () => {
-      stopped = true;
-    };
-  }, []);
-
   async function updateBoardLimit(key: keyof BoardSettings, limit: number) {
     try {
       const response = await fetch("/api/board-settings", {
@@ -266,9 +261,9 @@ export function KanbanBoard({
         throw new Error(`Board settings update failed with ${response.status}`);
       }
       setBoardSettings((await response.json()) as BoardSettings);
-      setError(null);
+      setError((current) => (current === boardLimitError ? null : current));
     } catch {
-      setError("Unable to update the board limit.");
+      setError(boardLimitError);
     }
   }
 
@@ -1064,7 +1059,7 @@ export function KanbanBoard({
               }}
             >
               <header className="kanban-column__header">
-                <h3>{status.label}</h3>
+                <h3 title={status.label}>{status.label}</h3>
                 {limitKey && (
                   <label className="kanban-column__limit">
                     Limit
