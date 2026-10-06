@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
+import { defaultKanbanLimit } from "./kanban.ts";
 import type {
   BoardSettings,
   KanbanStatus,
@@ -216,8 +217,8 @@ export class TaskStore {
 
       CREATE TABLE IF NOT EXISTS board_settings (
         id INTEGER PRIMARY KEY CHECK (id = 1),
-        coding_limit INTEGER NOT NULL DEFAULT 2,
-        review_limit INTEGER NOT NULL DEFAULT 2
+        coding_limit INTEGER NOT NULL DEFAULT ${defaultKanbanLimit},
+        review_limit INTEGER NOT NULL DEFAULT ${defaultKanbanLimit}
       );
       INSERT OR IGNORE INTO board_settings (id) VALUES (1);
     `);

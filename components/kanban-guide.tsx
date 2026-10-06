@@ -84,7 +84,7 @@ export function KanbanGuide() {
             Claim the highest-priority, oldest <code>todo</code> task in your
             repositories. It moves to <code>in-progress</code> with a lease of{" "}
             <code>leaseSeconds</code> (15–3600, default 60). HTTP 204 means
-            nothing is waiting. The optional <code>agentRunId</code> names a
+            nothing is waiting or In Coding Progress is at its limit. The optional <code>agentRunId</code> names a
             run that works on this task only, so the card shows its live
             tokens before a heartbeat reports <code>usedTokens</code>. A
             session that works on several tasks sends only{" "}

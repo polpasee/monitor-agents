@@ -21,6 +21,7 @@ import {
   parseKanbanEffort,
   parseKanbanModel,
   parseKanbanPriority,
+  parseBoardSettingsPatch,
   parseKanbanTaskPatch,
   parseTaskRunMetadata,
   type KanbanStatus,
@@ -275,6 +276,22 @@ test("parseKanbanTaskPatch carries the requested model and effort", () => {
     }),
     null,
   );
+});
+
+test("parseBoardSettingsPatch accepts limits of 1 to 5 only", () => {
+  assert.deepEqual(parseBoardSettingsPatch({ codingLimit: 1 }), {
+    codingLimit: 1,
+  });
+  assert.deepEqual(parseBoardSettingsPatch({ codingLimit: 5, reviewLimit: 3 }), {
+    codingLimit: 5,
+    reviewLimit: 3,
+  });
+  for (const value of [0, 6, 2.5, "2", null, undefined]) {
+    assert.equal(parseBoardSettingsPatch({ reviewLimit: value }), null);
+  }
+  assert.equal(parseBoardSettingsPatch({}), null);
+  assert.equal(parseBoardSettingsPatch(null), null);
+  assert.equal(parseBoardSettingsPatch({ codingLimit: 2, other: 1 }), null);
 });
 
 test("kanbanRepositories returns sorted unique repository names", () => {

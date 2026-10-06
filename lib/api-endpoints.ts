@@ -106,11 +106,35 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
     ],
     responses: [
       { status: 200, description: "KanbanTask in in-progress" },
-      { status: 204, description: "No Todo task available, no body" },
+      {
+        status: 204,
+        description:
+          "No Todo task available, or In Coding Progress already holds the coding limit; no body",
+      },
       { status: 400, description: '{"error":"Invalid claim input."}' },
     ],
     description:
       "Atomically claims the highest-priority, oldest Todo task in the given repositories and moves it to In Coding Progress.",
+  },
+  {
+    method: "GET",
+    path: "/api/board-settings",
+    request: [],
+    responses: [{ status: 200, description: "{ codingLimit, reviewLimit }" }],
+    description:
+      "Reads the board limits (default 2 each). Claims stop while In Coding Progress holds codingLimit tasks; reviewLimit is advisory and not enforced.",
+  },
+  {
+    method: "PATCH",
+    path: "/api/board-settings",
+    request: [
+      "codingLimit?, reviewLimit?: integer 1–5; at least one, no other keys",
+    ],
+    responses: [
+      { status: 200, description: "{ codingLimit, reviewLimit }" },
+      { status: 400, description: '{"error":"Invalid board settings."}' },
+    ],
+    description: "Changes one or both board limits.",
   },
   {
     method: "POST",

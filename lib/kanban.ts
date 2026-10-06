@@ -51,6 +51,28 @@ export interface BoardSettings {
   reviewLimit: number;
 }
 
+export const kanbanLimitOptions = [1, 2, 3, 4, 5] as const;
+
+export const defaultKanbanLimit = 2;
+
+/** At least one known limit, each an integer 1–5; anything else is rejected. */
+export function parseBoardSettingsPatch(
+  body: Record<string, unknown> | null,
+): Partial<BoardSettings> | null {
+  if (!body) return null;
+  const keys = Object.keys(body);
+  if (
+    keys.length === 0 ||
+    !keys.every((key) => key === "codingLimit" || key === "reviewLimit") ||
+    !keys.every((key) =>
+      kanbanLimitOptions.some((option) => option === body[key]),
+    )
+  ) {
+    return null;
+  }
+  return body as Partial<BoardSettings>;
+}
+
 export interface KanbanStatusEvent {
   status: KanbanStatus;
   at: string;
