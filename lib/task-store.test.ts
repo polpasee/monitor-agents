@@ -144,6 +144,68 @@ test("TaskStore stores the requested model and effort, defaulting to Inherit", a
   }
 });
 
+test("TaskStore stores the review model and effort apart from the coding pair", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-review-requested-"));
+  const store = new TaskStore(join(directory, "tasks.sqlite"));
+
+  try {
+    const inherited = store.createTask({
+      title: "Inherit",
+      repository: "monitor-agents",
+    });
+    assert.equal(inherited.requestedReviewModel, null);
+    assert.equal(inherited.requestedReviewEffort, null);
+
+    const task = store.createTask({
+      title: "Pick a reviewer",
+      repository: "cacti-api",
+      requestedModel: "claude-opus",
+      requestedEffort: "high",
+      requestedReviewModel: "codex-sol",
+      requestedReviewEffort: "low",
+    });
+    assert.equal(task.requestedModel, "claude-opus");
+    assert.equal(task.requestedEffort, "high");
+    assert.equal(task.requestedReviewModel, "codex-sol");
+    assert.equal(task.requestedReviewEffort, "low");
+    assert.deepEqual(store.getTask(task.id), task);
+
+    const details = {
+      title: "Pick a reviewer",
+      description: "",
+      repository: "cacti-api",
+    };
+    const kept = store.updateTodoTaskDetails(task.id, {
+      ...details,
+      requestedModel: "codex-luna",
+    });
+    assert.equal(kept?.requestedModel, "codex-luna");
+    assert.equal(kept?.requestedReviewModel, "codex-sol");
+    assert.equal(kept?.requestedReviewEffort, "low");
+
+    const changed = store.updateTodoTaskDetails(task.id, {
+      ...details,
+      requestedReviewModel: "claude-haiku",
+    });
+    assert.equal(changed?.requestedModel, "codex-luna");
+    assert.equal(changed?.requestedEffort, "high");
+    assert.equal(changed?.requestedReviewModel, "claude-haiku");
+    assert.equal(changed?.requestedReviewEffort, "low");
+
+    const reset = store.updateTodoTaskDetails(task.id, {
+      ...details,
+      requestedReviewModel: null,
+      requestedReviewEffort: null,
+    });
+    assert.equal(reset?.requestedReviewModel, null);
+    assert.equal(reset?.requestedReviewEffort, null);
+    assert.equal(reset?.requestedEffort, "high");
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("TaskStore rejects a stale Todo edit after another connection claims it", async () => {
   const directory = await mkdtemp(join(tmpdir(), "monitor-task-edit-race-"));
   const path = join(directory, "tasks.sqlite");
@@ -795,6 +857,8 @@ test("TaskStore upgrades a database written before run details existed", async (
     assert.equal(task?.summary, null);
     assert.equal(task?.requestedModel, null);
     assert.equal(task?.requestedEffort, null);
+    assert.equal(task?.requestedReviewModel, null);
+    assert.equal(task?.requestedReviewEffort, null);
     assert.equal(store.getTask("legacy-2")?.pullRequestNumber, 5);
     assert.deepEqual(task?.statusHistory, [
       { status: "todo", at: "2026-08-04T00:00:00.000Z" },

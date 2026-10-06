@@ -39,6 +39,8 @@ const tasks: KanbanTask[] = [
     priority: 0,
     requestedModel: null,
     requestedEffort: null,
+    requestedReviewModel: null,
+    requestedReviewEffort: null,
     claimedBy: null,
     claimedAt: null,
     leaseUntil: null,
@@ -65,6 +67,8 @@ const tasks: KanbanTask[] = [
     priority: 0,
     requestedModel: null,
     requestedEffort: null,
+    requestedReviewModel: null,
+    requestedReviewEffort: null,
     claimedBy: null,
     claimedAt: null,
     leaseUntil: null,
@@ -278,6 +282,44 @@ test("parseKanbanTaskPatch carries the requested model and effort", () => {
   );
 });
 
+test("parseKanbanTaskPatch carries the review model and effort apart from the coding pair", () => {
+  const details = {
+    title: "Pick a reviewer",
+    repository: "monitor-agents",
+    description: "",
+  };
+  assert.deepEqual(
+    parseKanbanTaskPatch({
+      ...details,
+      requestedModel: "claude-opus",
+      requestedReviewModel: "codex-sol",
+      requestedReviewEffort: "low",
+    }),
+    {
+      ...details,
+      requestedModel: "claude-opus",
+      requestedReviewModel: "codex-sol",
+      requestedReviewEffort: "low",
+    },
+  );
+  assert.deepEqual(
+    parseKanbanTaskPatch({
+      ...details,
+      requestedReviewModel: "inherit",
+      requestedReviewEffort: null,
+    }),
+    { ...details, requestedReviewModel: null, requestedReviewEffort: null },
+  );
+  assert.equal(
+    parseKanbanTaskPatch({ ...details, requestedReviewModel: "gpt-9" }),
+    null,
+  );
+  assert.equal(
+    parseKanbanTaskPatch({ ...details, requestedReviewEffort: "max" }),
+    null,
+  );
+});
+
 test("parseBoardSettingsPatch accepts limits of 1 to 5 only", () => {
   assert.deepEqual(parseBoardSettingsPatch({ codingLimit: 1 }), {
     codingLimit: 1,
@@ -309,6 +351,8 @@ const task: KanbanTask = {
   priority: 0,
   requestedModel: null,
   requestedEffort: null,
+  requestedReviewModel: null,
+  requestedReviewEffort: null,
   claimedBy: null,
   claimedAt: null,
   leaseUntil: null,

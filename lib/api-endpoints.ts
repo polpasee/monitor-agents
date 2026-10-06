@@ -41,6 +41,8 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
       'priority?: "high" | "normal" | "low" (default "normal")',
       'requestedModel?: "inherit" | "claude-fable" | "claude-opus" | "claude-sonnet" | "claude-haiku" | "codex-astra" | "codex-sol" | "codex-luna" (default "inherit", stored as null)',
       'requestedEffort?: "inherit" | "xhigh" | "high" | "medium" | "low" (default "inherit", stored as null)',
+      "requestedModel and requestedEffort are for the coding agent",
+      "requestedReviewModel?, requestedReviewEffort?: same options as requestedModel and requestedEffort, for the review agent",
     ],
     responses: [
       { status: 201, description: "KanbanTask in todo" },
@@ -53,7 +55,7 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
     path: "/api/tasks/{id}",
     request: [
       'Either { status: "todo" | "in-progress" | "review-queue" | "review" | "done" } alone',
-      "Or exactly { title, repository, description } (limits as POST) plus priority?, requestedModel?, requestedEffort?; omitted keeps the current one, null resets priority to normal and the others to inherit",
+      "Or exactly { title, repository, description } (limits as POST) plus priority?, requestedModel?, requestedEffort?, requestedReviewModel?, requestedReviewEffort?; omitted keeps the current one, null resets priority to normal and the others to inherit",
     ],
     responses: [
       { status: 200, description: "KanbanTask" },

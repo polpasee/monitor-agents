@@ -87,6 +87,8 @@ export interface KanbanTask {
   priority: number;
   requestedModel: string | null;
   requestedEffort: string | null;
+  requestedReviewModel: string | null;
+  requestedReviewEffort: string | null;
   claimedBy: string | null;
   claimedAt: string | null;
   leaseUntil: string | null;
@@ -123,6 +125,8 @@ export type KanbanTaskPatch =
       priority?: number;
       requestedModel?: string | null;
       requestedEffort?: string | null;
+      requestedReviewModel?: string | null;
+      requestedReviewEffort?: string | null;
     };
 
 const statusIds = new Set<KanbanStatus>(
@@ -175,6 +179,8 @@ const taskDetailKeys = new Set([
   "priority",
   "requestedModel",
   "requestedEffort",
+  "requestedReviewModel",
+  "requestedReviewEffort",
 ]);
 
 export function parseKanbanTaskPatch(
@@ -206,7 +212,22 @@ export function parseKanbanTaskPatch(
   const requestedEffort = hasEffort
     ? parseKanbanEffort(body.requestedEffort)
     : undefined;
-  if (requestedModel === false || requestedEffort === false) return null;
+  const hasReviewModel = Object.hasOwn(body, "requestedReviewModel");
+  const requestedReviewModel = hasReviewModel
+    ? parseKanbanModel(body.requestedReviewModel)
+    : undefined;
+  const hasReviewEffort = Object.hasOwn(body, "requestedReviewEffort");
+  const requestedReviewEffort = hasReviewEffort
+    ? parseKanbanEffort(body.requestedReviewEffort)
+    : undefined;
+  if (
+    requestedModel === false ||
+    requestedEffort === false ||
+    requestedReviewModel === false ||
+    requestedReviewEffort === false
+  ) {
+    return null;
+  }
 
   const title = requiredString(body.title, 200);
   const repository = requiredString(body.repository, 200);
@@ -219,6 +240,8 @@ export function parseKanbanTaskPatch(
         ...(priority !== undefined && { priority }),
         ...(hasModel && { requestedModel }),
         ...(hasEffort && { requestedEffort }),
+        ...(hasReviewModel && { requestedReviewModel }),
+        ...(hasReviewEffort && { requestedReviewEffort }),
       }
     : null;
 }
