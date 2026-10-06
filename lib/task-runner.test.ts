@@ -361,6 +361,9 @@ test("runnerModel maps each Kanban model to its provider and CLI name", () => {
     fallback: "gpt-6-luna",
   });
   assert.throws(() => runnerModel("codex-nova"), /Unknown requested model/);
+  // Selectable in the dialogs, but no runner provider exists for them yet.
+  assert.throws(() => runnerModel("deepseek"), /Unknown requested model/);
+  assert.throws(() => runnerModel("glm"), /Unknown requested model/);
 });
 
 // `codex debug models` trimmed to the fields the runner reads.
