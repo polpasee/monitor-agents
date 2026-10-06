@@ -30,6 +30,8 @@ export const kanbanModels = [
   { id: "codex-astra", label: "Codex-Astra" },
   { id: "codex-sol", label: "Codex-Sol" },
   { id: "codex-luna", label: "Codex-Luna" },
+  { id: "deepseek", label: "DeepSeek" },
+  { id: "glm", label: "GLM" },
 ] as const;
 
 export type KanbanModel = (typeof kanbanModels)[number]["id"];

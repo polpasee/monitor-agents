@@ -217,6 +217,8 @@ test("parseKanbanModel and parseKanbanEffort store Inherit as null", () => {
       "codex-astra",
       "codex-sol",
       "codex-luna",
+      "deepseek",
+      "glm",
     ],
   );
   assert.deepEqual(

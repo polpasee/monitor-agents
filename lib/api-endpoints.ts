@@ -39,7 +39,7 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
       "repository: string, 1–200 chars",
       "description?: string, up to 5000 chars; omit it rather than send null (400)",
       'priority?: "high" | "normal" | "low" (default "normal")',
-      'requestedModel?: "inherit" | "claude-fable" | "claude-opus" | "claude-sonnet" | "claude-haiku" | "codex-astra" | "codex-sol" | "codex-luna" (default "inherit", stored as null)',
+      'requestedModel?: "inherit" | "claude-fable" | "claude-opus" | "claude-sonnet" | "claude-haiku" | "codex-astra" | "codex-sol" | "codex-luna" | "deepseek" | "glm" (default "inherit", stored as null)',
       'requestedEffort?: "inherit" | "xhigh" | "high" | "medium" | "low" (default "inherit", stored as null)',
       "requestedModel and requestedEffort are for the coding agent",
       "requestedReviewModel?, requestedReviewEffort?: same options as requestedModel and requestedEffort, for the review agent",
