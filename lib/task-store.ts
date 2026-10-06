@@ -3,7 +3,9 @@ import { mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
+import { defaultKanbanLimit } from "./kanban.ts";
 import type {
+  BoardSettings,
   KanbanStatus,
   KanbanStatusEvent,
   KanbanTask,
@@ -19,6 +21,8 @@ interface TaskRow {
   priority: number;
   requested_model: string | null;
   requested_effort: string | null;
+  requested_review_model: string | null;
+  requested_review_effort: string | null;
   claimed_by: string | null;
   claimed_at: string | null;
   lease_until: string | null;
@@ -44,6 +48,8 @@ export interface CreateTaskInput {
   priority?: number;
   requestedModel?: string | null;
   requestedEffort?: string | null;
+  requestedReviewModel?: string | null;
+  requestedReviewEffort?: string | null;
 }
 
 export interface UpdateTaskDetailsInput {
@@ -53,6 +59,8 @@ export interface UpdateTaskDetailsInput {
   priority?: number;
   requestedModel?: string | null;
   requestedEffort?: string | null;
+  requestedReviewModel?: string | null;
+  requestedReviewEffort?: string | null;
 }
 
 export interface ClaimTaskInput {
@@ -91,6 +99,8 @@ function taskFromRow(row: TaskRow): KanbanTask {
     priority: row.priority,
     requestedModel: row.requested_model,
     requestedEffort: row.requested_effort,
+    requestedReviewModel: row.requested_review_model,
+    requestedReviewEffort: row.requested_review_effort,
     claimedBy: row.claimed_by,
     claimedAt: row.claimed_at,
     leaseUntil: row.lease_until,
@@ -179,6 +189,8 @@ function tasksTableSql(target: string) {
     priority INTEGER NOT NULL DEFAULT 0,
     requested_model TEXT,
     requested_effort TEXT,
+    requested_review_model TEXT,
+    requested_review_effort TEXT,
     claimed_by TEXT,
     claimed_at TEXT,
     lease_until TEXT,
@@ -212,6 +224,13 @@ export class TaskStore {
 
       ${tasksTableSql("IF NOT EXISTS tasks")}
       ${tasksIndexSql}
+
+      CREATE TABLE IF NOT EXISTS board_settings (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        coding_limit INTEGER NOT NULL DEFAULT ${defaultKanbanLimit},
+        review_limit INTEGER NOT NULL DEFAULT ${defaultKanbanLimit}
+      );
+      INSERT OR IGNORE INTO board_settings (id) VALUES (1);
     `);
     this.migrate();
   }
@@ -242,6 +261,8 @@ export class TaskStore {
       ["status_history", "TEXT NOT NULL DEFAULT '[]'"],
       ["requested_model", "TEXT"],
       ["requested_effort", "TEXT"],
+      ["requested_review_model", "TEXT"],
+      ["requested_review_effort", "TEXT"],
     ];
     for (const [name, definition] of additions) {
       if (!columns.has(name)) {
@@ -323,6 +344,25 @@ export class TaskStore {
     this.database.close();
   }
 
+  getBoardSettings(): BoardSettings {
+    const row = this.database
+      .prepare("SELECT coding_limit, review_limit FROM board_settings WHERE id = 1")
+      .get() as { coding_limit: number; review_limit: number };
+    return { codingLimit: row.coding_limit, reviewLimit: row.review_limit };
+  }
+
+  updateBoardSettings(input: Partial<BoardSettings>): BoardSettings {
+    this.database
+      .prepare(`
+        UPDATE board_settings
+        SET coding_limit = COALESCE(?, coding_limit),
+            review_limit = COALESCE(?, review_limit)
+        WHERE id = 1
+      `)
+      .run(input.codingLimit ?? null, input.reviewLimit ?? null);
+    return this.getBoardSettings();
+  }
+
   createTask(input: CreateTaskInput, now = new Date()): KanbanTask {
     const id = randomUUID();
     const timestamp = now.toISOString();
@@ -331,9 +371,11 @@ export class TaskStore {
         INSERT INTO tasks (
           id, title, description, repository, status, priority,
           requested_model, requested_effort,
+          requested_review_model, requested_review_effort,
           status_history, created_at, updated_at
         ) VALUES (
           ?, ?, ?, ?, 'todo', ?,
+          ?, ?,
           ?, ?,
           json_array(json_object('status', 'todo', 'at', ?)), ?, ?
         )
@@ -346,6 +388,8 @@ export class TaskStore {
         input.priority ?? 0,
         input.requestedModel ?? null,
         input.requestedEffort ?? null,
+        input.requestedReviewModel ?? null,
+        input.requestedReviewEffort ?? null,
         timestamp,
         timestamp,
         timestamp,
@@ -434,6 +478,12 @@ export class TaskStore {
             priority = COALESCE(?, priority),
             requested_model = CASE WHEN ? THEN ? ELSE requested_model END,
             requested_effort = CASE WHEN ? THEN ? ELSE requested_effort END,
+            requested_review_model = CASE
+              WHEN ? THEN ? ELSE requested_review_model
+            END,
+            requested_review_effort = CASE
+              WHEN ? THEN ? ELSE requested_review_effort
+            END,
             updated_at = ?
         WHERE id = ? AND status = 'todo'
         RETURNING *
@@ -448,6 +498,10 @@ export class TaskStore {
         input.requestedModel ?? null,
         input.requestedEffort === undefined ? 0 : 1,
         input.requestedEffort ?? null,
+        input.requestedReviewModel === undefined ? 0 : 1,
+        input.requestedReviewModel ?? null,
+        input.requestedReviewEffort === undefined ? 0 : 1,
+        input.requestedReviewEffort ?? null,
         now.toISOString(),
         id,
       ) as unknown as TaskRow | undefined;
@@ -497,6 +551,14 @@ export class TaskStore {
             AND lease_until <= ?
         `)
         .run("todo", nowIso, nowIso, nowIso);
+
+      const { running } = this.database
+        .prepare("SELECT COUNT(*) AS running FROM tasks WHERE status = 'in-progress'")
+        .get() as { running: number };
+      if (running >= this.getBoardSettings().codingLimit) {
+        this.database.exec("COMMIT");
+        return null;
+      }
 
       const candidate = this.database
         .prepare(`

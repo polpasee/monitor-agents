@@ -28,6 +28,8 @@ export async function POST(request: Request) {
   const priority = parseKanbanPriority(body?.priority);
   const requestedModel = parseKanbanModel(body?.requestedModel);
   const requestedEffort = parseKanbanEffort(body?.requestedEffort);
+  const requestedReviewModel = parseKanbanModel(body?.requestedReviewModel);
+  const requestedReviewEffort = parseKanbanEffort(body?.requestedReviewEffort);
 
   if (
     !body ||
@@ -36,7 +38,9 @@ export async function POST(request: Request) {
     description === null ||
     priority === null ||
     requestedModel === false ||
-    requestedEffort === false
+    requestedEffort === false ||
+    requestedReviewModel === false ||
+    requestedReviewEffort === false
   ) {
     return Response.json({ error: "Invalid task input." }, { status: 400 });
   }
@@ -48,6 +52,8 @@ export async function POST(request: Request) {
     priority,
     requestedModel,
     requestedEffort,
+    requestedReviewModel,
+    requestedReviewEffort,
   });
   return Response.json(task, { status: 201 });
 }

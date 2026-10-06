@@ -29,7 +29,7 @@ test("every Kanban task route method is documented", () => {
     apiEndpoints.map((endpoint) => `${endpoint.method} ${routeFile(endpoint.path)}`),
   );
 
-  for (const directory of ["api/tasks", "api/agent/tasks"]) {
+  for (const directory of ["api/tasks", "api/agent/tasks", "api/board-settings"]) {
     const root = join(appDirectory, directory);
     const routes = readdirSync(root, { recursive: true, encoding: "utf8" })
       .filter((entry) => entry.endsWith("route.ts"))

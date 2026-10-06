@@ -30,6 +30,8 @@ const task: KanbanTask = {
   priority: 0,
   requestedModel: null,
   requestedEffort: null,
+  requestedReviewModel: null,
+  requestedReviewEffort: null,
   claimedBy: null,
   claimedAt: null,
   leaseUntil: null,

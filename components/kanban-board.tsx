@@ -9,6 +9,7 @@ import {
 import type { AgentRun, QuotaLimit } from "@/lib/telemetry";
 import {
   compareKanbanColumnTasks,
+  defaultKanbanLimit,
   findTaskAgent,
   formatBangkokTime,
   formatDuration,
@@ -16,6 +17,7 @@ import {
   formatTokenCount,
   isKanbanTaskEditable,
   kanbanEfforts,
+  kanbanLimitOptions,
   kanbanModels,
   kanbanPriorities,
   kanbanPriorityOf,
@@ -24,6 +26,7 @@ import {
   kanbanStatusSince,
   kanbanStatuses,
   kanbanTaskTokens,
+  type BoardSettings,
   type KanbanEffort,
   type KanbanModel,
   type KanbanPriority,
@@ -49,6 +52,14 @@ function requestedEffortOf(task: KanbanTask): KanbanEffort {
   return (task.requestedEffort as KanbanEffort | null) ?? "inherit";
 }
 
+function requestedReviewModelOf(task: KanbanTask): KanbanModel {
+  return (task.requestedReviewModel as KanbanModel | null) ?? "inherit";
+}
+
+function requestedReviewEffortOf(task: KanbanTask): KanbanEffort {
+  return (task.requestedReviewEffort as KanbanEffort | null) ?? "inherit";
+}
+
 /** The runner-reported model, else the requested one; null for an unrun Inherit task. */
 function cardModelOf(task: KanbanTask): string | null {
   if (task.model) return task.model;
@@ -65,6 +76,8 @@ function cardEffortOf(task: KanbanTask): string | null {
       ?.label ?? null
   );
 }
+
+const boardLimitError = "Unable to update the board limit.";
 
 /** A reset, retry, or failure keeps the details of the last completion. */
 function showsCompletion(task: KanbanTask): boolean {
@@ -97,6 +110,8 @@ export function KanbanBoard({
   const [priority, setPriority] = useState<KanbanPriority>("normal");
   const [model, setModel] = useState<KanbanModel>("inherit");
   const [effort, setEffort] = useState<KanbanEffort>("inherit");
+  const [reviewModel, setReviewModel] = useState<KanbanModel>("inherit");
+  const [reviewEffort, setReviewEffort] = useState<KanbanEffort>("inherit");
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [editTitle, setEditTitle] = useState("");
   const [editRepository, setEditRepository] = useState("");
@@ -104,6 +119,10 @@ export function KanbanBoard({
   const [editPriority, setEditPriority] = useState<KanbanPriority>("normal");
   const [editModel, setEditModel] = useState<KanbanModel>("inherit");
   const [editEffort, setEditEffort] = useState<KanbanEffort>("inherit");
+  const [editReviewModel, setEditReviewModel] =
+    useState<KanbanModel>("inherit");
+  const [editReviewEffort, setEditReviewEffort] =
+    useState<KanbanEffort>("inherit");
   const [editError, setEditError] = useState<string | null>(null);
   const [savingTaskId, setSavingTaskId] = useState<string | null>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<string | null>(null);
@@ -111,6 +130,7 @@ export function KanbanBoard({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [boardSettings, setBoardSettings] = useState<BoardSettings | null>(null);
   const repositories = useMemo(
     () => mergeRepositoryNames(kanbanRepositories(tasks), githubRepositories),
     [githubRepositories, tasks],
@@ -144,7 +164,24 @@ export function KanbanBoard({
     let stopped = false;
     let timeoutId: number | undefined;
 
+    /** Polled with the tasks, so a failed load retries and other clients' changes show up. */
+    async function refreshBoardSettings() {
+      try {
+        const response = await fetch("/api/board-settings", {
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          throw new Error(`Board settings request failed with ${response.status}`);
+        }
+        const settings = (await response.json()) as BoardSettings;
+        if (!stopped) setBoardSettings(settings);
+      } catch {
+        // The limit selects keep their last value until the next poll succeeds.
+      }
+    }
+
     async function refresh() {
+      void refreshBoardSettings();
       try {
         const response = await fetch("/api/tasks", { cache: "no-store" });
         if (!response.ok) {
@@ -213,6 +250,23 @@ export function KanbanBoard({
     };
   }, []);
 
+  async function updateBoardLimit(key: keyof BoardSettings, limit: number) {
+    try {
+      const response = await fetch("/api/board-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [key]: limit }),
+      });
+      if (!response.ok) {
+        throw new Error(`Board settings update failed with ${response.status}`);
+      }
+      setBoardSettings((await response.json()) as BoardSettings);
+      setError((current) => (current === boardLimitError ? null : current));
+    } catch {
+      setError(boardLimitError);
+    }
+  }
+
   async function addTask(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const nextTitle = title.trim();
@@ -233,6 +287,8 @@ export function KanbanBoard({
           priority,
           requestedModel: model,
           requestedEffort: effort,
+          requestedReviewModel: reviewModel,
+          requestedReviewEffort: reviewEffort,
         }),
       });
       if (!response.ok) {
@@ -245,6 +301,8 @@ export function KanbanBoard({
       setPriority("normal");
       setModel("inherit");
       setEffort("inherit");
+      setReviewModel("inherit");
+      setReviewEffort("inherit");
       setRepository(nextRepository);
       setError(null);
       addTaskDialogRef.current?.close();
@@ -276,6 +334,8 @@ export function KanbanBoard({
     setEditPriority(kanbanPriorityOf(task.priority).id);
     setEditModel(requestedModelOf(task));
     setEditEffort(requestedEffortOf(task));
+    setEditReviewModel(requestedReviewModelOf(task));
+    setEditReviewEffort(requestedReviewEffortOf(task));
     setEditError(null);
     editTaskDialogRef.current?.showModal();
     if (isKanbanTaskEditable(task)) {
@@ -312,6 +372,8 @@ export function KanbanBoard({
     setEditPriority("normal");
     setEditModel("inherit");
     setEditEffort("inherit");
+    setEditReviewModel("inherit");
+    setEditReviewEffort("inherit");
     setEditError(null);
 
     const trigger = editTaskButtonRef.current;
@@ -355,6 +417,14 @@ export function KanbanBoard({
           ...(selectedTask &&
             editEffort !== requestedEffortOf(selectedTask) && {
               requestedEffort: editEffort,
+            }),
+          ...(selectedTask &&
+            editReviewModel !== requestedReviewModelOf(selectedTask) && {
+              requestedReviewModel: editReviewModel,
+            }),
+          ...(selectedTask &&
+            editReviewEffort !== requestedReviewEffortOf(selectedTask) && {
+              requestedReviewEffort: editReviewEffort,
             }),
         }),
       });
@@ -560,7 +630,7 @@ export function KanbanBoard({
           </label>
           <div className="kanban-task-dialog__row">
             <label>
-              <span>Requested model</span>
+              <span>Coding model</span>
               <select
                 onChange={(event) => setModel(event.target.value as KanbanModel)}
                 value={model}
@@ -573,12 +643,44 @@ export function KanbanBoard({
               </select>
             </label>
             <label>
-              <span>Effort / Thinking</span>
+              <span>Coding effort / thinking</span>
               <select
                 onChange={(event) =>
                   setEffort(event.target.value as KanbanEffort)
                 }
                 value={effort}
+              >
+                {kanbanEfforts.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="kanban-task-dialog__row">
+            <label>
+              <span>Review model</span>
+              <select
+                onChange={(event) =>
+                  setReviewModel(event.target.value as KanbanModel)
+                }
+                value={reviewModel}
+              >
+                {kanbanModels.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Review effort / thinking</span>
+              <select
+                onChange={(event) =>
+                  setReviewEffort(event.target.value as KanbanEffort)
+                }
+                value={reviewEffort}
               >
                 {kanbanEfforts.map((option) => (
                   <option key={option.id} value={option.id}>
@@ -718,7 +820,7 @@ export function KanbanBoard({
             </label>
             <div className="kanban-task-dialog__row">
               <label>
-                <span>Requested model</span>
+                <span>Coding model</span>
                 <select
                   disabled={isTaskDialogReadOnly}
                   onChange={(event) =>
@@ -738,7 +840,7 @@ export function KanbanBoard({
                 </select>
               </label>
               <label>
-                <span>Effort / Thinking</span>
+                <span>Coding effort / thinking</span>
                 <select
                   disabled={isTaskDialogReadOnly}
                   onChange={(event) =>
@@ -748,6 +850,48 @@ export function KanbanBoard({
                     isTaskDialogReadOnly && selectedTask
                       ? requestedEffortOf(selectedTask)
                       : editEffort
+                  }
+                >
+                  {kanbanEfforts.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="kanban-task-dialog__row">
+              <label>
+                <span>Review model</span>
+                <select
+                  disabled={isTaskDialogReadOnly}
+                  onChange={(event) =>
+                    setEditReviewModel(event.target.value as KanbanModel)
+                  }
+                  value={
+                    isTaskDialogReadOnly && selectedTask
+                      ? requestedReviewModelOf(selectedTask)
+                      : editReviewModel
+                  }
+                >
+                  {kanbanModels.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Review effort / thinking</span>
+                <select
+                  disabled={isTaskDialogReadOnly}
+                  onChange={(event) =>
+                    setEditReviewEffort(event.target.value as KanbanEffort)
+                  }
+                  value={
+                    isTaskDialogReadOnly && selectedTask
+                      ? requestedReviewEffortOf(selectedTask)
+                      : editReviewEffort
                   }
                 >
                   {kanbanEfforts.map((option) => (
@@ -895,6 +1039,12 @@ export function KanbanBoard({
           const columnTasks = visibleTasks.filter(
             (task) => task.status === status.id,
           );
+          const limitKey =
+            status.id === "in-progress"
+              ? "codingLimit"
+              : status.id === "review"
+                ? "reviewLimit"
+                : null;
 
           return (
             <section
@@ -909,7 +1059,28 @@ export function KanbanBoard({
               }}
             >
               <header className="kanban-column__header">
-                <h3>{status.label}</h3>
+                <h3 title={status.label}>{status.label}</h3>
+                {limitKey && (
+                  <label className="kanban-column__limit">
+                    Limit
+                    <select
+                      disabled={!boardSettings}
+                      onChange={(event) =>
+                        void updateBoardLimit(
+                          limitKey,
+                          Number(event.target.value),
+                        )
+                      }
+                      value={boardSettings?.[limitKey] ?? defaultKanbanLimit}
+                    >
+                      {kanbanLimitOptions.map((limit) => (
+                        <option key={limit} value={limit}>
+                          {limit}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <span>{columnTasks.length}</span>
               </header>
               <div className="kanban-column__tasks">

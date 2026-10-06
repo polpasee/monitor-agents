@@ -21,6 +21,7 @@ import {
   parseKanbanEffort,
   parseKanbanModel,
   parseKanbanPriority,
+  parseBoardSettingsPatch,
   parseKanbanTaskPatch,
   parseTaskRunMetadata,
   type KanbanStatus,
@@ -38,6 +39,8 @@ const tasks: KanbanTask[] = [
     priority: 0,
     requestedModel: null,
     requestedEffort: null,
+    requestedReviewModel: null,
+    requestedReviewEffort: null,
     claimedBy: null,
     claimedAt: null,
     leaseUntil: null,
@@ -64,6 +67,8 @@ const tasks: KanbanTask[] = [
     priority: 0,
     requestedModel: null,
     requestedEffort: null,
+    requestedReviewModel: null,
+    requestedReviewEffort: null,
     claimedBy: null,
     claimedAt: null,
     leaseUntil: null,
@@ -277,6 +282,60 @@ test("parseKanbanTaskPatch carries the requested model and effort", () => {
   );
 });
 
+test("parseKanbanTaskPatch carries the review model and effort apart from the coding pair", () => {
+  const details = {
+    title: "Pick a reviewer",
+    repository: "monitor-agents",
+    description: "",
+  };
+  assert.deepEqual(
+    parseKanbanTaskPatch({
+      ...details,
+      requestedModel: "claude-opus",
+      requestedReviewModel: "codex-sol",
+      requestedReviewEffort: "low",
+    }),
+    {
+      ...details,
+      requestedModel: "claude-opus",
+      requestedReviewModel: "codex-sol",
+      requestedReviewEffort: "low",
+    },
+  );
+  assert.deepEqual(
+    parseKanbanTaskPatch({
+      ...details,
+      requestedReviewModel: "inherit",
+      requestedReviewEffort: null,
+    }),
+    { ...details, requestedReviewModel: null, requestedReviewEffort: null },
+  );
+  assert.equal(
+    parseKanbanTaskPatch({ ...details, requestedReviewModel: "gpt-9" }),
+    null,
+  );
+  assert.equal(
+    parseKanbanTaskPatch({ ...details, requestedReviewEffort: "max" }),
+    null,
+  );
+});
+
+test("parseBoardSettingsPatch accepts limits of 1 to 5 only", () => {
+  assert.deepEqual(parseBoardSettingsPatch({ codingLimit: 1 }), {
+    codingLimit: 1,
+  });
+  assert.deepEqual(parseBoardSettingsPatch({ codingLimit: 5, reviewLimit: 3 }), {
+    codingLimit: 5,
+    reviewLimit: 3,
+  });
+  for (const value of [0, 6, 2.5, "2", null, undefined]) {
+    assert.equal(parseBoardSettingsPatch({ reviewLimit: value }), null);
+  }
+  assert.equal(parseBoardSettingsPatch({}), null);
+  assert.equal(parseBoardSettingsPatch(null), null);
+  assert.equal(parseBoardSettingsPatch({ codingLimit: 2, other: 1 }), null);
+});
+
 test("kanbanRepositories returns sorted unique repository names", () => {
   assert.deepEqual(
     kanbanRepositories([...tasks, { ...tasks[0], id: "task-3" }]),
@@ -292,6 +351,8 @@ const task: KanbanTask = {
   priority: 0,
   requestedModel: null,
   requestedEffort: null,
+  requestedReviewModel: null,
+  requestedReviewEffort: null,
   claimedBy: null,
   claimedAt: null,
   leaseUntil: null,

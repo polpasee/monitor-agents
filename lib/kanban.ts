@@ -45,6 +45,34 @@ export const kanbanEfforts = [
 
 export type KanbanEffort = (typeof kanbanEfforts)[number]["id"];
 
+/** How many tasks may sit in In Coding / In Review Progress at once. */
+export interface BoardSettings {
+  codingLimit: number;
+  reviewLimit: number;
+}
+
+export const kanbanLimitOptions = [1, 2, 3, 4, 5] as const;
+
+export const defaultKanbanLimit = 2;
+
+/** At least one known limit, each an integer 1–5; anything else is rejected. */
+export function parseBoardSettingsPatch(
+  body: Record<string, unknown> | null,
+): Partial<BoardSettings> | null {
+  if (!body) return null;
+  const keys = Object.keys(body);
+  if (
+    keys.length === 0 ||
+    !keys.every((key) => key === "codingLimit" || key === "reviewLimit") ||
+    !keys.every((key) =>
+      kanbanLimitOptions.some((option) => option === body[key]),
+    )
+  ) {
+    return null;
+  }
+  return body as Partial<BoardSettings>;
+}
+
 export interface KanbanStatusEvent {
   status: KanbanStatus;
   at: string;
@@ -59,6 +87,8 @@ export interface KanbanTask {
   priority: number;
   requestedModel: string | null;
   requestedEffort: string | null;
+  requestedReviewModel: string | null;
+  requestedReviewEffort: string | null;
   claimedBy: string | null;
   claimedAt: string | null;
   leaseUntil: string | null;
@@ -95,6 +125,8 @@ export type KanbanTaskPatch =
       priority?: number;
       requestedModel?: string | null;
       requestedEffort?: string | null;
+      requestedReviewModel?: string | null;
+      requestedReviewEffort?: string | null;
     };
 
 const statusIds = new Set<KanbanStatus>(
@@ -147,6 +179,8 @@ const taskDetailKeys = new Set([
   "priority",
   "requestedModel",
   "requestedEffort",
+  "requestedReviewModel",
+  "requestedReviewEffort",
 ]);
 
 export function parseKanbanTaskPatch(
@@ -178,7 +212,22 @@ export function parseKanbanTaskPatch(
   const requestedEffort = hasEffort
     ? parseKanbanEffort(body.requestedEffort)
     : undefined;
-  if (requestedModel === false || requestedEffort === false) return null;
+  const hasReviewModel = Object.hasOwn(body, "requestedReviewModel");
+  const requestedReviewModel = hasReviewModel
+    ? parseKanbanModel(body.requestedReviewModel)
+    : undefined;
+  const hasReviewEffort = Object.hasOwn(body, "requestedReviewEffort");
+  const requestedReviewEffort = hasReviewEffort
+    ? parseKanbanEffort(body.requestedReviewEffort)
+    : undefined;
+  if (
+    requestedModel === false ||
+    requestedEffort === false ||
+    requestedReviewModel === false ||
+    requestedReviewEffort === false
+  ) {
+    return null;
+  }
 
   const title = requiredString(body.title, 200);
   const repository = requiredString(body.repository, 200);
@@ -191,6 +240,8 @@ export function parseKanbanTaskPatch(
         ...(priority !== undefined && { priority }),
         ...(hasModel && { requestedModel }),
         ...(hasEffort && { requestedEffort }),
+        ...(hasReviewModel && { requestedReviewModel }),
+        ...(hasReviewEffort && { requestedReviewEffort }),
       }
     : null;
 }

@@ -971,7 +971,11 @@ button:focus-visible,
 }
 
 .kanban-column__header h3 {
+  min-width: 0;
+  overflow: hidden;
   margin: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--text-soft);
   font-size: 11px;
   font-weight: 700;
@@ -988,6 +992,28 @@ button:focus-visible,
   color: var(--muted);
   font-size: 9px;
   font-variant-numeric: tabular-nums;
+}
+
+.kanban-column__limit {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.kanban-column__limit select {
+  height: 21px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-soft);
+  font-size: 10px;
 }
 
 .kanban-column__tasks {

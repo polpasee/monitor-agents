@@ -41,6 +41,8 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
       'priority?: "high" | "normal" | "low" (default "normal")',
       'requestedModel?: "inherit" | "claude-fable" | "claude-opus" | "claude-sonnet" | "claude-haiku" | "codex-astra" | "codex-sol" | "codex-luna" (default "inherit", stored as null)',
       'requestedEffort?: "inherit" | "xhigh" | "high" | "medium" | "low" (default "inherit", stored as null)',
+      "requestedModel and requestedEffort are for the coding agent",
+      "requestedReviewModel?, requestedReviewEffort?: same options as requestedModel and requestedEffort, for the review agent",
     ],
     responses: [
       { status: 201, description: "KanbanTask in todo" },
@@ -53,7 +55,7 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
     path: "/api/tasks/{id}",
     request: [
       'Either { status: "todo" | "in-progress" | "review-queue" | "review" | "done" } alone',
-      "Or exactly { title, repository, description } (limits as POST) plus priority?, requestedModel?, requestedEffort?; omitted keeps the current one, null resets priority to normal and the others to inherit",
+      "Or exactly { title, repository, description } (limits as POST) plus priority?, requestedModel?, requestedEffort?, requestedReviewModel?, requestedReviewEffort?; omitted keeps the current one, null resets priority to normal and the others to inherit",
     ],
     responses: [
       { status: 200, description: "KanbanTask" },
@@ -106,11 +108,35 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
     ],
     responses: [
       { status: 200, description: "KanbanTask in in-progress" },
-      { status: 204, description: "No Todo task available, no body" },
+      {
+        status: 204,
+        description:
+          "No Todo task available, or In Coding Progress already holds the coding limit; no body",
+      },
       { status: 400, description: '{"error":"Invalid claim input."}' },
     ],
     description:
       "Atomically claims the highest-priority, oldest Todo task in the given repositories and moves it to In Coding Progress.",
+  },
+  {
+    method: "GET",
+    path: "/api/board-settings",
+    request: [],
+    responses: [{ status: 200, description: "{ codingLimit, reviewLimit }" }],
+    description:
+      "Reads the board limits (default 2 each). Claims stop while In Coding Progress holds codingLimit tasks; reviewLimit is advisory and not enforced.",
+  },
+  {
+    method: "PATCH",
+    path: "/api/board-settings",
+    request: [
+      "codingLimit?, reviewLimit?: integer 1–5; at least one, no other keys",
+    ],
+    responses: [
+      { status: 200, description: "{ codingLimit, reviewLimit }" },
+      { status: 400, description: '{"error":"Invalid board settings."}' },
+    ],
+    description: "Changes one or both board limits.",
   },
   {
     method: "POST",

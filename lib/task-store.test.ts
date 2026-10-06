@@ -144,6 +144,68 @@ test("TaskStore stores the requested model and effort, defaulting to Inherit", a
   }
 });
 
+test("TaskStore stores the review model and effort apart from the coding pair", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-review-requested-"));
+  const store = new TaskStore(join(directory, "tasks.sqlite"));
+
+  try {
+    const inherited = store.createTask({
+      title: "Inherit",
+      repository: "monitor-agents",
+    });
+    assert.equal(inherited.requestedReviewModel, null);
+    assert.equal(inherited.requestedReviewEffort, null);
+
+    const task = store.createTask({
+      title: "Pick a reviewer",
+      repository: "cacti-api",
+      requestedModel: "claude-opus",
+      requestedEffort: "high",
+      requestedReviewModel: "codex-sol",
+      requestedReviewEffort: "low",
+    });
+    assert.equal(task.requestedModel, "claude-opus");
+    assert.equal(task.requestedEffort, "high");
+    assert.equal(task.requestedReviewModel, "codex-sol");
+    assert.equal(task.requestedReviewEffort, "low");
+    assert.deepEqual(store.getTask(task.id), task);
+
+    const details = {
+      title: "Pick a reviewer",
+      description: "",
+      repository: "cacti-api",
+    };
+    const kept = store.updateTodoTaskDetails(task.id, {
+      ...details,
+      requestedModel: "codex-luna",
+    });
+    assert.equal(kept?.requestedModel, "codex-luna");
+    assert.equal(kept?.requestedReviewModel, "codex-sol");
+    assert.equal(kept?.requestedReviewEffort, "low");
+
+    const changed = store.updateTodoTaskDetails(task.id, {
+      ...details,
+      requestedReviewModel: "claude-haiku",
+    });
+    assert.equal(changed?.requestedModel, "codex-luna");
+    assert.equal(changed?.requestedEffort, "high");
+    assert.equal(changed?.requestedReviewModel, "claude-haiku");
+    assert.equal(changed?.requestedReviewEffort, "low");
+
+    const reset = store.updateTodoTaskDetails(task.id, {
+      ...details,
+      requestedReviewModel: null,
+      requestedReviewEffort: null,
+    });
+    assert.equal(reset?.requestedReviewModel, null);
+    assert.equal(reset?.requestedReviewEffort, null);
+    assert.equal(reset?.requestedEffort, "high");
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("TaskStore rejects a stale Todo edit after another connection claims it", async () => {
   const directory = await mkdtemp(join(tmpdir(), "monitor-task-edit-race-"));
   const path = join(directory, "tasks.sqlite");
@@ -355,6 +417,7 @@ test("TaskStore lists and claims higher priority first", async () => {
       store.listTasks().map((task) => task.title),
       ["High", "Normal", "Low"],
     );
+    store.updateBoardSettings({ codingLimit: 3 });
     const now = new Date("2026-08-04T00:03:00.000Z");
     const claimed = [1, 2, 3].map(
       (index) =>
@@ -365,6 +428,76 @@ test("TaskStore lists and claims higher priority first", async () => {
         })?.title,
     );
     assert.deepEqual(claimed, ["High", "Normal", "Low"]);
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("TaskStore keeps board limits, defaulting to two each", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-board-settings-"));
+  const path = join(directory, "tasks.sqlite");
+  const store = new TaskStore(path);
+
+  try {
+    assert.deepEqual(store.getBoardSettings(), { codingLimit: 2, reviewLimit: 2 });
+    assert.deepEqual(store.updateBoardSettings({ codingLimit: 4 }), {
+      codingLimit: 4,
+      reviewLimit: 2,
+    });
+    assert.deepEqual(store.updateBoardSettings({ reviewLimit: 1 }), {
+      codingLimit: 4,
+      reviewLimit: 1,
+    });
+  } finally {
+    store.close();
+  }
+
+  // Reopening an existing database keeps the stored row.
+  const reopened = new TaskStore(path);
+  try {
+    assert.deepEqual(reopened.getBoardSettings(), { codingLimit: 4, reviewLimit: 1 });
+  } finally {
+    reopened.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("TaskStore claims nothing once the coding limit is reached", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-limit-"));
+  const store = new TaskStore(join(directory, "tasks.sqlite"));
+
+  try {
+    for (const title of ["One", "Two", "Three"]) {
+      store.createTask({ title, repository: "monitor-agents" });
+    }
+    const claim = (now = new Date("2026-08-04T00:00:00.000Z")) =>
+      store.claimTask({
+        agentId: "agent-1",
+        repositories: ["monitor-agents"],
+        now,
+        leaseMs: 60_000,
+      });
+
+    store.updateBoardSettings({ codingLimit: 1 });
+    const first = claim();
+    assert.equal(first?.title, "One");
+    assert.equal(claim(), null);
+
+    store.updateBoardSettings({ codingLimit: 2 });
+    assert.equal(claim()?.title, "Two");
+    assert.equal(claim(), null);
+
+    // A finished task frees its slot.
+    store.updateTaskStatus(first!.id, "review-queue");
+    assert.equal(claim()?.title, "Three");
+
+    // An expired lease is re-queued before the limit is counted.
+    store.updateBoardSettings({ codingLimit: 1 });
+    assert.equal(
+      claim(new Date("2026-08-04T00:05:00.000Z"))?.status,
+      "in-progress",
+    );
   } finally {
     store.close();
     await rm(directory, { recursive: true, force: true });
@@ -724,6 +857,8 @@ test("TaskStore upgrades a database written before run details existed", async (
     assert.equal(task?.summary, null);
     assert.equal(task?.requestedModel, null);
     assert.equal(task?.requestedEffort, null);
+    assert.equal(task?.requestedReviewModel, null);
+    assert.equal(task?.requestedReviewEffort, null);
     assert.equal(store.getTask("legacy-2")?.pullRequestNumber, 5);
     assert.deepEqual(task?.statusHistory, [
       { status: "todo", at: "2026-08-04T00:00:00.000Z" },
