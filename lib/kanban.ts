@@ -45,6 +45,12 @@ export const kanbanEfforts = [
 
 export type KanbanEffort = (typeof kanbanEfforts)[number]["id"];
 
+/** How many tasks may sit in In Coding / In Review Progress at once. */
+export interface BoardSettings {
+  codingLimit: number;
+  reviewLimit: number;
+}
+
 export interface KanbanStatusEvent {
   status: KanbanStatus;
   at: string;

@@ -355,6 +355,7 @@ test("TaskStore lists and claims higher priority first", async () => {
       store.listTasks().map((task) => task.title),
       ["High", "Normal", "Low"],
     );
+    store.updateBoardSettings({ codingLimit: 3 });
     const now = new Date("2026-08-04T00:03:00.000Z");
     const claimed = [1, 2, 3].map(
       (index) =>
@@ -365,6 +366,76 @@ test("TaskStore lists and claims higher priority first", async () => {
         })?.title,
     );
     assert.deepEqual(claimed, ["High", "Normal", "Low"]);
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("TaskStore keeps board limits, defaulting to two each", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-board-settings-"));
+  const path = join(directory, "tasks.sqlite");
+  const store = new TaskStore(path);
+
+  try {
+    assert.deepEqual(store.getBoardSettings(), { codingLimit: 2, reviewLimit: 2 });
+    assert.deepEqual(store.updateBoardSettings({ codingLimit: 4 }), {
+      codingLimit: 4,
+      reviewLimit: 2,
+    });
+    assert.deepEqual(store.updateBoardSettings({ reviewLimit: 1 }), {
+      codingLimit: 4,
+      reviewLimit: 1,
+    });
+  } finally {
+    store.close();
+  }
+
+  // Reopening an existing database keeps the stored row.
+  const reopened = new TaskStore(path);
+  try {
+    assert.deepEqual(reopened.getBoardSettings(), { codingLimit: 4, reviewLimit: 1 });
+  } finally {
+    reopened.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("TaskStore claims nothing once the coding limit is reached", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-limit-"));
+  const store = new TaskStore(join(directory, "tasks.sqlite"));
+
+  try {
+    for (const title of ["One", "Two", "Three"]) {
+      store.createTask({ title, repository: "monitor-agents" });
+    }
+    const claim = (now = new Date("2026-08-04T00:00:00.000Z")) =>
+      store.claimTask({
+        agentId: "agent-1",
+        repositories: ["monitor-agents"],
+        now,
+        leaseMs: 60_000,
+      });
+
+    store.updateBoardSettings({ codingLimit: 1 });
+    const first = claim();
+    assert.equal(first?.title, "One");
+    assert.equal(claim(), null);
+
+    store.updateBoardSettings({ codingLimit: 2 });
+    assert.equal(claim()?.title, "Two");
+    assert.equal(claim(), null);
+
+    // A finished task frees its slot.
+    store.updateTaskStatus(first!.id, "review-queue");
+    assert.equal(claim()?.title, "Three");
+
+    // An expired lease is re-queued before the limit is counted.
+    store.updateBoardSettings({ codingLimit: 1 });
+    assert.equal(
+      claim(new Date("2026-08-04T00:05:00.000Z"))?.status,
+      "in-progress",
+    );
   } finally {
     store.close();
     await rm(directory, { recursive: true, force: true });

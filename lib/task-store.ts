@@ -4,6 +4,7 @@ import { join, dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
 import type {
+  BoardSettings,
   KanbanStatus,
   KanbanStatusEvent,
   KanbanTask,
@@ -212,6 +213,13 @@ export class TaskStore {
 
       ${tasksTableSql("IF NOT EXISTS tasks")}
       ${tasksIndexSql}
+
+      CREATE TABLE IF NOT EXISTS board_settings (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        coding_limit INTEGER NOT NULL DEFAULT 2,
+        review_limit INTEGER NOT NULL DEFAULT 2
+      );
+      INSERT OR IGNORE INTO board_settings (id) VALUES (1);
     `);
     this.migrate();
   }
@@ -321,6 +329,25 @@ export class TaskStore {
 
   close() {
     this.database.close();
+  }
+
+  getBoardSettings(): BoardSettings {
+    const row = this.database
+      .prepare("SELECT coding_limit, review_limit FROM board_settings WHERE id = 1")
+      .get() as { coding_limit: number; review_limit: number };
+    return { codingLimit: row.coding_limit, reviewLimit: row.review_limit };
+  }
+
+  updateBoardSettings(input: Partial<BoardSettings>): BoardSettings {
+    this.database
+      .prepare(`
+        UPDATE board_settings
+        SET coding_limit = COALESCE(?, coding_limit),
+            review_limit = COALESCE(?, review_limit)
+        WHERE id = 1
+      `)
+      .run(input.codingLimit ?? null, input.reviewLimit ?? null);
+    return this.getBoardSettings();
   }
 
   createTask(input: CreateTaskInput, now = new Date()): KanbanTask {
@@ -497,6 +524,14 @@ export class TaskStore {
             AND lease_until <= ?
         `)
         .run("todo", nowIso, nowIso, nowIso);
+
+      const { running } = this.database
+        .prepare("SELECT COUNT(*) AS running FROM tasks WHERE status = 'in-progress'")
+        .get() as { running: number };
+      if (running >= this.getBoardSettings().codingLimit) {
+        this.database.exec("COMMIT");
+        return null;
+      }
 
       const candidate = this.database
         .prepare(`
