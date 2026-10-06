@@ -8,6 +8,7 @@ import {
   codexArgs,
   formatCompletionResult,
   latestCodexSlug,
+  openRouterEnv,
   maxResultLength,
   parseClaudeOutput,
   parseClaudeRunMetadata,
@@ -361,9 +362,33 @@ test("runnerModel maps each Kanban model to its provider and CLI name", () => {
     fallback: "gpt-6-luna",
   });
   assert.throws(() => runnerModel("codex-nova"), /Unknown requested model/);
-  // Selectable in the dialogs, but no runner provider exists for them yet.
-  assert.throws(() => runnerModel("deepseek"), /Unknown requested model/);
-  assert.throws(() => runnerModel("glm"), /Unknown requested model/);
+  assert.deepEqual(runnerModel("deepseek"), {
+    provider: "openrouter",
+    cli: "deepseek/deepseek-v4-pro",
+  });
+  assert.deepEqual(runnerModel("glm"), { provider: "openrouter", cli: "z-ai/glm-5.3" });
+});
+
+test("openRouterEnv points Claude Code at OpenRouter with the requested model", () => {
+  const env = openRouterEnv(
+    { PATH: "/usr/bin", OPENROUTER_API_KEY: " sk-or-test ", ANTHROPIC_API_KEY: "sk-ant" },
+    "z-ai/glm-5.3",
+  );
+  assert.deepEqual(env, {
+    PATH: "/usr/bin",
+    OPENROUTER_API_KEY: " sk-or-test ",
+    ANTHROPIC_BASE_URL: "https://openrouter.ai/api",
+    ANTHROPIC_AUTH_TOKEN: "sk-or-test",
+    ANTHROPIC_API_KEY: "",
+    ANTHROPIC_DEFAULT_OPUS_MODEL: "z-ai/glm-5.3",
+    ANTHROPIC_DEFAULT_SONNET_MODEL: "z-ai/glm-5.3",
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: "z-ai/glm-5.3",
+  });
+  assert.throws(() => openRouterEnv({}, "z-ai/glm-5.3"), /OPENROUTER_API_KEY is not set/);
+  assert.throws(
+    () => openRouterEnv({ OPENROUTER_API_KEY: " " }, "z-ai/glm-5.3"),
+    /OPENROUTER_API_KEY is not set/,
+  );
 });
 
 // `codex debug models` trimmed to the fields the runner reads.
