@@ -13,6 +13,7 @@ import {
   formatCompletionResult,
   formatFailure,
   latestCodexSlug,
+  openRouterEnv,
   maxResultLength,
   parseClaudeOutput,
   parseClaudeRunMetadata,
@@ -170,7 +171,11 @@ function agentCommand(task, worktree, prompt) {
     return { provider: "codex", cli, bin: config.codexBin, args: codexArgs(prompt, cli, task.requestedEffort, worktree) };
   }
   const { provider, cli } = model;
-  return { provider, cli, bin: config.claudeBin, args: claudeArgs(prompt, cli, task.requestedEffort) };
+  const args = claudeArgs(prompt, cli, task.requestedEffort);
+  if (provider === "openrouter") {
+    return { provider, cli, bin: config.claudeBin, args, env: openRouterEnv(process.env, cli) };
+  }
+  return { provider, cli, bin: config.claudeBin, args };
 }
 
 /**
@@ -188,9 +193,9 @@ async function runMetadata(task, provider, cli, stdout) {
   return { ...metadata, ...requestedEffort, ...(await readEffort(metadata.sessionId)) };
 }
 
-async function runAgent(bin, args, worktree, logPath, output) {
+async function runAgent(bin, args, env, worktree, logPath, output) {
   return new Promise((resolvePromise) => {
-    const child = spawn(bin, args, { cwd: worktree, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(bin, args, { cwd: worktree, env, stdio: ["ignore", "pipe", "pipe"] });
 
     // Token accounting parses every line, so a multi-byte character split
     // across two chunks must not corrupt the JSON it lands in.
@@ -220,7 +225,7 @@ async function runAgent(bin, args, worktree, logPath, output) {
   });
 }
 
-/** Codex runs carry no Claude attribution in the commit or pull request. */
+/** Only Claude runs carry Claude attribution in the commit or pull request. */
 async function publishChanges(worktree, branch, task, provider) {
   await git(worktree, ["add", "-A", "--", ...stagePathspecs(config.commitExcludes)]);
   const staged = await git(worktree, ["diff", "--cached", "--name-only"]);
@@ -230,7 +235,7 @@ async function publishChanges(worktree, branch, task, provider) {
   await git(worktree, [
     "commit",
     "-m",
-    provider === "codex"
+    provider !== "claude"
       ? `${task.title}\n\nQueued Kanban task ${task.id}.`
       : `${task.title}\n\nQueued Kanban task ${task.id}.\n\nCo-Authored-By: Claude <noreply@anthropic.com>`,
   ]);
@@ -248,7 +253,7 @@ async function publishChanges(worktree, branch, task, provider) {
         "--title",
         task.title,
         "--body",
-        provider === "codex"
+        provider !== "claude"
           ? `Queued Kanban task \`${task.id}\`.\n\n${task.description || "No description provided."}`
           : `Queued Kanban task \`${task.id}\`.\n\n${task.description || "No description provided."}\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)`,
       ],
@@ -274,7 +279,7 @@ async function runTask(task, directory) {
   try {
     // An unknown model must reach the fail report below, so this runs inside
     // the try and the heartbeat starts once the provider is known.
-    const { provider, cli, bin, args } = agentCommand(task, worktree, buildTaskPrompt(task));
+    const { provider, cli, bin, args, env } = agentCommand(task, worktree, buildTaskPrompt(task));
     heartbeat = setInterval(() => {
       runMetadata(task, provider, cli, output.stdout)
         .then((metadata) =>
@@ -291,7 +296,7 @@ async function runTask(task, directory) {
     await git(directory, ["worktree", "add", "-b", branch, worktree, base]);
     log(`Worktree ${worktree} on ${branch} from ${base}`);
 
-    const run = await runAgent(bin, args, worktree, logPath, output);
+    const run = await runAgent(bin, args, env, worktree, logPath, output);
     const { result, isError } = (provider === "codex" ? parseCodexOutput : parseClaudeOutput)(run.stdout);
     const metadata = await runMetadata(task, provider, cli, run.stdout);
 

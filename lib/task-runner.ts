@@ -64,11 +64,12 @@ export function buildTaskPrompt(task: KanbanTask): string {
     .join("\n");
 }
 
-export type RunnerProvider = "claude" | "codex";
+export type RunnerProvider = "claude" | "codex" | "openrouter";
 
 export type RunnerModel =
   | { provider: "claude"; cli: string | null }
-  | { provider: "codex"; family: string; fallback: string };
+  | { provider: "codex"; family: string; fallback: string }
+  | { provider: "openrouter"; cli: string };
 
 /**
  * Claude takes the CLI aliases, which follow new releases on their own. Codex
@@ -83,6 +84,8 @@ const runnerModels: Record<string, RunnerModel> = {
   "codex-astra": { provider: "codex", family: "astra", fallback: "gpt-6-astra" },
   "codex-sol": { provider: "codex", family: "sol", fallback: "gpt-6.1-sol" },
   "codex-luna": { provider: "codex", family: "luna", fallback: "gpt-6-luna" },
+  deepseek: { provider: "openrouter", cli: "deepseek/deepseek-v4-pro" },
+  glm: { provider: "openrouter", cli: "z-ai/glm-5.3" },
 };
 
 /**
@@ -94,6 +97,29 @@ export function runnerModel(requestedModel: string | null): RunnerModel {
   const model = runnerModels[requestedModel];
   if (!model) throw new Error(`Unknown requested model: ${requestedModel}`);
   return model;
+}
+
+/**
+ * OpenRouter speaks the Anthropic API, so Claude Code runs DeepSeek and GLM
+ * when pointed at it. Every Claude alias resolves to the requested model so
+ * background calls and subagents stay on it, and the empty ANTHROPIC_API_KEY
+ * keeps a stored Anthropic key from winning over the OpenRouter token.
+ */
+export function openRouterEnv(
+  env: Record<string, string | undefined>,
+  model: string,
+): Record<string, string | undefined> {
+  const key = env.OPENROUTER_API_KEY?.trim();
+  if (!key) throw new Error(`OPENROUTER_API_KEY is not set, so ${model} cannot run`);
+  return {
+    ...env,
+    ANTHROPIC_BASE_URL: "https://openrouter.ai/api",
+    ANTHROPIC_AUTH_TOKEN: key,
+    ANTHROPIC_API_KEY: "",
+    ANTHROPIC_DEFAULT_OPUS_MODEL: model,
+    ANTHROPIC_DEFAULT_SONNET_MODEL: model,
+    ANTHROPIC_DEFAULT_HAIKU_MODEL: model,
+  };
 }
 
 /**
