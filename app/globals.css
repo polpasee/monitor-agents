@@ -990,6 +990,27 @@ button:focus-visible,
   font-variant-numeric: tabular-nums;
 }
 
+.kanban-column__limit {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.kanban-column__limit select {
+  height: 21px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-soft);
+  font-size: 10px;
+}
+
 .kanban-column__tasks {
   display: grid;
   min-height: 0;

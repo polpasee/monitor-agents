@@ -9,6 +9,7 @@ import {
 import type { AgentRun, QuotaLimit } from "@/lib/telemetry";
 import {
   compareKanbanColumnTasks,
+  defaultKanbanLimit,
   findTaskAgent,
   formatBangkokTime,
   formatDuration,
@@ -16,6 +17,7 @@ import {
   formatTokenCount,
   isKanbanTaskEditable,
   kanbanEfforts,
+  kanbanLimitOptions,
   kanbanModels,
   kanbanPriorities,
   kanbanPriorityOf,
@@ -24,6 +26,7 @@ import {
   kanbanStatusSince,
   kanbanStatuses,
   kanbanTaskTokens,
+  type BoardSettings,
   type KanbanEffort,
   type KanbanModel,
   type KanbanPriority,
@@ -111,6 +114,7 @@ export function KanbanBoard({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
+  const [boardSettings, setBoardSettings] = useState<BoardSettings | null>(null);
   const repositories = useMemo(
     () => mergeRepositoryNames(kanbanRepositories(tasks), githubRepositories),
     [githubRepositories, tasks],
@@ -212,6 +216,47 @@ export function KanbanBoard({
       stopped = true;
     };
   }, []);
+
+  useEffect(() => {
+    let stopped = false;
+
+    async function loadBoardSettings() {
+      try {
+        const response = await fetch("/api/board-settings", {
+          cache: "no-store",
+        });
+        if (!response.ok) {
+          throw new Error(`Board settings request failed with ${response.status}`);
+        }
+        const settings = (await response.json()) as BoardSettings;
+        if (!stopped) setBoardSettings(settings);
+      } catch {
+        if (!stopped) setError("Unable to load the board limits.");
+      }
+    }
+
+    void loadBoardSettings();
+    return () => {
+      stopped = true;
+    };
+  }, []);
+
+  async function updateBoardLimit(key: keyof BoardSettings, limit: number) {
+    try {
+      const response = await fetch("/api/board-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [key]: limit }),
+      });
+      if (!response.ok) {
+        throw new Error(`Board settings update failed with ${response.status}`);
+      }
+      setBoardSettings((await response.json()) as BoardSettings);
+      setError(null);
+    } catch {
+      setError("Unable to update the board limit.");
+    }
+  }
 
   async function addTask(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -895,6 +940,12 @@ export function KanbanBoard({
           const columnTasks = visibleTasks.filter(
             (task) => task.status === status.id,
           );
+          const limitKey =
+            status.id === "in-progress"
+              ? "codingLimit"
+              : status.id === "review"
+                ? "reviewLimit"
+                : null;
 
           return (
             <section
@@ -910,6 +961,27 @@ export function KanbanBoard({
             >
               <header className="kanban-column__header">
                 <h3>{status.label}</h3>
+                {limitKey && (
+                  <label className="kanban-column__limit">
+                    Limit
+                    <select
+                      disabled={!boardSettings}
+                      onChange={(event) =>
+                        void updateBoardLimit(
+                          limitKey,
+                          Number(event.target.value),
+                        )
+                      }
+                      value={boardSettings?.[limitKey] ?? defaultKanbanLimit}
+                    >
+                      {kanbanLimitOptions.map((limit) => (
+                        <option key={limit} value={limit}>
+                          {limit}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <span>{columnTasks.length}</span>
               </header>
               <div className="kanban-column__tasks">
