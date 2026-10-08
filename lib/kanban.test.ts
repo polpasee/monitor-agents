@@ -6,6 +6,7 @@ import {
   kanbanTaskTokens,
   formatBangkokTime,
   formatDuration,
+  formatModelBadge,
   formatStatusAge,
   formatTokenCount,
   isKanbanTaskEditable,
@@ -490,6 +491,17 @@ test("formatStatusAge counts minutes, hours and days within a week", () => {
   assert.equal(at(6 * day + 23 * hour), "Last 6 Days");
   assert.equal(at(7 * day), "Sep 12, 14:30");
   assert.equal(at(-5 * minute), "Last 1 Minute");
+});
+
+test("formatModelBadge shortens requested and reported models", () => {
+  assert.equal(formatModelBadge("claude-opus", "medium"), "opus:med");
+  assert.equal(formatModelBadge("claude-opus-5-5", "max"), "opus:max");
+  assert.equal(formatModelBadge("gpt-6.1-sol", "xhigh"), "sol:xhigh");
+  assert.equal(formatModelBadge("z-ai/glm-5.3", null), "glm");
+  assert.equal(formatModelBadge("deepseek/deepseek-v4-pro", "high"), "deepseek:high");
+  assert.equal(formatModelBadge(null, "low"), "low");
+  assert.equal(formatModelBadge("mystery-model", null), "mystery-model");
+  assert.equal(formatModelBadge(null, null), null);
 });
 
 test("formatTokenCount keeps the badge short", () => {

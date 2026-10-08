@@ -375,6 +375,23 @@ export function formatTokenCount(tokens: number): string {
   return `${(tokens / 1_000_000).toFixed(2)}M`;
 }
 
+/** "claude-opus" → "opus"; also matched inside reported ids like "gpt-6.1-sol". */
+const shortModelNames = kanbanModels
+  .filter((option) => option.id !== "inherit")
+  .map((option) => option.id.split("-").at(-1)!);
+
+/** A requested or reported model and effort as "opus:med"; null when both are unknown. */
+export function formatModelBadge(
+  model: string | null,
+  effort: string | null,
+): string | null {
+  const tokens = model?.toLowerCase().split(/[-/._]/) ?? [];
+  const shortModel =
+    model && (shortModelNames.find((name) => tokens.includes(name)) ?? model);
+  const shortEffort = effort === "medium" ? "med" : effort?.toLowerCase();
+  return [shortModel, shortEffort].filter(Boolean).join(":") || null;
+}
+
 /**
  * Run details are optional everywhere: an agent reports what it knows, and a
  * key it leaves out — or sends as `null` — keeps the stored value. Anything

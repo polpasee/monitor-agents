@@ -13,6 +13,7 @@ import {
   findTaskAgent,
   formatBangkokTime,
   formatDuration,
+  formatModelBadge,
   formatStatusAge,
   formatTokenCount,
   isKanbanTaskEditable,
@@ -60,21 +61,16 @@ function requestedReviewEffortOf(task: KanbanTask): KanbanEffort {
   return (task.requestedReviewEffort as KanbanEffort | null) ?? "inherit";
 }
 
-/** The runner-reported model, else the requested one; null for an unrun Inherit task. */
-function cardModelOf(task: KanbanTask): string | null {
-  if (task.model) return task.model;
-  return (
-    kanbanModels.find((option) => option.id === task.requestedModel)?.label ??
-    null
+/** The runner-reported model and effort, else the requested ones; null for an unrun Inherit task. */
+function codingBadgeOf(task: KanbanTask): string | null {
+  return formatModelBadge(
+    task.model ?? task.requestedModel,
+    task.effort ?? task.requestedEffort,
   );
 }
 
-function cardEffortOf(task: KanbanTask): string | null {
-  if (task.effort) return task.effort;
-  return (
-    kanbanEfforts.find((option) => option.id === task.requestedEffort)
-      ?.label ?? null
-  );
+function reviewBadgeOf(task: KanbanTask): string | null {
+  return formatModelBadge(task.requestedReviewModel, task.requestedReviewEffort);
 }
 
 const boardLimitError = "Unable to update the board limit.";
@@ -1091,8 +1087,8 @@ export function KanbanBoard({
                   const cardPriority = kanbanPriorityOf(task.priority);
                   const usedTokens = kanbanTaskTokens(task, agents);
                   const showsTokens = usedTokens !== null;
-                  const cardModel = cardModelOf(task);
-                  const cardEffort = cardEffortOf(task);
+                  const codingBadge = codingBadgeOf(task);
+                  const reviewBadge = reviewBadgeOf(task);
                   const showsPullRequest =
                     showsCompletion(task) &&
                     typeof task.pullRequestNumber === "number";
@@ -1129,8 +1125,8 @@ export function KanbanBoard({
                           {task.title}
                         </span>
                         {(showsTokens ||
-                          cardModel ||
-                          cardEffort ||
+                          codingBadge ||
+                          reviewBadge ||
                           showsPullRequest) && (
                           <span className="kanban-card__badges">
                             {usedTokens !== null && (
@@ -1141,26 +1137,24 @@ export function KanbanBoard({
                                 {formatTokenCount(usedTokens)}
                               </span>
                             )}
-                            {cardModel && (
+                            {codingBadge && (
                               <span
                                 className="kanban-card__model"
                                 title={
-                                  task.model ? "Model" : "Requested model"
+                                  task.model
+                                    ? "Coding model / effort"
+                                    : "Requested coding model / effort"
                                 }
                               >
-                                {cardModel}
+                                Coding: {codingBadge}
                               </span>
                             )}
-                            {cardEffort && (
+                            {reviewBadge && (
                               <span
-                                className="kanban-card__effort"
-                                title={
-                                  task.effort
-                                    ? "Effort / Thinking"
-                                    : "Requested effort / thinking"
-                                }
+                                className="kanban-card__model"
+                                title="Requested review model / effort"
                               >
-                                {cardEffort}
+                                Review: {reviewBadge}
                               </span>
                             )}
                             {showsPullRequest && (
