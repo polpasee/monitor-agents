@@ -1090,7 +1090,6 @@ button:focus-visible,
 
 .kanban-card__tokens,
 .kanban-card__model,
-.kanban-card__effort,
 .kanban-card__pr,
 .kanban-card__priority {
   flex: 0 0 auto;
@@ -1106,7 +1105,6 @@ button:focus-visible,
 
 .kanban-card__badges .kanban-card__tokens,
 .kanban-card__badges .kanban-card__model,
-.kanban-card__badges .kanban-card__effort,
 .kanban-card__badges .kanban-card__pr,
 .kanban-card__priority {
   margin: 0;
