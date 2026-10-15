@@ -80,6 +80,17 @@ export interface KanbanStatusEvent {
   at: string;
 }
 
+/** One Standard Workflow step an agent ran for a task; a step may repeat. */
+export interface KanbanWorkflowStep {
+  /** 1–6, as numbered in AGENTS.md. */
+  step: number;
+  model: string | null;
+  effort: string | null;
+  usedTokens: number | null;
+  startedAt: string | null;
+  endedAt: string | null;
+}
+
 export interface KanbanTask {
   id: string;
   title: string;
@@ -105,6 +116,7 @@ export interface KanbanTask {
   pullRequestNumber: number | null;
   summary: string | null;
   statusHistory: KanbanStatusEvent[];
+  workflowSteps: KanbanWorkflowStep[];
   createdAt: string;
   updatedAt: string;
 }
@@ -116,6 +128,8 @@ export interface TaskRunMetadata {
   model?: string;
   effort?: string;
   usedTokens?: number;
+  /** The reporter's full list; it replaces the stored one. */
+  workflowSteps?: KanbanWorkflowStep[];
 }
 
 export type KanbanTaskPatch =
@@ -392,6 +406,156 @@ export function formatModelBadge(
   return [shortModel, shortEffort].filter(Boolean).join(":") || null;
 }
 
+const maxWorkflowSteps = 50;
+
+/** The Standard Workflow steps of AGENTS.md, numbered from 1. */
+const workflowStepLabels = [
+  "Explore",
+  "Plan",
+  "Implement",
+  "Test & Verification",
+  "Merge and Clean",
+  "Summarize",
+];
+
+/** A missing key or null means "not known"; `false` marks a malformed value. */
+function optionalText(value: unknown): string | null | false {
+  return value === undefined || value === null
+    ? null
+    : (requiredString(value, 200) ?? false);
+}
+
+function optionalTimestamp(value: unknown): string | null | false {
+  if (value === undefined || value === null) return null;
+  return typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}T/u.test(value) &&
+    !Number.isNaN(Date.parse(value))
+    ? value
+    : false;
+}
+
+function parseWorkflowStep(value: unknown): KanbanWorkflowStep | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const entry = value as Record<string, unknown>;
+  const { step } = entry;
+  const usedTokens = entry.usedTokens ?? null;
+  const model = optionalText(entry.model);
+  const effort = optionalText(entry.effort);
+  const startedAt = optionalTimestamp(entry.startedAt);
+  const endedAt = optionalTimestamp(entry.endedAt);
+  if (
+    typeof step !== "number" ||
+    !Number.isInteger(step) ||
+    step < 1 ||
+    step > 6 ||
+    model === false ||
+    effort === false ||
+    startedAt === false ||
+    endedAt === false ||
+    (usedTokens !== null &&
+      (typeof usedTokens !== "number" ||
+        !Number.isInteger(usedTokens) ||
+        usedTokens < 0 ||
+        usedTokens > 1_000_000_000_000))
+  ) {
+    return null;
+  }
+  return { step, model, effort, usedTokens, startedAt, endedAt };
+}
+
+const stepEffortLabels: Record<string, string> = {
+  xhigh: "XHigh",
+  high: "High",
+  medium: "Med",
+  low: "Low",
+};
+
+/**
+ * A reported model and effort as "OPUS:Med". The model is shown by family:
+ * Codex ids (and the Astra, Sol and Luna names) read "CODEX", a known name
+ * inside the id ("claude-opus-5", "glm-5.3") reads as that name, and any other
+ * id by its first segment. An effort of "inherit", or none, is left out.
+ */
+export function formatStepModel(
+  model: string | null,
+  effort: string | null,
+): string | null {
+  if (!model) return null;
+  const tokens = model.toLowerCase().split(/[-/._]/);
+  const known = kanbanModels.find(
+    (option) =>
+      option.id !== "inherit" && tokens.includes(option.id.split("-").at(-1)!),
+  );
+  const family =
+    tokens[0] === "codex" || known?.id.startsWith("codex-")
+      ? "codex"
+      : known
+        ? known.id.split("-").at(-1)!
+        : tokens[0];
+  const level = effort?.toLowerCase();
+  return [
+    (family || model).toUpperCase(),
+    level && level !== "inherit" ? (stepEffortLabels[level] ?? effort) : null,
+  ]
+    .filter(Boolean)
+    .join(":");
+}
+
+/** Always in millions, "0.51 M"; null while the step reported no tokens. */
+export function formatStepTokens(tokens: number | null): string {
+  return tokens === null ? "—" : `${(tokens / 1_000_000).toFixed(2)} M`;
+}
+
+export interface KanbanWorkflowStepRow {
+  step: number;
+  label: string;
+  /** Display form, e.g. "CODEX:High"; null when the step reported no model. */
+  model: string | null;
+  tokens: number | null;
+  durationMs: number | null;
+}
+
+/**
+ * The steps an agent reported, one row each, a repeated step staying a row of
+ * its own. Rows follow `startedAt` when every step has one, otherwise the
+ * order reported. A step that has started but not ended has no duration yet.
+ */
+export function kanbanWorkflowSteps(task: Pick<KanbanTask, "workflowSteps">): {
+  rows: KanbanWorkflowStepRow[];
+  totalTokens: number | null;
+} {
+  // A board can be served a task from an older API that never sent steps.
+  const steps = task.workflowSteps ?? [];
+  const startedAt = (step: KanbanWorkflowStep) =>
+    step.startedAt === null ? NaN : Date.parse(step.startedAt);
+  const ordered = steps.every((step) => !Number.isNaN(startedAt(step)))
+    ? steps.toSorted((left, right) => startedAt(left) - startedAt(right))
+    : steps;
+
+  const rows = ordered.map((step) => {
+    const duration =
+      step.startedAt !== null && step.endedAt !== null
+        ? Date.parse(step.endedAt) - Date.parse(step.startedAt)
+        : NaN;
+    return {
+      step: step.step,
+      label: workflowStepLabels[step.step - 1] ?? "",
+      model: formatStepModel(step.model, step.effort),
+      tokens: step.usedTokens,
+      durationMs: duration >= 0 ? duration : null,
+    };
+  });
+  const counted = rows.flatMap((row) => (row.tokens === null ? [] : [row.tokens]));
+  return {
+    rows,
+    totalTokens: counted.length
+      ? counted.reduce((sum, tokens) => sum + tokens, 0)
+      : null,
+  };
+}
+
 /**
  * Run details are optional everywhere: an agent reports what it knows, and a
  * key it leaves out — or sends as `null` — keeps the stored value. Anything
@@ -420,6 +584,15 @@ export function parseTaskRunMetadata(
       return null;
     }
     metadata.usedTokens = tokens;
+  }
+
+  // The reporter sends its whole list every time, so it replaces the stored one.
+  if (body.workflowSteps !== undefined && body.workflowSteps !== null) {
+    const entries = body.workflowSteps;
+    if (!Array.isArray(entries) || entries.length > maxWorkflowSteps) return null;
+    const steps = entries.map(parseWorkflowStep);
+    if (steps.includes(null)) return null;
+    metadata.workflowSteps = steps as KanbanWorkflowStep[];
   }
 
   return metadata;

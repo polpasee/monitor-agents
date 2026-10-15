@@ -8,6 +8,8 @@ import {
   formatDuration,
   formatModelBadge,
   formatStatusAge,
+  formatStepModel,
+  formatStepTokens,
   formatTokenCount,
   isKanbanTaskEditable,
   isKanbanStatus,
@@ -15,6 +17,7 @@ import {
   kanbanRepositories,
   kanbanStatusDurations,
   kanbanStatusSince,
+  kanbanWorkflowSteps,
   compareKanbanColumnTasks,
   kanbanEfforts,
   kanbanModels,
@@ -27,6 +30,7 @@ import {
   parseTaskRunMetadata,
   type KanbanStatus,
   type KanbanTask,
+  type KanbanWorkflowStep,
 } from "./kanban.ts";
 import type { AgentRun } from "./telemetry.ts";
 
@@ -56,6 +60,7 @@ const tasks: KanbanTask[] = [
     pullRequestNumber: null,
     summary: null,
     statusHistory: [],
+    workflowSteps: [],
     createdAt: "2026-08-04T00:00:00.000Z",
     updatedAt: "2026-08-04T00:00:00.000Z",
   },
@@ -84,6 +89,7 @@ const tasks: KanbanTask[] = [
     pullRequestNumber: null,
     summary: null,
     statusHistory: [],
+    workflowSteps: [],
     createdAt: "2026-08-04T01:00:00.000Z",
     updatedAt: "2026-08-04T01:00:00.000Z",
   },
@@ -376,6 +382,7 @@ const task: KanbanTask = {
     { status: "in-progress", at: "2026-08-04T00:02:30.000Z" },
     { status: "review", at: "2026-08-04T00:04:30.000Z" },
   ],
+  workflowSteps: [],
   createdAt: "2026-08-04T00:00:00.000Z",
   updatedAt: "2026-08-04T00:04:30.000Z",
 };
@@ -536,6 +543,224 @@ test("parseTaskRunMetadata accepts only the fields an agent reports", () => {
   assert.equal(parseTaskRunMetadata({ usedTokens: "4200" }), null);
   assert.equal(parseTaskRunMetadata({ sessionId: "" }), null);
   assert.equal(parseTaskRunMetadata({ model: "m".repeat(201) }), null);
+});
+
+test("formatStepModel shows the model family and a short effort", () => {
+  assert.equal(formatStepModel("codex-astra", "high"), "CODEX:High");
+  assert.equal(formatStepModel("codex", "high"), "CODEX:High");
+  assert.equal(formatStepModel("gpt-6.1-sol", "low"), "CODEX:Low");
+  assert.equal(formatStepModel("claude-opus", "medium"), "OPUS:Med");
+  assert.equal(formatStepModel("claude-opus-5", "xhigh"), "OPUS:XHigh");
+  assert.equal(formatStepModel("Claude-Sonnet-4-5-20250929", "low"), "SONNET:Low");
+  assert.equal(formatStepModel("deepseek", "high"), "DEEPSEEK:High");
+  assert.equal(formatStepModel("z-ai/glm-5.3", "high"), "GLM:High");
+  // An id nothing names is shown by its first segment.
+  assert.equal(formatStepModel("gemini-2.5-pro", "high"), "GEMINI:High");
+  // Inherit or no effort leaves out the colon; no model leaves nothing to show.
+  assert.equal(formatStepModel("claude-opus", "inherit"), "OPUS");
+  assert.equal(formatStepModel("claude-opus", null), "OPUS");
+  assert.equal(formatStepModel("claude-opus", "max"), "OPUS:max");
+  assert.equal(formatStepModel(null, "high"), null);
+  assert.equal(formatStepModel("-", null), "-");
+});
+
+test("formatStepTokens always counts in millions", () => {
+  assert.equal(formatStepTokens(510_000), "0.51 M");
+  assert.equal(formatStepTokens(3_100_000), "3.10 M");
+  assert.equal(formatStepTokens(9_840_000), "9.84 M");
+  assert.equal(formatStepTokens(0), "0.00 M");
+  assert.equal(formatStepTokens(4_200), "0.00 M");
+  assert.equal(formatStepTokens(1_234_567_890), "1234.57 M");
+  assert.equal(formatStepTokens(null), "—");
+});
+
+const workflowStep = (
+  overrides: Partial<KanbanWorkflowStep>,
+): KanbanWorkflowStep => ({
+  step: 1,
+  model: null,
+  effort: null,
+  usedTokens: null,
+  startedAt: null,
+  endedAt: null,
+  ...overrides,
+});
+
+test("kanbanWorkflowSteps lists each reported step with model, tokens and time", () => {
+  const view = kanbanWorkflowSteps({
+    workflowSteps: [
+      workflowStep({
+        step: 1,
+        model: "codex-astra",
+        effort: "high",
+        usedTokens: 510_000,
+        startedAt: "2026-10-15T10:00:00.000Z",
+        endedAt: "2026-10-15T10:04:12.000Z",
+      }),
+      workflowStep({
+        step: 4,
+        model: "claude-opus-5",
+        effort: "medium",
+        usedTokens: 3_100_000,
+        startedAt: "2026-10-15T10:10:00.000Z",
+        endedAt: "2026-10-15T10:19:40.000Z",
+      }),
+      workflowStep({
+        step: 4,
+        model: "claude-opus-5",
+        effort: "medium",
+        usedTokens: 1_000_000,
+        startedAt: "2026-10-15T10:20:00.000Z",
+        endedAt: "2026-10-15T10:23:00.000Z",
+      }),
+    ],
+  });
+
+  assert.deepEqual(view, {
+    rows: [
+      { step: 1, label: "Explore", model: "CODEX:High", tokens: 510_000, durationMs: 252_000 },
+      { step: 4, label: "Test & Verification", model: "OPUS:Med", tokens: 3_100_000, durationMs: 580_000 },
+      { step: 4, label: "Test & Verification", model: "OPUS:Med", tokens: 1_000_000, durationMs: 180_000 },
+    ],
+    totalTokens: 4_610_000,
+  });
+});
+
+test("kanbanWorkflowSteps sorts by start time, else keeps the reported order", () => {
+  const steps = [
+    workflowStep({ step: 3, startedAt: "2026-10-15T10:30:00.000Z" }),
+    workflowStep({ step: 2, startedAt: "2026-10-15T10:10:00.000Z" }),
+    workflowStep({ step: 1, startedAt: "2026-10-15T10:00:00.000Z" }),
+  ];
+  assert.deepEqual(
+    kanbanWorkflowSteps({ workflowSteps: steps }).rows.map((row) => row.step),
+    [1, 2, 3],
+  );
+  // One step without a start time makes the times unusable for ordering.
+  assert.deepEqual(
+    kanbanWorkflowSteps({
+      workflowSteps: [steps[0], workflowStep({ step: 1 }), steps[1]],
+    }).rows.map((row) => row.step),
+    [3, 1, 2],
+  );
+});
+
+test("kanbanWorkflowSteps leaves unknown times and tokens as null", () => {
+  const view = kanbanWorkflowSteps({
+    workflowSteps: [
+      // Still running: started, not ended.
+      workflowStep({
+        step: 3,
+        model: "claude-opus",
+        usedTokens: 700_000,
+        startedAt: "2026-10-15T10:00:00.000Z",
+      }),
+      // Ended before it started.
+      workflowStep({
+        step: 2,
+        startedAt: "2026-10-15T10:05:00.000Z",
+        endedAt: "2026-10-15T10:00:00.000Z",
+      }),
+      workflowStep({ step: 6 }),
+    ],
+  });
+
+  assert.deepEqual(
+    view.rows.map((row) => row.durationMs),
+    [null, null, null],
+  );
+  assert.equal(view.rows[0].model, "OPUS");
+  assert.equal(view.rows[2].model, null);
+  assert.equal(view.rows[2].label, "Summarize");
+  assert.equal(view.totalTokens, 700_000);
+
+  assert.deepEqual(
+    kanbanWorkflowSteps({ workflowSteps: [workflowStep({ step: 5 })] }),
+    {
+      rows: [
+        { step: 5, label: "Merge and Clean", model: null, tokens: null, durationMs: null },
+      ],
+      totalTokens: null,
+    },
+  );
+});
+
+test("kanbanWorkflowSteps has no rows or total for a task without steps", () => {
+  assert.deepEqual(kanbanWorkflowSteps({ workflowSteps: [] }), {
+    rows: [],
+    totalTokens: null,
+  });
+  assert.deepEqual(
+    kanbanWorkflowSteps({
+      workflowSteps: undefined as unknown as KanbanTask["workflowSteps"],
+    }),
+    { rows: [], totalTokens: null },
+  );
+});
+
+test("parseTaskRunMetadata accepts the workflow steps an agent reports", () => {
+  const step = {
+    step: 4,
+    model: "claude-opus-5",
+    effort: "medium",
+    usedTokens: 3_100_000,
+    startedAt: "2026-10-15T10:00:00.000Z",
+    endedAt: "2026-10-15T10:09:40.000Z",
+  };
+  assert.deepEqual(parseTaskRunMetadata({ workflowSteps: [step, step] }), {
+    workflowSteps: [step, step],
+  });
+  // Unreported fields become null; a missing or null list keeps what is stored.
+  assert.deepEqual(parseTaskRunMetadata({ workflowSteps: [{ step: 1 }] }), {
+    workflowSteps: [
+      {
+        step: 1,
+        model: null,
+        effort: null,
+        usedTokens: null,
+        startedAt: null,
+        endedAt: null,
+      },
+    ],
+  });
+  assert.deepEqual(parseTaskRunMetadata({ workflowSteps: [] }), {
+    workflowSteps: [],
+  });
+  assert.deepEqual(parseTaskRunMetadata({ workflowSteps: null }), {});
+});
+
+test("parseTaskRunMetadata rejects malformed workflow steps", () => {
+  const rejects = (workflowSteps: unknown) =>
+    assert.equal(parseTaskRunMetadata({ workflowSteps }), null);
+
+  rejects("explore");
+  rejects({ step: 1 });
+  rejects(Array.from({ length: 51 }, () => ({ step: 1 })));
+  rejects([null]);
+  rejects([[1]]);
+  rejects([{}]);
+  rejects([{ step: 0 }]);
+  rejects([{ step: 7 }]);
+  rejects([{ step: 1.5 }]);
+  rejects([{ step: "1" }]);
+  rejects([{ step: 1, model: "" }]);
+  rejects([{ step: 1, model: 5 }]);
+  rejects([{ step: 1, effort: "e".repeat(201) }]);
+  rejects([{ step: 1, usedTokens: -1 }]);
+  rejects([{ step: 1, usedTokens: 1.5 }]);
+  rejects([{ step: 1, usedTokens: Infinity }]);
+  rejects([{ step: 1, usedTokens: "10" }]);
+  rejects([{ step: 1, startedAt: "yesterday" }]);
+  rejects([{ step: 1, startedAt: "2026-13-45T00:00:00Z" }]);
+  rejects([{ step: 1, endedAt: 1_760_000_000_000 }]);
+  // One bad entry rejects the whole report.
+  rejects([{ step: 1 }, { step: 9 }]);
+  assert.notEqual(
+    parseTaskRunMetadata({
+      workflowSteps: Array.from({ length: 50 }, () => ({ step: 1 })),
+    }),
+    null,
+  );
 });
 
 function agent(

@@ -15,6 +15,7 @@ import {
   formatDuration,
   formatModelBadge,
   formatStatusAge,
+  formatStepTokens,
   formatTokenCount,
   isKanbanTaskEditable,
   kanbanEfforts,
@@ -27,6 +28,7 @@ import {
   kanbanStatusSince,
   kanbanStatuses,
   kanbanTaskTokens,
+  kanbanWorkflowSteps,
   type BoardSettings,
   type KanbanEffort,
   type KanbanModel,
@@ -974,6 +976,37 @@ export function KanbanBoard({
                         <dd>{formatDuration(entry.milliseconds)}</dd>
                       </div>
                     ))}
+                  </dl>
+                )}
+                <h4>Workflow Steps</h4>
+                {kanbanWorkflowSteps(selectedTask).rows.length === 0 ? (
+                  <p className="kanban-run-details__empty">
+                    No workflow steps reported yet
+                  </p>
+                ) : (
+                  <dl>
+                    {kanbanWorkflowSteps(selectedTask).rows.map((row, index) => (
+                      <div key={index}>
+                        <dt>
+                          Step {row.step} {row.label}
+                        </dt>
+                        <dd>
+                          {`${row.model ?? "—"}, Token: ${formatStepTokens(row.tokens)}, Time: ${
+                            row.durationMs === null
+                              ? "—"
+                              : formatDuration(row.durationMs)
+                          }`}
+                        </dd>
+                      </div>
+                    ))}
+                    <div>
+                      <dt>Total Token</dt>
+                      <dd>
+                        {formatStepTokens(
+                          kanbanWorkflowSteps(selectedTask).totalTokens,
+                        )}
+                      </dd>
+                    </div>
                   </dl>
                 )}
               </section>

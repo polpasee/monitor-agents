@@ -97,10 +97,14 @@ export function KanbanGuide() {
           <li>
             Heartbeat while working, at least every half lease, to renew it.{" "}
             <code>usedTokens</code>{" "}is this attempt&apos;s running total, not
-            an increment.
+            an increment. The optional <code>workflowSteps</code>{" "}lists the
+            Standard Workflow steps (1–6) run so far, one entry per run of a
+            step; send the whole list each time, it replaces the stored one.
+            Heartbeat, complete and fail all accept it, and the task dialog
+            shows it under Workflow Steps.
             <pre>
               <code>{`curl -sS -X POST "${base}/api/agent/tasks/TASK_ID/heartbeat" ${json} \\
-  -d '{"agentId":"codex-worker-1","leaseSeconds":60,"usedTokens":12000}'`}</code>
+  -d '{"agentId":"codex-worker-1","leaseSeconds":60,"usedTokens":12000,"workflowSteps":[{"step":1,"model":"codex-astra","effort":"high","usedTokens":12000,"startedAt":"2026-10-15T10:00:00Z","endedAt":"2026-10-15T10:04:12Z"}]}'`}</code>
             </pre>
           </li>
           <li>
