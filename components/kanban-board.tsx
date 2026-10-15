@@ -984,30 +984,81 @@ export function KanbanBoard({
                     No workflow steps reported yet
                   </p>
                 ) : (
-                  <dl>
-                    {kanbanWorkflowSteps(selectedTask).rows.map((row, index) => (
-                      <div key={index}>
-                        <dt>
-                          Step {row.step} {row.label}
-                        </dt>
-                        <dd>
-                          {`${row.model ?? "—"}, Token: ${formatStepTokens(row.tokens)}, Time: ${
-                            row.durationMs === null
-                              ? "—"
-                              : formatDuration(row.durationMs)
-                          }`}
-                        </dd>
-                      </div>
-                    ))}
-                    <div>
-                      <dt>Total Token</dt>
-                      <dd>
-                        {formatStepTokens(
-                          kanbanWorkflowSteps(selectedTask).totalTokens,
+                  <div className="kanban-run-details__table-wrap">
+                    <table className="kanban-run-details__table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Step</th>
+                          <th scope="col">Model</th>
+                          <th scope="col">Input</th>
+                          <th scope="col">Cache write</th>
+                          <th scope="col">Cache read</th>
+                          <th scope="col">Output</th>
+                          <th scope="col">Total</th>
+                          <th scope="col">Time</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {kanbanWorkflowSteps(selectedTask).rows.map(
+                          (row, index) => (
+                            <tr key={index}>
+                              <th scope="row">
+                                {row.step} {row.label}
+                              </th>
+                              <td>{row.model ?? "—"}</td>
+                              <td>{formatStepTokens(row.inputTokens)}</td>
+                              <td>{formatStepTokens(row.cacheWriteTokens)}</td>
+                              <td>{formatStepTokens(row.cacheReadTokens)}</td>
+                              <td>{formatStepTokens(row.outputTokens)}</td>
+                              <td>{formatStepTokens(row.tokens)}</td>
+                              <td>
+                                {row.durationMs === null
+                                  ? "—"
+                                  : formatDuration(row.durationMs)}
+                              </td>
+                            </tr>
+                          ),
                         )}
-                      </dd>
-                    </div>
-                  </dl>
+                      </tbody>
+                      <tfoot>
+                        <tr>
+                          <th scope="row" colSpan={2}>
+                            Total
+                          </th>
+                          <td>
+                            {formatStepTokens(
+                              kanbanWorkflowSteps(selectedTask).totals
+                                .inputTokens,
+                            )}
+                          </td>
+                          <td>
+                            {formatStepTokens(
+                              kanbanWorkflowSteps(selectedTask).totals
+                                .cacheWriteTokens,
+                            )}
+                          </td>
+                          <td>
+                            {formatStepTokens(
+                              kanbanWorkflowSteps(selectedTask).totals
+                                .cacheReadTokens,
+                            )}
+                          </td>
+                          <td>
+                            {formatStepTokens(
+                              kanbanWorkflowSteps(selectedTask).totals
+                                .outputTokens,
+                            )}
+                          </td>
+                          <td>
+                            {formatStepTokens(
+                              kanbanWorkflowSteps(selectedTask).totalTokens,
+                            )}
+                          </td>
+                          <td />
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
                 )}
               </section>
             )}
