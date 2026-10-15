@@ -619,8 +619,9 @@ test("agyModelId puts the effort into the Gemini Flash id only", () => {
   assert.equal(agyModelId({ cli: "claude-opus-4-6-thinking" }, "low"), "claude-opus-4-6-thinking");
 });
 
-test("agyArgs runs print mode with stream-json and the card's effort", () => {
-  assert.deepEqual(agyArgs("do it", "claude-opus-4-6-thinking", "high"), [
+test("agyArgs runs print mode with stream-json and never passes --effort", () => {
+  // `agy` rejects --effort for every model it lists, so the id alone carries the level.
+  assert.deepEqual(agyArgs("do it", "claude-opus-4-6-thinking"), [
     "-p",
     "do it",
     "--model",
@@ -628,12 +629,8 @@ test("agyArgs runs print mode with stream-json and the card's effort", () => {
     "--output-format",
     "stream-json",
     "--dangerously-skip-permissions",
-    "--effort",
-    "high",
   ]);
-  assert.equal(agyArgs("do it", "claude-opus-4-6-thinking", null).includes("--effort"), false);
-  // Gemini Flash already carries its effort in the id.
-  assert.equal(agyArgs("do it", "gemini-3.8-flash-low", "low", true).includes("--effort"), false);
+  assert.equal(agyArgs("do it", "gemini-3.8-flash-low").includes("--effort"), false);
 });
 
 const agyStream = [

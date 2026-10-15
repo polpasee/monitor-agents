@@ -6,6 +6,7 @@ import { hostname, homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 
+import { isEffortFixed } from "../lib/kanban.ts";
 import {
   buildTaskPrompt,
   agyArgs,
@@ -181,7 +182,7 @@ function agentCommand(task, worktree, prompt) {
       provider: "agy",
       cli,
       bin: config.agyBin,
-      args: agyArgs(prompt, cli, task.requestedEffort, model.effortInModel),
+      args: agyArgs(prompt, cli),
     };
   }
   const { provider, cli } = model;
@@ -204,7 +205,12 @@ async function runMetadata(task, provider, cli, stdout) {
     return { ...parseCodexRunMetadata(stdout), model: cli, ...requestedEffort };
   }
   if (provider === "agy") {
-    return { ...parseAgyRunMetadata(stdout), model: `agy/${cli}`, ...requestedEffort };
+    // Rows saved before these models stopped taking an effort may still carry one that was never applied.
+    return {
+      ...parseAgyRunMetadata(stdout),
+      model: `agy/${cli}`,
+      ...(isEffortFixed(task.requestedModel) ? {} : requestedEffort),
+    };
   }
   const metadata = parseClaudeRunMetadata(stdout);
   return { ...metadata, ...requestedEffort, ...(await readEffort(metadata.sessionId)) };

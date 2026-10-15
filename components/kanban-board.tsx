@@ -16,6 +16,7 @@ import {
   formatModelBadge,
   formatStatusAge,
   formatReviewScore,
+  isEffortFixed,
   formatStepTokens,
   formatTokenCount,
   isKanbanTaskEditable,
@@ -644,10 +645,16 @@ export function KanbanBoard({
             <label>
               <span>Coding effort / thinking</span>
               <select
+                disabled={isEffortFixed(model)}
                 onChange={(event) =>
                   setEffort(event.target.value as KanbanEffort)
                 }
-                value={effort}
+                title={
+                  isEffortFixed(model)
+                    ? "This model's effort is not adjustable"
+                    : undefined
+                }
+                value={isEffortFixed(model) ? "inherit" : effort}
               >
                 {kanbanEfforts.map((option) => (
                   <option key={option.id} value={option.id}>
@@ -676,10 +683,16 @@ export function KanbanBoard({
             <label>
               <span>Review effort / thinking</span>
               <select
+                disabled={isEffortFixed(reviewModel)}
                 onChange={(event) =>
                   setReviewEffort(event.target.value as KanbanEffort)
                 }
-                value={reviewEffort}
+                title={
+                  isEffortFixed(reviewModel)
+                    ? "This model's effort is not adjustable"
+                    : undefined
+                }
+                value={isEffortFixed(reviewModel) ? "inherit" : reviewEffort}
               >
                 {kanbanEfforts.map((option) => (
                   <option key={option.id} value={option.id}>
@@ -841,14 +854,36 @@ export function KanbanBoard({
               <label>
                 <span>Coding effort / thinking</span>
                 <select
-                  disabled={isTaskDialogReadOnly}
+                  disabled={
+                    isTaskDialogReadOnly ||
+                    isEffortFixed(
+                      isTaskDialogReadOnly && selectedTask
+                        ? requestedModelOf(selectedTask)
+                        : editModel,
+                    )
+                  }
                   onChange={(event) =>
                     setEditEffort(event.target.value as KanbanEffort)
                   }
+                  title={
+                    isEffortFixed(
+                      isTaskDialogReadOnly && selectedTask
+                        ? requestedModelOf(selectedTask)
+                        : editModel,
+                    )
+                      ? "This model's effort is not adjustable"
+                      : undefined
+                  }
                   value={
-                    isTaskDialogReadOnly && selectedTask
-                      ? requestedEffortOf(selectedTask)
-                      : editEffort
+                    isEffortFixed(
+                      isTaskDialogReadOnly && selectedTask
+                        ? requestedModelOf(selectedTask)
+                        : editModel,
+                    )
+                      ? "inherit"
+                      : isTaskDialogReadOnly && selectedTask
+                        ? requestedEffortOf(selectedTask)
+                        : editEffort
                   }
                 >
                   {kanbanEfforts.map((option) => (
@@ -883,14 +918,36 @@ export function KanbanBoard({
               <label>
                 <span>Review effort / thinking</span>
                 <select
-                  disabled={isTaskDialogReadOnly}
+                  disabled={
+                    isTaskDialogReadOnly ||
+                    isEffortFixed(
+                      isTaskDialogReadOnly && selectedTask
+                        ? requestedReviewModelOf(selectedTask)
+                        : editReviewModel,
+                    )
+                  }
                   onChange={(event) =>
                     setEditReviewEffort(event.target.value as KanbanEffort)
                   }
+                  title={
+                    isEffortFixed(
+                      isTaskDialogReadOnly && selectedTask
+                        ? requestedReviewModelOf(selectedTask)
+                        : editReviewModel,
+                    )
+                      ? "This model's effort is not adjustable"
+                      : undefined
+                  }
                   value={
-                    isTaskDialogReadOnly && selectedTask
-                      ? requestedReviewEffortOf(selectedTask)
-                      : editReviewEffort
+                    isEffortFixed(
+                      isTaskDialogReadOnly && selectedTask
+                        ? requestedReviewModelOf(selectedTask)
+                        : editReviewModel,
+                    )
+                      ? "inherit"
+                      : isTaskDialogReadOnly && selectedTask
+                        ? requestedReviewEffortOf(selectedTask)
+                        : editReviewEffort
                   }
                 >
                   {kanbanEfforts.map((option) => (

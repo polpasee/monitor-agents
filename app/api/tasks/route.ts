@@ -4,6 +4,7 @@ import {
   requiredString,
 } from "@/lib/api-input";
 import {
+  effortForModel,
   parseKanbanEffort,
   parseKanbanModel,
   parseKanbanPriority,
@@ -51,9 +52,12 @@ export async function POST(request: Request) {
     description,
     priority,
     requestedModel,
-    requestedEffort,
+    requestedEffort: effortForModel(requestedModel, requestedEffort),
     requestedReviewModel,
-    requestedReviewEffort,
+    requestedReviewEffort: effortForModel(
+      requestedReviewModel,
+      requestedReviewEffort,
+    ),
   });
   return Response.json(task, { status: 201 });
 }

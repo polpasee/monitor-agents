@@ -45,7 +45,7 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
       'priority?: "high" | "normal" | "low" (default "normal")',
       'requestedModel?: "inherit" | "claude-fable" | "claude-opus" | "claude-sonnet" | "claude-haiku" | "codex-astra" | "codex-sol" | "codex-luna" | "deepseek" | "glm" | "agy-gemini" | "agy-sonnet" | "agy-opus" | "agy-gpt-oss" (default "inherit", stored as null)',
       'requestedEffort?: "inherit" | "xhigh" | "high" | "medium" | "low" (default "inherit", stored as null)',
-      "requestedModel and requestedEffort are for the coding agent",
+      "requestedModel and requestedEffort are for the coding agent; agy-sonnet, agy-opus and agy-gpt-oss take no effort (any sent is stored as null)",
       "requestedReviewModel?, requestedReviewEffort?: same options as requestedModel and requestedEffort, for the review agent",
     ],
     responses: [
