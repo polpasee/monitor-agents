@@ -101,7 +101,11 @@ export function KanbanGuide() {
             Standard Workflow steps (1–6) run so far, one entry per run of a
             step; send the whole list each time, it replaces the stored one.
             Heartbeat, complete and fail all accept it, and the task dialog
-            shows it under Workflow Steps.
+            shows it as a table under Workflow Steps. Each entry may also
+            carry <code>inputTokens</code>, <code>cacheWriteTokens</code>,{" "}
+            <code>cacheReadTokens</code> and <code>outputTokens</code>, the
+            four kinds behind <code>usedTokens</code>; a kind left out shows
+            as —.
             <pre>
               <code>{`curl -sS -X POST "${base}/api/agent/tasks/TASK_ID/heartbeat" ${json} \\
   -d '{"agentId":"codex-worker-1","leaseSeconds":60,"usedTokens":12000,"workflowSteps":[{"step":1,"model":"codex-astra","effort":"high","usedTokens":12000,"startedAt":"2026-10-15T10:00:00Z","endedAt":"2026-10-15T10:04:12Z"}]}'`}</code>

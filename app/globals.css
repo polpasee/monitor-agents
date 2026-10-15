@@ -757,6 +757,55 @@ button:focus-visible,
   white-space: nowrap;
 }
 
+.kanban-run-details__table-wrap {
+  overflow-x: auto;
+}
+
+.kanban-run-details__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 10px;
+}
+
+.kanban-run-details__table th,
+.kanban-run-details__table td {
+  padding: 3px 6px;
+  white-space: nowrap;
+}
+
+.kanban-run-details__table thead th {
+  color: var(--text-soft);
+  font-weight: 750;
+  text-align: right;
+}
+
+.kanban-run-details__table thead th:first-child,
+.kanban-run-details__table thead th:nth-child(2),
+.kanban-run-details__table tbody th,
+.kanban-run-details__table tfoot th {
+  text-align: left;
+}
+
+.kanban-run-details__table tbody th,
+.kanban-run-details__table tfoot th {
+  color: var(--color-zinc-600);
+  font-weight: 400;
+}
+
+.kanban-run-details__table td {
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  text-align: right;
+}
+
+.kanban-run-details__table td:nth-child(2) {
+  text-align: left;
+}
+
+.kanban-run-details__table tfoot tr {
+  border-top: 1px solid var(--border);
+}
+
 .kanban-run-details__empty {
   margin: 0;
   color: var(--color-zinc-600);

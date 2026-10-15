@@ -87,6 +87,14 @@ export interface KanbanWorkflowStep {
   model: string | null;
   effort: string | null;
   usedTokens: number | null;
+  /**
+   * The usage behind `usedTokens`, as billed in four kinds. Optional: steps
+   * stored before these were reported have only the total.
+   */
+  inputTokens?: number | null;
+  cacheWriteTokens?: number | null;
+  cacheReadTokens?: number | null;
+  outputTokens?: number | null;
   startedAt: string | null;
   endedAt: string | null;
 }
@@ -434,6 +442,22 @@ function optionalTimestamp(value: unknown): string | null | false {
     : false;
 }
 
+const stepTokenFields = [
+  "inputTokens",
+  "cacheWriteTokens",
+  "cacheReadTokens",
+  "outputTokens",
+] as const;
+
+function validTokenCount(value: unknown): value is number {
+  return (
+    typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 0 &&
+    value <= 1_000_000_000_000
+  );
+}
+
 function parseWorkflowStep(value: unknown): KanbanWorkflowStep | null {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return null;
@@ -454,15 +478,27 @@ function parseWorkflowStep(value: unknown): KanbanWorkflowStep | null {
     effort === false ||
     startedAt === false ||
     endedAt === false ||
-    (usedTokens !== null &&
-      (typeof usedTokens !== "number" ||
-        !Number.isInteger(usedTokens) ||
-        usedTokens < 0 ||
-        usedTokens > 1_000_000_000_000))
+    (usedTokens !== null && !validTokenCount(usedTokens))
   ) {
     return null;
   }
-  return { step, model, effort, usedTokens, startedAt, endedAt };
+
+  const parsed: KanbanWorkflowStep = {
+    step,
+    model,
+    effort,
+    usedTokens,
+    startedAt,
+    endedAt,
+  };
+  // A kind the reporter leaves out stays out; one that is sent must be a count.
+  for (const field of stepTokenFields) {
+    const tokens = entry[field];
+    if (tokens === undefined) continue;
+    if (tokens !== null && !validTokenCount(tokens)) return null;
+    parsed[field] = tokens;
+  }
+  return parsed;
 }
 
 const stepEffortLabels: Record<string, string> = {
@@ -514,7 +550,20 @@ export interface KanbanWorkflowStepRow {
   /** Display form, e.g. "CODEX:High"; null when the step reported no model. */
   model: string | null;
   tokens: number | null;
+  inputTokens: number | null;
+  cacheWriteTokens: number | null;
+  cacheReadTokens: number | null;
+  outputTokens: number | null;
   durationMs: number | null;
+}
+
+/** Each column's sum over the steps that reported it; null when none did. */
+export interface KanbanWorkflowStepTotals {
+  tokens: number | null;
+  inputTokens: number | null;
+  cacheWriteTokens: number | null;
+  cacheReadTokens: number | null;
+  outputTokens: number | null;
 }
 
 /**
@@ -525,6 +574,7 @@ export interface KanbanWorkflowStepRow {
 export function kanbanWorkflowSteps(task: Pick<KanbanTask, "workflowSteps">): {
   rows: KanbanWorkflowStepRow[];
   totalTokens: number | null;
+  totals: KanbanWorkflowStepTotals;
 } {
   // A board can be served a task from an older API that never sent steps.
   const steps = task.workflowSteps ?? [];
@@ -544,16 +594,27 @@ export function kanbanWorkflowSteps(task: Pick<KanbanTask, "workflowSteps">): {
       label: workflowStepLabels[step.step - 1] ?? "",
       model: formatStepModel(step.model, step.effort),
       tokens: step.usedTokens,
+      inputTokens: step.inputTokens ?? null,
+      cacheWriteTokens: step.cacheWriteTokens ?? null,
+      cacheReadTokens: step.cacheReadTokens ?? null,
+      outputTokens: step.outputTokens ?? null,
       durationMs: duration >= 0 ? duration : null,
     };
   });
-  const counted = rows.flatMap((row) => (row.tokens === null ? [] : [row.tokens]));
-  return {
-    rows,
-    totalTokens: counted.length
-      ? counted.reduce((sum, tokens) => sum + tokens, 0)
-      : null,
+  const sum = (pick: (row: KanbanWorkflowStepRow) => number | null) => {
+    const counted = rows.flatMap((row) => pick(row) ?? []);
+    return counted.length
+      ? counted.reduce((total, tokens) => total + tokens, 0)
+      : null;
   };
+  const totals: KanbanWorkflowStepTotals = {
+    tokens: sum((row) => row.tokens),
+    inputTokens: sum((row) => row.inputTokens),
+    cacheWriteTokens: sum((row) => row.cacheWriteTokens),
+    cacheReadTokens: sum((row) => row.cacheReadTokens),
+    outputTokens: sum((row) => row.outputTokens),
+  };
+  return { rows, totalTokens: totals.tokens, totals };
 }
 
 /**

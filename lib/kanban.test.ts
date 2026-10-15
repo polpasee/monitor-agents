@@ -618,11 +618,12 @@ test("kanbanWorkflowSteps lists each reported step with model, tokens and time",
 
   assert.deepEqual(view, {
     rows: [
-      { step: 1, label: "Explore", model: "CODEX:High", tokens: 510_000, durationMs: 252_000 },
-      { step: 4, label: "Test & Verification", model: "OPUS:Med", tokens: 3_100_000, durationMs: 580_000 },
-      { step: 4, label: "Test & Verification", model: "OPUS:Med", tokens: 1_000_000, durationMs: 180_000 },
+      { step: 1, label: "Explore", model: "CODEX:High", tokens: 510_000, inputTokens: null, cacheWriteTokens: null, cacheReadTokens: null, outputTokens: null, durationMs: 252_000 },
+      { step: 4, label: "Test & Verification", model: "OPUS:Med", tokens: 3_100_000, inputTokens: null, cacheWriteTokens: null, cacheReadTokens: null, outputTokens: null, durationMs: 580_000 },
+      { step: 4, label: "Test & Verification", model: "OPUS:Med", tokens: 1_000_000, inputTokens: null, cacheWriteTokens: null, cacheReadTokens: null, outputTokens: null, durationMs: 180_000 },
     ],
     totalTokens: 4_610_000,
+    totals: { tokens: 4_610_000, inputTokens: null, cacheWriteTokens: null, cacheReadTokens: null, outputTokens: null },
   });
 });
 
@@ -678,24 +679,74 @@ test("kanbanWorkflowSteps leaves unknown times and tokens as null", () => {
     kanbanWorkflowSteps({ workflowSteps: [workflowStep({ step: 5 })] }),
     {
       rows: [
-        { step: 5, label: "Merge and Clean", model: null, tokens: null, durationMs: null },
+        { step: 5, label: "Merge and Clean", model: null, tokens: null, inputTokens: null, cacheWriteTokens: null, cacheReadTokens: null, outputTokens: null, durationMs: null },
       ],
       totalTokens: null,
+      totals: { tokens: null, inputTokens: null, cacheWriteTokens: null, cacheReadTokens: null, outputTokens: null },
     },
   );
 });
 
 test("kanbanWorkflowSteps has no rows or total for a task without steps", () => {
+  const noTotals = { tokens: null, inputTokens: null, cacheWriteTokens: null, cacheReadTokens: null, outputTokens: null };
   assert.deepEqual(kanbanWorkflowSteps({ workflowSteps: [] }), {
     rows: [],
     totalTokens: null,
+    totals: noTotals,
   });
   assert.deepEqual(
     kanbanWorkflowSteps({
       workflowSteps: undefined as unknown as KanbanTask["workflowSteps"],
     }),
-    { rows: [], totalTokens: null },
+    { rows: [], totalTokens: null, totals: noTotals },
   );
+});
+
+test("kanbanWorkflowSteps shows the four token kinds per step and in total", () => {
+  const view = kanbanWorkflowSteps({
+    workflowSteps: [
+      workflowStep({
+        step: 3,
+        usedTokens: 1_000,
+        inputTokens: 100,
+        cacheWriteTokens: 0,
+        cacheReadTokens: 800,
+        outputTokens: 100,
+      }),
+      workflowStep({
+        step: 4,
+        usedTokens: 600,
+        inputTokens: 50,
+        cacheWriteTokens: 300,
+        cacheReadTokens: 200,
+        outputTokens: 50,
+      }),
+      // Stored before the four kinds were reported: only its total.
+      workflowStep({ step: 5, usedTokens: 40 }),
+    ],
+  });
+
+  assert.deepEqual(
+    view.rows.map((row) => [
+      row.inputTokens,
+      row.cacheWriteTokens,
+      row.cacheReadTokens,
+      row.outputTokens,
+    ]),
+    [
+      [100, 0, 800, 100],
+      [50, 300, 200, 50],
+      [null, null, null, null],
+    ],
+  );
+  assert.deepEqual(view.totals, {
+    tokens: 1_640,
+    inputTokens: 150,
+    cacheWriteTokens: 300,
+    cacheReadTokens: 1_000,
+    outputTokens: 150,
+  });
+  assert.equal(view.totalTokens, 1_640);
 });
 
 test("parseTaskRunMetadata accepts the workflow steps an agent reports", () => {
@@ -723,6 +774,37 @@ test("parseTaskRunMetadata accepts the workflow steps an agent reports", () => {
       },
     ],
   });
+  // The four token kinds are kept when sent, null or not.
+  const kinds = {
+    inputTokens: 10,
+    cacheWriteTokens: 0,
+    cacheReadTokens: 3_000,
+    outputTokens: null,
+  };
+  assert.deepEqual(
+    parseTaskRunMetadata({ workflowSteps: [{ step: 3, ...kinds }] }),
+    {
+      workflowSteps: [
+        {
+          step: 3,
+          model: null,
+          effort: null,
+          usedTokens: null,
+          startedAt: null,
+          endedAt: null,
+          ...kinds,
+        },
+      ],
+    },
+  );
+  assert.equal(
+    parseTaskRunMetadata({ workflowSteps: [{ step: 3, inputTokens: -1 }] }),
+    null,
+  );
+  assert.equal(
+    parseTaskRunMetadata({ workflowSteps: [{ step: 3, outputTokens: "9" }] }),
+    null,
+  );
   assert.deepEqual(parseTaskRunMetadata({ workflowSteps: [] }), {
     workflowSteps: [],
   });
