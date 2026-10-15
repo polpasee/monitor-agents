@@ -15,6 +15,7 @@ import {
   formatDuration,
   formatModelBadge,
   formatStatusAge,
+  formatReviewScore,
   formatStepTokens,
   formatTokenCount,
   isKanbanTaskEditable,
@@ -1060,6 +1061,12 @@ export function KanbanBoard({
                     </table>
                   </div>
                 )}
+                <dl>
+                  <div>
+                    <dt>Review score</dt>
+                    <dd>{formatReviewScore(selectedTask.reviewScore)}</dd>
+                  </div>
+                </dl>
               </section>
             )}
             {editError && (

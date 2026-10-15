@@ -129,6 +129,8 @@ export interface KanbanTask {
   summary: string | null;
   statusHistory: KanbanStatusEvent[];
   workflowSteps: KanbanWorkflowStep[];
+  /** The Review Agent's mark for the coding agent's work, 0–10; null until reported. */
+  reviewScore: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -142,6 +144,8 @@ export interface TaskRunMetadata {
   usedTokens?: number;
   /** The reporter's full list; it replaces the stored one. */
   workflowSteps?: KanbanWorkflowStep[];
+  /** 0–10, decimals allowed; the first review round's. A report without it keeps the stored one. */
+  reviewScore?: number;
 }
 
 export type KanbanTaskPatch =
@@ -462,6 +466,14 @@ function optionalTimestamp(value: unknown): string | null | false {
     : false;
 }
 
+/** The Review Agent marks out of this. */
+export const maxReviewScore = 10;
+
+/** "8.5 / 10", or "—" while no review has been scored. */
+export function formatReviewScore(score: number | null): string {
+  return score === null ? "—" : `${Number(score.toFixed(1))} / ${maxReviewScore}`;
+}
+
 const stepTokenFields = [
   "inputTokens",
   "cacheWriteTokens",
@@ -667,6 +679,19 @@ export function parseTaskRunMetadata(
       return null;
     }
     metadata.usedTokens = tokens;
+  }
+
+  if (body.reviewScore !== undefined && body.reviewScore !== null) {
+    const score = body.reviewScore;
+    if (
+      typeof score !== "number" ||
+      !Number.isFinite(score) ||
+      score < 0 ||
+      score > maxReviewScore
+    ) {
+      return null;
+    }
+    metadata.reviewScore = score;
   }
 
   // The reporter sends its whole list every time, so it replaces the stored one.

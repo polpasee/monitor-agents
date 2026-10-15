@@ -9,6 +9,7 @@ import {
   formatModelBadge,
   formatStatusAge,
   formatStepModel,
+  formatReviewScore,
   formatStepTokens,
   formatTokenCount,
   isKanbanTaskEditable,
@@ -61,6 +62,7 @@ const tasks: KanbanTask[] = [
     summary: null,
     statusHistory: [],
     workflowSteps: [],
+    reviewScore: null,
     createdAt: "2026-08-04T00:00:00.000Z",
     updatedAt: "2026-08-04T00:00:00.000Z",
   },
@@ -90,6 +92,7 @@ const tasks: KanbanTask[] = [
     summary: null,
     statusHistory: [],
     workflowSteps: [],
+    reviewScore: null,
     createdAt: "2026-08-04T01:00:00.000Z",
     updatedAt: "2026-08-04T01:00:00.000Z",
   },
@@ -387,6 +390,7 @@ const task: KanbanTask = {
     { status: "review", at: "2026-08-04T00:04:30.000Z" },
   ],
   workflowSteps: [],
+  reviewScore: null,
   createdAt: "2026-08-04T00:00:00.000Z",
   updatedAt: "2026-08-04T00:04:30.000Z",
 };
@@ -1177,4 +1181,25 @@ test("kanbanTaskTokens counts the live run until the agent reports a total", () 
   assert.equal(kanbanTaskTokens({ ...active, status: "todo" }, [run]), null);
   // Found only through the session, the root run counts every task it worked on.
   assert.equal(kanbanTaskTokens({ ...active, agentRunId: null }, [run]), null);
+});
+
+test("parseTaskRunMetadata accepts a review score from 0 to 10, decimals included", () => {
+  assert.deepEqual(parseTaskRunMetadata({ reviewScore: 8.5 }), { reviewScore: 8.5 });
+  assert.deepEqual(parseTaskRunMetadata({ reviewScore: 0 }), { reviewScore: 0 });
+  assert.deepEqual(parseTaskRunMetadata({ reviewScore: 10 }), { reviewScore: 10 });
+  // Left out or null keeps what is stored.
+  assert.deepEqual(parseTaskRunMetadata({ reviewScore: null }), {});
+  assert.deepEqual(parseTaskRunMetadata({}), {});
+  for (const bad of [-0.1, 10.1, Number.NaN, Infinity, "8", true, [8]]) {
+    assert.equal(parseTaskRunMetadata({ reviewScore: bad }), null);
+  }
+});
+
+test("formatReviewScore shows the mark out of 10 to one decimal", () => {
+  assert.equal(formatReviewScore(8.5), "8.5 / 10");
+  assert.equal(formatReviewScore(10), "10 / 10");
+  assert.equal(formatReviewScore(7), "7 / 10");
+  assert.equal(formatReviewScore(7.25), "7.3 / 10");
+  assert.equal(formatReviewScore(0), "0 / 10");
+  assert.equal(formatReviewScore(null), "—");
 });
