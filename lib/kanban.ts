@@ -1,4 +1,5 @@
 import { optionalString, requiredString } from "./api-input.ts";
+import { shortDateTimeFormatter } from "./format-time.ts";
 import type { AgentRun } from "./telemetry.ts";
 
 export const kanbanStatuses = [
@@ -371,14 +372,7 @@ export function formatDuration(milliseconds: number): string {
     : `${Math.floor(hours / 24)}d ${hours % 24}h`;
 }
 
-const bangkokTime = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  hourCycle: "h23",
-  timeZone: "Asia/Bangkok",
-});
+const bangkokTime = shortDateTimeFormatter({ timeZone: "Asia/Bangkok" });
 
 export function formatBangkokTime(isoString: string): string {
   return bangkokTime.format(new Date(isoString));
