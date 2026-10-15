@@ -3,6 +3,8 @@ import test from "node:test";
 
 import type { KanbanTask } from "./kanban.ts";
 import {
+  agyArgs,
+  agyModelId,
   buildTaskPrompt,
   claudeArgs,
   codexArgs,
@@ -10,6 +12,8 @@ import {
   latestCodexSlug,
   openRouterEnv,
   maxResultLength,
+  parseAgyOutput,
+  parseAgyRunMetadata,
   parseClaudeOutput,
   parseClaudeRunMetadata,
   parseCodexOutput,
@@ -591,4 +595,83 @@ test("parseClaudeRunMetadata reads a run started with --model haiku", () => {
     usedTokens: 29_384,
     agentRunId: "claude:f5655906-c847-4b1d-aea7-554ec8d74abd",
   });
+});
+
+test("runnerModel maps the Antigravity models to agy ids", () => {
+  assert.deepEqual(runnerModel("agy-sonnet"), { provider: "agy", cli: "claude-sonnet-4-6" });
+  assert.deepEqual(runnerModel("agy-opus"), { provider: "agy", cli: "claude-opus-4-6-thinking" });
+  assert.deepEqual(runnerModel("agy-gpt-oss"), { provider: "agy", cli: "gpt-oss-120b-medium" });
+  assert.deepEqual(runnerModel("agy-gemini"), {
+    provider: "agy",
+    cli: "gemini-3.8-flash",
+    effortInModel: true,
+  });
+});
+
+test("agyModelId puts the effort into the Gemini Flash id only", () => {
+  const gemini = { cli: "gemini-3.8-flash", effortInModel: true };
+  assert.equal(agyModelId(gemini, "low"), "gemini-3.8-flash-low");
+  assert.equal(agyModelId(gemini, "medium"), "gemini-3.8-flash-medium");
+  assert.equal(agyModelId(gemini, "high"), "gemini-3.8-flash-high");
+  assert.equal(agyModelId(gemini, "xhigh"), "gemini-3.8-flash-high");
+  assert.equal(agyModelId(gemini, null), "gemini-3.8-flash-medium");
+  assert.equal(agyModelId({ cli: "claude-opus-4-6-thinking" }, "low"), "claude-opus-4-6-thinking");
+});
+
+test("agyArgs runs print mode with stream-json and the card's effort", () => {
+  assert.deepEqual(agyArgs("do it", "claude-opus-4-6-thinking", "high"), [
+    "-p",
+    "do it",
+    "--model",
+    "claude-opus-4-6-thinking",
+    "--output-format",
+    "stream-json",
+    "--dangerously-skip-permissions",
+    "--effort",
+    "high",
+  ]);
+  assert.equal(agyArgs("do it", "claude-opus-4-6-thinking", null).includes("--effort"), false);
+  // Gemini Flash already carries its effort in the id.
+  assert.equal(agyArgs("do it", "gemini-3.8-flash-low", "low", true).includes("--effort"), false);
+});
+
+const agyStream = [
+  '{"event":"init","conversation_id":"conv-1","init":{"model":"gemini-3.8-flash-low"}}',
+  '{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"O"}}',
+  '{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":1,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":100,"output_tokens":5,"total_tokens":105}}}',
+  '{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":3,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":200,"output_tokens":20,"thinking_tokens":10,"total_tokens":230}}}',
+];
+
+test("parseAgyRunMetadata reads the conversation and the tokens so far", () => {
+  assert.deepEqual(parseAgyRunMetadata(agyStream.join("\n")), {
+    sessionId: "conv-1",
+    usedTokens: 335,
+  });
+  // A repeated step event counts once.
+  assert.equal(
+    parseAgyRunMetadata([...agyStream, agyStream[2]].join("\n")).usedTokens,
+    335,
+  );
+  assert.deepEqual(parseAgyRunMetadata("not json\n{broken"), {});
+});
+
+test("parseAgyRunMetadata prefers the final result usage", () => {
+  const result =
+    '{"event":"result","result":{"conversation_id":"conv-1","status":"SUCCESS","response":"OK\\n","usage":{"input_tokens":300,"output_tokens":25,"thinking_tokens":10,"total_tokens":340}}}';
+  assert.deepEqual(parseAgyRunMetadata([...agyStream, result].join("\n")), {
+    sessionId: "conv-1",
+    usedTokens: 340,
+  });
+});
+
+test("parseAgyOutput returns the response and flags a failed status", () => {
+  const ok = '{"event":"result","result":{"status":"SUCCESS","response":"Changed two files."}}';
+  const failed = '{"event":"result","result":{"status":"ERROR","response":"Quota exceeded"}}';
+  assert.deepEqual(parseAgyOutput([...agyStream, ok].join("\n")), {
+    result: "Changed two files.",
+    isError: false,
+  });
+  assert.deepEqual(parseAgyOutput(failed), { result: "Quota exceeded", isError: true });
+  // No result event: the raw output is the best summary there is.
+  assert.equal(parseAgyOutput("plain text").result, "plain text");
 });

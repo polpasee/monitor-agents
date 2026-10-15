@@ -32,6 +32,10 @@ export const kanbanModels = [
   { id: "codex-luna", label: "Codex-Luna" },
   { id: "deepseek", label: "DeepSeek" },
   { id: "glm", label: "GLM" },
+  { id: "agy-gemini", label: "AGY-Gemini" },
+  { id: "agy-sonnet", label: "AGY-Sonnet" },
+  { id: "agy-opus", label: "AGY-Opus" },
+  { id: "agy-gpt-oss", label: "AGY-GPT-OSS" },
 ] as const;
 
 export type KanbanModel = (typeof kanbanModels)[number]["id"];
@@ -397,6 +401,19 @@ export function formatTokenCount(tokens: number): string {
   return `${(tokens / 1_000_000).toFixed(2)}M`;
 }
 
+const agyFamilies = ["gemini", "sonnet", "opus", "oss"];
+
+/**
+ * An Antigravity model by family, "agy-opus", so it never reads as the Claude
+ * model it shares a name with. Requested ids ("agy-opus") and reported ones
+ * ("agy/claude-opus-4-6-thinking") both start with "agy"; null for any other.
+ */
+function agyFamily(tokens: string[]): string | null {
+  if (tokens[0] !== "agy") return null;
+  const family = agyFamilies.find((name) => tokens.includes(name));
+  return family ? `agy-${family}` : "agy";
+}
+
 /** "claude-opus" → "opus"; also matched inside reported ids like "gpt-6.1-sol". */
 const shortModelNames = kanbanModels
   .filter((option) => option.id !== "inherit")
@@ -409,7 +426,10 @@ export function formatModelBadge(
 ): string | null {
   const tokens = model?.toLowerCase().split(/[-/._]/) ?? [];
   const shortModel =
-    model && (shortModelNames.find((name) => tokens.includes(name)) ?? model);
+    model &&
+    (agyFamily(tokens) ??
+      shortModelNames.find((name) => tokens.includes(name)) ??
+      model);
   const shortEffort = effort === "medium" ? "med" : effort?.toLowerCase();
   return [shortModel, shortEffort].filter(Boolean).join(":") || null;
 }
@@ -520,16 +540,18 @@ export function formatStepModel(
 ): string | null {
   if (!model) return null;
   const tokens = model.toLowerCase().split(/[-/._]/);
+  const agy = agyFamily(tokens);
   const known = kanbanModels.find(
     (option) =>
       option.id !== "inherit" && tokens.includes(option.id.split("-").at(-1)!),
   );
   const family =
-    tokens[0] === "codex" || known?.id.startsWith("codex-")
+    agy ??
+    (tokens[0] === "codex" || known?.id.startsWith("codex-")
       ? "codex"
       : known
         ? known.id.split("-").at(-1)!
-        : tokens[0];
+        : tokens[0]);
   const level = effort?.toLowerCase();
   return [
     (family || model).toUpperCase(),
