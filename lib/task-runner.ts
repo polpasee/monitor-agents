@@ -467,7 +467,8 @@ export function parseAgyOutput(stdout: string): {
   isError: boolean;
 } {
   let result = "";
-  let isError = false;
+  // A run that never printed its `result` (killed, crashed, cut off) did not finish.
+  let isError = true;
 
   for (const line of stdout.split("\n")) {
     const trimmed = line.trim();

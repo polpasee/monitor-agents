@@ -672,6 +672,7 @@ test("parseAgyOutput returns the response and flags a failed status", () => {
     isError: false,
   });
   assert.deepEqual(parseAgyOutput(failed), { result: "Quota exceeded", isError: true });
-  // No result event: the raw output is the best summary there is.
-  assert.equal(parseAgyOutput("plain text").result, "plain text");
+  // No result event: the run did not finish, and the raw output is the best summary there is.
+  assert.deepEqual(parseAgyOutput("plain text"), { result: "plain text", isError: true });
+  assert.equal(parseAgyOutput(agyStream.join("\n")).isError, true);
 });
