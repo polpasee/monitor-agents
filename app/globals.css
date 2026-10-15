@@ -769,8 +769,15 @@ button:focus-visible,
 
 .kanban-run-details__table th,
 .kanban-run-details__table td {
-  padding: 3px 6px;
+  padding: 3px 4px;
   white-space: nowrap;
+}
+
+/* Long labels wrap so the whole table fits the dialog without a sideways scroll. */
+.kanban-run-details__table thead th,
+.kanban-run-details__table tbody th,
+.kanban-run-details__table tfoot th {
+  white-space: normal;
 }
 
 .kanban-run-details__table thead th {
@@ -798,7 +805,7 @@ button:focus-visible,
   text-align: right;
 }
 
-.kanban-run-details__table td:nth-child(2) {
+.kanban-run-details__table tbody td:nth-child(2) {
   text-align: left;
 }
 
