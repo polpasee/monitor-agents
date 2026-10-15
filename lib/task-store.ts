@@ -9,6 +9,7 @@ import type {
   KanbanStatus,
   KanbanStatusEvent,
   KanbanTask,
+  KanbanWorkflowStep,
   TaskRunMetadata,
 } from "./kanban";
 
@@ -37,6 +38,7 @@ interface TaskRow {
   pull_request_number: number | null;
   summary: string | null;
   status_history: string;
+  workflow_steps: string;
   created_at: string;
   updated_at: string;
 }
@@ -80,6 +82,15 @@ function statusHistoryFromRow(value: string): KanbanStatusEvent[] {
   }
 }
 
+function workflowStepsFromRow(value: string): KanbanWorkflowStep[] {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? (parsed as KanbanWorkflowStep[]) : [];
+  } catch {
+    return [];
+  }
+}
+
 /** Rows completed before the number was reported still name the PR in `result`. */
 function pullRequestNumberFromResult(result: string | null): number | null {
   const match =
@@ -116,6 +127,7 @@ function taskFromRow(row: TaskRow): KanbanTask {
       row.pull_request_number ?? pullRequestNumberFromResult(row.result),
     summary: row.summary,
     statusHistory: statusHistoryFromRow(row.status_history),
+    workflowSteps: workflowStepsFromRow(row.workflow_steps),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -171,6 +183,18 @@ function runMetadataValues(metadata: TaskRunMetadata | undefined) {
   ] as const;
 }
 
+/**
+ * Heartbeat, complete and fail only. A report that leaves `workflowSteps` out
+ * keeps the stored list; one that sends it replaces the list whole.
+ */
+const workflowStepsSql = "workflow_steps = COALESCE(?, workflow_steps)";
+
+function workflowStepsValue(metadata: TaskRunMetadata | undefined) {
+  return metadata?.workflowSteps
+    ? JSON.stringify(metadata.workflowSteps)
+    : null;
+}
+
 const tasksIndexSql = `
   CREATE INDEX IF NOT EXISTS tasks_queue
     ON tasks (status, repository, priority DESC, created_at ASC);
@@ -206,6 +230,7 @@ function tasksTableSql(target: string) {
     pull_request_number INTEGER,
     summary TEXT,
     status_history TEXT NOT NULL DEFAULT '[]',
+    workflow_steps TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -263,6 +288,7 @@ export class TaskStore {
       ["requested_effort", "TEXT"],
       ["requested_review_model", "TEXT"],
       ["requested_review_effort", "TEXT"],
+      ["workflow_steps", "TEXT NOT NULL DEFAULT '[]'"],
     ];
     for (const [name, definition] of additions) {
       if (!columns.has(name)) {
@@ -618,7 +644,8 @@ export class TaskStore {
     const result = this.database
       .prepare(`
         UPDATE tasks
-        SET lease_until = ?, ${runMetadataSql}, updated_at = ?
+        SET lease_until = ?, ${runMetadataSql}, ${workflowStepsSql},
+            updated_at = ?
         WHERE id = ?
           AND status = 'in-progress'
           AND claimed_by = ?
@@ -627,6 +654,7 @@ export class TaskStore {
       .run(
         new Date(now.getTime() + leaseMs).toISOString(),
         ...runMetadataValues(metadata),
+        workflowStepsValue(metadata),
         timestamp,
         id,
         agentId,
@@ -653,6 +681,7 @@ export class TaskStore {
             lease_until = NULL,
             status_history = ${appendStatusSql},
             ${runMetadataSql},
+            ${workflowStepsSql},
             updated_at = ?
         WHERE id = ?
           AND status = 'in-progress'
@@ -666,6 +695,7 @@ export class TaskStore {
         "review-queue",
         now.toISOString(),
         ...runMetadataValues(metadata),
+        workflowStepsValue(metadata),
         now.toISOString(),
         id,
         agentId,
@@ -689,6 +719,7 @@ export class TaskStore {
             lease_until = NULL,
             status_history = ${appendStatusSql},
             ${runMetadataSql},
+            ${workflowStepsSql},
             updated_at = ?
         WHERE id = ?
           AND status = 'in-progress'
@@ -700,6 +731,7 @@ export class TaskStore {
         "review-queue",
         now.toISOString(),
         ...runMetadataValues(metadata),
+        workflowStepsValue(metadata),
         now.toISOString(),
         id,
         agentId,

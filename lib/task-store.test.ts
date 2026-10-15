@@ -734,6 +734,112 @@ test("TaskStore keeps run details reported by a heartbeat", async () => {
   }
 });
 
+test("TaskStore stores workflow steps from a heartbeat, complete and fail, replacing the list", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-steps-"));
+  const path = join(directory, "tasks.sqlite");
+  const store = new TaskStore(path);
+  const step = (number: number, usedTokens: number) => ({
+    step: number,
+    model: "codex-astra",
+    effort: "high",
+    usedTokens,
+    startedAt: "2026-08-04T00:00:00.000Z",
+    endedAt: "2026-08-04T00:04:12.000Z",
+  });
+
+  try {
+    for (const finish of ["complete", "fail"] as const) {
+      const task = store.createTask({
+        title: `Report steps then ${finish}`,
+        repository: "monitor-agents",
+      });
+      assert.deepEqual(task.workflowSteps, []);
+      store.claimTask({
+        agentId: "agent-1",
+        repositories: ["monitor-agents"],
+        now: new Date("2026-08-04T00:00:00.000Z"),
+        leaseMs: 600_000,
+      });
+      const at = (seconds: number) =>
+        new Date(`2026-08-04T00:00:${seconds}.000Z`);
+
+      const first = store.heartbeatTask(task.id, "agent-1", at(10), 600_000, {
+        workflowSteps: [step(1, 510_000)],
+      });
+      assert.deepEqual(first?.workflowSteps, [step(1, 510_000)]);
+
+      // The reporter resends its whole list, so the new one replaces the old.
+      const second = store.heartbeatTask(task.id, "agent-1", at(20), 600_000, {
+        workflowSteps: [step(1, 510_000), step(2, 2_120_000)],
+      });
+      assert.deepEqual(second?.workflowSteps, [
+        step(1, 510_000),
+        step(2, 2_120_000),
+      ]);
+
+      // A report without the field leaves the stored list alone.
+      const third = store.heartbeatTask(task.id, "agent-1", at(30), 600_000, {
+        usedTokens: 5,
+      });
+      assert.deepEqual(third?.workflowSteps, second?.workflowSteps);
+      assert.deepEqual(
+        store.heartbeatTask(task.id, "agent-1", at(31), 600_000)?.workflowSteps,
+        second?.workflowSteps,
+      );
+
+      const finished =
+        finish === "complete"
+          ? store.completeTask(task.id, "agent-1", "done", at(40), {
+              workflowSteps: [step(3, 3_110_000)],
+            })
+          : store.failTask(task.id, "agent-1", "boom", at(40), {
+              workflowSteps: [step(3, 3_110_000)],
+            });
+      assert.deepEqual(finished?.workflowSteps, [step(3, 3_110_000)]);
+      assert.deepEqual(store.getTask(task.id)?.workflowSteps, [
+        step(3, 3_110_000),
+      ]);
+
+      // Sending an empty list is a report too, and clears the steps.
+      store.updateTaskStatus(task.id, "todo", at(45));
+      store.claimTask({
+        agentId: "agent-1",
+        repositories: ["monitor-agents"],
+        now: at(46),
+        leaseMs: 600_000,
+      });
+      // A retry's claim keeps what the earlier attempt reported.
+      assert.deepEqual(store.getTask(task.id)?.workflowSteps, [
+        step(3, 3_110_000),
+      ]);
+      assert.deepEqual(
+        store.heartbeatTask(task.id, "agent-1", at(47), 600_000, {
+          workflowSteps: [],
+        })?.workflowSteps,
+        [],
+      );
+      store.updateTaskStatus(task.id, "done", at(50));
+    }
+  } finally {
+    store.close();
+  }
+
+  // A column that holds something other than a JSON array reads as no steps.
+  const raw = new DatabaseSync(path);
+  raw.exec("UPDATE tasks SET workflow_steps = 'not json'");
+  raw.close();
+  const reopened = new TaskStore(path);
+  try {
+    assert.deepEqual(
+      reopened.listTasks().map((task) => task.workflowSteps),
+      [[], []],
+    );
+  } finally {
+    reopened.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 async function completedWith(
   resultText: string,
   completion?: { pullRequestNumber?: number; summary?: string },
@@ -859,6 +965,7 @@ test("TaskStore upgrades a database written before run details existed", async (
     assert.equal(task?.requestedEffort, null);
     assert.equal(task?.requestedReviewModel, null);
     assert.equal(task?.requestedReviewEffort, null);
+    assert.deepEqual(task?.workflowSteps, []);
     assert.equal(store.getTask("legacy-2")?.pullRequestNumber, 5);
     assert.deepEqual(task?.statusHistory, [
       { status: "todo", at: "2026-08-04T00:00:00.000Z" },

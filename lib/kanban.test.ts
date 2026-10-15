@@ -56,6 +56,7 @@ const tasks: KanbanTask[] = [
     pullRequestNumber: null,
     summary: null,
     statusHistory: [],
+    workflowSteps: [],
     createdAt: "2026-08-04T00:00:00.000Z",
     updatedAt: "2026-08-04T00:00:00.000Z",
   },
@@ -84,6 +85,7 @@ const tasks: KanbanTask[] = [
     pullRequestNumber: null,
     summary: null,
     statusHistory: [],
+    workflowSteps: [],
     createdAt: "2026-08-04T01:00:00.000Z",
     updatedAt: "2026-08-04T01:00:00.000Z",
   },
@@ -376,6 +378,7 @@ const task: KanbanTask = {
     { status: "in-progress", at: "2026-08-04T00:02:30.000Z" },
     { status: "review", at: "2026-08-04T00:04:30.000Z" },
   ],
+  workflowSteps: [],
   createdAt: "2026-08-04T00:00:00.000Z",
   updatedAt: "2026-08-04T00:04:30.000Z",
 };
@@ -536,6 +539,71 @@ test("parseTaskRunMetadata accepts only the fields an agent reports", () => {
   assert.equal(parseTaskRunMetadata({ usedTokens: "4200" }), null);
   assert.equal(parseTaskRunMetadata({ sessionId: "" }), null);
   assert.equal(parseTaskRunMetadata({ model: "m".repeat(201) }), null);
+});
+
+test("parseTaskRunMetadata accepts the workflow steps an agent reports", () => {
+  const step = {
+    step: 4,
+    model: "claude-opus-5",
+    effort: "medium",
+    usedTokens: 3_100_000,
+    startedAt: "2026-10-15T10:00:00.000Z",
+    endedAt: "2026-10-15T10:09:40.000Z",
+  };
+  assert.deepEqual(parseTaskRunMetadata({ workflowSteps: [step, step] }), {
+    workflowSteps: [step, step],
+  });
+  // Unreported fields become null; a missing or null list keeps what is stored.
+  assert.deepEqual(parseTaskRunMetadata({ workflowSteps: [{ step: 1 }] }), {
+    workflowSteps: [
+      {
+        step: 1,
+        model: null,
+        effort: null,
+        usedTokens: null,
+        startedAt: null,
+        endedAt: null,
+      },
+    ],
+  });
+  assert.deepEqual(parseTaskRunMetadata({ workflowSteps: [] }), {
+    workflowSteps: [],
+  });
+  assert.deepEqual(parseTaskRunMetadata({ workflowSteps: null }), {});
+});
+
+test("parseTaskRunMetadata rejects malformed workflow steps", () => {
+  const rejects = (workflowSteps: unknown) =>
+    assert.equal(parseTaskRunMetadata({ workflowSteps }), null);
+
+  rejects("explore");
+  rejects({ step: 1 });
+  rejects(Array.from({ length: 51 }, () => ({ step: 1 })));
+  rejects([null]);
+  rejects([[1]]);
+  rejects([{}]);
+  rejects([{ step: 0 }]);
+  rejects([{ step: 7 }]);
+  rejects([{ step: 1.5 }]);
+  rejects([{ step: "1" }]);
+  rejects([{ step: 1, model: "" }]);
+  rejects([{ step: 1, model: 5 }]);
+  rejects([{ step: 1, effort: "e".repeat(201) }]);
+  rejects([{ step: 1, usedTokens: -1 }]);
+  rejects([{ step: 1, usedTokens: 1.5 }]);
+  rejects([{ step: 1, usedTokens: Infinity }]);
+  rejects([{ step: 1, usedTokens: "10" }]);
+  rejects([{ step: 1, startedAt: "yesterday" }]);
+  rejects([{ step: 1, startedAt: "2026-13-45T00:00:00Z" }]);
+  rejects([{ step: 1, endedAt: 1_760_000_000_000 }]);
+  // One bad entry rejects the whole report.
+  rejects([{ step: 1 }, { step: 9 }]);
+  assert.notEqual(
+    parseTaskRunMetadata({
+      workflowSteps: Array.from({ length: 50 }, () => ({ step: 1 })),
+    }),
+    null,
+  );
 });
 
 function agent(

@@ -18,6 +18,10 @@ const runMetadata = [
   "Run details left out or null keep the stored value",
 ];
 
+/** Heartbeat, complete and fail only; claim parses it but does not store it. */
+const workflowSteps =
+  'workflowSteps?: { step: integer 1–6, model?, effort?: string 1–200 chars, usedTokens?: integer 0–1000000000000, startedAt?, endedAt?: ISO 8601 }[], up to 50, one per Standard Workflow step run (a step may repeat); send the full list each time, it replaces the stored one; left out or null keeps it';
+
 const inactiveClaim = {
   status: 409,
   description: '{"error":"Task claim is not active."} (no such task, not in progress, claimed by another agent, or lease expired)',
@@ -145,6 +149,7 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
       "agentId: string, 1–200 chars",
       "leaseSeconds?: integer 15–3600 (default 60)",
       ...runMetadata,
+      workflowSteps,
     ],
     responses: [
       { status: 200, description: "KanbanTask" },
@@ -163,6 +168,7 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
       "summary?: string, 1–10000 chars",
       "pullRequestNumber?: positive integer",
       ...runMetadata,
+      workflowSteps,
     ],
     responses: [
       { status: 200, description: "KanbanTask in review-queue" },
@@ -178,6 +184,7 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
       "agentId: string, 1–200 chars",
       "error: string, 1–10000 chars",
       ...runMetadata,
+      workflowSteps,
     ],
     responses: [
       { status: 200, description: "KanbanTask in review-queue" },

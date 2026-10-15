@@ -80,6 +80,17 @@ export interface KanbanStatusEvent {
   at: string;
 }
 
+/** One Standard Workflow step an agent ran for a task; a step may repeat. */
+export interface KanbanWorkflowStep {
+  /** 1–6, as numbered in AGENTS.md. */
+  step: number;
+  model: string | null;
+  effort: string | null;
+  usedTokens: number | null;
+  startedAt: string | null;
+  endedAt: string | null;
+}
+
 export interface KanbanTask {
   id: string;
   title: string;
@@ -105,6 +116,7 @@ export interface KanbanTask {
   pullRequestNumber: number | null;
   summary: string | null;
   statusHistory: KanbanStatusEvent[];
+  workflowSteps: KanbanWorkflowStep[];
   createdAt: string;
   updatedAt: string;
 }
@@ -116,6 +128,8 @@ export interface TaskRunMetadata {
   model?: string;
   effort?: string;
   usedTokens?: number;
+  /** The reporter's full list; it replaces the stored one. */
+  workflowSteps?: KanbanWorkflowStep[];
 }
 
 export type KanbanTaskPatch =
@@ -392,6 +406,55 @@ export function formatModelBadge(
   return [shortModel, shortEffort].filter(Boolean).join(":") || null;
 }
 
+const maxWorkflowSteps = 50;
+
+/** A missing key or null means "not known"; `false` marks a malformed value. */
+function optionalText(value: unknown): string | null | false {
+  return value === undefined || value === null
+    ? null
+    : (requiredString(value, 200) ?? false);
+}
+
+function optionalTimestamp(value: unknown): string | null | false {
+  if (value === undefined || value === null) return null;
+  return typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}T/u.test(value) &&
+    !Number.isNaN(Date.parse(value))
+    ? value
+    : false;
+}
+
+function parseWorkflowStep(value: unknown): KanbanWorkflowStep | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const entry = value as Record<string, unknown>;
+  const { step } = entry;
+  const usedTokens = entry.usedTokens ?? null;
+  const model = optionalText(entry.model);
+  const effort = optionalText(entry.effort);
+  const startedAt = optionalTimestamp(entry.startedAt);
+  const endedAt = optionalTimestamp(entry.endedAt);
+  if (
+    typeof step !== "number" ||
+    !Number.isInteger(step) ||
+    step < 1 ||
+    step > 6 ||
+    model === false ||
+    effort === false ||
+    startedAt === false ||
+    endedAt === false ||
+    (usedTokens !== null &&
+      (typeof usedTokens !== "number" ||
+        !Number.isInteger(usedTokens) ||
+        usedTokens < 0 ||
+        usedTokens > 1_000_000_000_000))
+  ) {
+    return null;
+  }
+  return { step, model, effort, usedTokens, startedAt, endedAt };
+}
+
 /**
  * Run details are optional everywhere: an agent reports what it knows, and a
  * key it leaves out — or sends as `null` — keeps the stored value. Anything
@@ -420,6 +483,15 @@ export function parseTaskRunMetadata(
       return null;
     }
     metadata.usedTokens = tokens;
+  }
+
+  // The reporter sends its whole list every time, so it replaces the stored one.
+  if (body.workflowSteps !== undefined && body.workflowSteps !== null) {
+    const entries = body.workflowSteps;
+    if (!Array.isArray(entries) || entries.length > maxWorkflowSteps) return null;
+    const steps = entries.map(parseWorkflowStep);
+    if (steps.includes(null)) return null;
+    metadata.workflowSteps = steps as KanbanWorkflowStep[];
   }
 
   return metadata;
