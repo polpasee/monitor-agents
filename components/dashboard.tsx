@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+import { shortDateTimeFormatter } from "@/lib/format-time";
 import {
   calculateKpis,
   retainTopologyAgents,
@@ -34,14 +35,7 @@ const currency = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 2,
 });
 
-const timestamp = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  hourCycle: "h23",
-  timeZone: "UTC",
-});
+const timestamp = shortDateTimeFormatter({ timeZone: "UTC" });
 
 function MetricIcon({ name }: { name: MetricIconName }) {
   const paths: Record<MetricIconName, React.ReactNode> = {

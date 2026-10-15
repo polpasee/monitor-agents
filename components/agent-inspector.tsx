@@ -1,5 +1,6 @@
 "use client";
 
+import { shortDateTimeFormatter } from "@/lib/format-time";
 import {
   durationMs,
   getAgentChildren,
@@ -29,15 +30,7 @@ const currency = new Intl.NumberFormat("en-US", {
   maximumFractionDigits: 4,
 });
 
-const timestamp = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-  hour: "2-digit",
-  minute: "2-digit",
-  second: "2-digit",
-  hourCycle: "h23",
-  timeZone: "UTC",
-});
+const timestamp = shortDateTimeFormatter({ timeZone: "UTC", seconds: true });
 
 const providerLabels: Record<Provider, string> = {
   codex: "Codex",
