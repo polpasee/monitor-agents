@@ -805,7 +805,7 @@ button:focus-visible,
   text-align: right;
 }
 
-.kanban-run-details__table td:nth-child(2) {
+.kanban-run-details__table tbody td:nth-child(2) {
   text-align: left;
 }
 
