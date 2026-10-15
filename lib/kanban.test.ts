@@ -226,6 +226,10 @@ test("parseKanbanModel and parseKanbanEffort store Inherit as null", () => {
       "codex-luna",
       "deepseek",
       "glm",
+      "agy-gemini",
+      "agy-sonnet",
+      "agy-opus",
+      "agy-gpt-oss",
     ],
   );
   assert.deepEqual(
@@ -506,6 +510,11 @@ test("formatModelBadge shortens requested and reported models", () => {
   assert.equal(formatModelBadge("gpt-6.1-sol", "xhigh"), "sol:xhigh");
   assert.equal(formatModelBadge("z-ai/glm-5.3", null), "glm");
   assert.equal(formatModelBadge("deepseek/deepseek-v4-pro", "high"), "deepseek:high");
+  // Antigravity models never read as the Claude model of the same name.
+  assert.equal(formatModelBadge("agy-opus", "high"), "agy-opus:high");
+  assert.equal(formatModelBadge("agy-gpt-oss", null), "agy-oss");
+  assert.equal(formatModelBadge("agy/claude-sonnet-4-6", "medium"), "agy-sonnet:med");
+  assert.equal(formatModelBadge("agy/gemini-3.8-flash-low", null), "agy-gemini");
   assert.equal(formatModelBadge(null, "low"), "low");
   assert.equal(formatModelBadge("mystery-model", null), "mystery-model");
   assert.equal(formatModelBadge(null, null), null);
@@ -554,6 +563,9 @@ test("formatStepModel shows the model family and a short effort", () => {
   assert.equal(formatStepModel("Claude-Sonnet-4-5-20250929", "low"), "SONNET:Low");
   assert.equal(formatStepModel("deepseek", "high"), "DEEPSEEK:High");
   assert.equal(formatStepModel("z-ai/glm-5.3", "high"), "GLM:High");
+  assert.equal(formatStepModel("agy/claude-opus-4-6-thinking", "high"), "AGY-OPUS:High");
+  assert.equal(formatStepModel("agy-gemini", "low"), "AGY-GEMINI:Low");
+  assert.equal(formatStepModel("agy/gpt-oss-120b-medium", null), "AGY-OSS");
   // An id nothing names is shown by its first segment.
   assert.equal(formatStepModel("gemini-2.5-pro", "high"), "GEMINI:High");
   // Inherit or no effort leaves out the colon; no model leaves nothing to show.

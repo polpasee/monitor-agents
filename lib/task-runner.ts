@@ -64,12 +64,14 @@ export function buildTaskPrompt(task: KanbanTask): string {
     .join("\n");
 }
 
-export type RunnerProvider = "claude" | "codex" | "openrouter";
+export type RunnerProvider = "claude" | "codex" | "openrouter" | "agy";
 
 export type RunnerModel =
   | { provider: "claude"; cli: string | null }
   | { provider: "codex"; family: string; fallback: string }
-  | { provider: "openrouter"; cli: string };
+  | { provider: "openrouter"; cli: string }
+  /** `effortInModel`: the model id ends in its effort, e.g. gemini-3.8-flash-low. */
+  | { provider: "agy"; cli: string; effortInModel?: boolean };
 
 /**
  * Claude takes the CLI aliases, which follow new releases on their own. Codex
@@ -86,6 +88,10 @@ const runnerModels: Record<string, RunnerModel> = {
   "codex-luna": { provider: "codex", family: "luna", fallback: "gpt-6-luna" },
   deepseek: { provider: "openrouter", cli: "deepseek/deepseek-v4-pro" },
   glm: { provider: "openrouter", cli: "z-ai/glm-5.3" },
+  "agy-gemini": { provider: "agy", cli: "gemini-3.8-flash", effortInModel: true },
+  "agy-sonnet": { provider: "agy", cli: "claude-sonnet-4-6" },
+  "agy-opus": { provider: "agy", cli: "claude-opus-4-6-thinking" },
+  "agy-gpt-oss": { provider: "agy", cli: "gpt-oss-120b-medium" },
 };
 
 /**
@@ -154,6 +160,41 @@ export function latestCodexSlug(
     }
   }
   return best?.slug ?? fallback;
+}
+
+/**
+ * `agy models` lists Gemini Flash once per level, so the card's effort picks
+ * the id: xhigh reads as high, and none as medium.
+ */
+export function agyModelId(
+  model: { cli: string; effortInModel?: boolean },
+  effort: string | null,
+): string {
+  if (!model.effortInModel) return model.cli;
+  const level = effort === "xhigh" ? "high" : effort;
+  return `${model.cli}-${level === "low" || level === "high" ? level : "medium"}`;
+}
+
+/**
+ * Print mode with stream-json, like Claude. A model that carries its effort in
+ * the id takes no --effort; the others take the card's.
+ */
+export function agyArgs(
+  prompt: string,
+  model: string,
+  effort: string | null,
+  effortInModel = false,
+): string[] {
+  return [
+    "-p",
+    prompt,
+    "--model",
+    model,
+    "--output-format",
+    "stream-json",
+    "--dangerously-skip-permissions",
+    ...(effort && !effortInModel ? ["--effort", effort] : []),
+  ];
 }
 
 export function claudeArgs(
@@ -415,6 +456,87 @@ export function parseCodexOutput(stdout: string): {
     result: failure ?? (message || truncate(stdout, 2_000)),
     isError: failure !== undefined,
   };
+}
+
+/**
+ * Antigravity prints `init`, `step_update` and a final `result` event. Only
+ * `result` carries the answer, and `status` is SUCCESS when the turn worked.
+ */
+export function parseAgyOutput(stdout: string): {
+  result: string;
+  isError: boolean;
+} {
+  let result = "";
+  // A run that never printed its `result` (killed, crashed, cut off) did not finish.
+  let isError = true;
+
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    let event: unknown;
+    try {
+      event = JSON.parse(trimmed);
+    } catch {
+      continue;
+    }
+    const record = event as { event?: unknown; result?: Record<string, unknown> };
+    if (record?.event === "result" && typeof record.result === "object" && record.result) {
+      if (typeof record.result.response === "string") result = record.result.response;
+      isError = record.result.status !== "SUCCESS";
+    }
+  }
+
+  return { result: result || truncate(stdout, 2_000), isError };
+}
+
+/**
+ * The conversation id names the session. Tokens are the final `result` usage;
+ * until it arrives, the usage of each finished step (one per step index, as a
+ * step can repeat its event) is what a heartbeat can report.
+ */
+export function parseAgyRunMetadata(stdout: string): ClaudeRunMetadata {
+  const metadata: ClaudeRunMetadata = {};
+  const steps = new Map<number, number>();
+  let resultTokens: number | undefined;
+
+  const total = (usage: unknown): number | undefined => {
+    if (typeof usage !== "object" || usage === null) return undefined;
+    const fields = usage as Record<string, unknown>;
+    return typeof fields.total_tokens === "number"
+      ? fields.total_tokens
+      : sumTokens(fields, ["input_tokens", "output_tokens", "thinking_tokens"]);
+  };
+
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("{")) continue;
+    let event: Record<string, unknown>;
+    try {
+      event = JSON.parse(trimmed) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    if (typeof event !== "object" || event === null) continue;
+
+    if (event.event === "init") {
+      metadata.sessionId = stringField(event.conversation_id) ?? metadata.sessionId;
+    } else if (event.event === "step_update") {
+      const step = event.step_update as Record<string, unknown> | undefined;
+      const tokens = total(step?.usage);
+      if (step && typeof step.step_index === "number" && tokens !== undefined) {
+        steps.set(step.step_index, tokens);
+      }
+    } else if (event.event === "result") {
+      const result = event.result as Record<string, unknown> | undefined;
+      metadata.sessionId = stringField(result?.conversation_id) ?? metadata.sessionId;
+      resultTokens = total(result?.usage) ?? resultTokens;
+    }
+  }
+
+  const summed = [...steps.values()].reduce((sum, tokens) => sum + tokens, 0);
+  const tokens = resultTokens ?? (steps.size ? summed : undefined);
+  if (tokens !== undefined) metadata.usedTokens = tokens;
+  return metadata;
 }
 
 /**

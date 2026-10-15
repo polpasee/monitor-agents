@@ -8,6 +8,8 @@ import { promisify } from "node:util";
 
 import {
   buildTaskPrompt,
+  agyArgs,
+  agyModelId,
   claudeArgs,
   codexArgs,
   formatCompletionResult,
@@ -15,6 +17,8 @@ import {
   latestCodexSlug,
   openRouterEnv,
   maxResultLength,
+  parseAgyOutput,
+  parseAgyRunMetadata,
   parseClaudeOutput,
   parseClaudeRunMetadata,
   parseCodexOutput,
@@ -38,6 +42,7 @@ const config = {
   taskTimeoutSeconds: Number(process.env.KANBAN_TASK_TIMEOUT_SECONDS ?? 3_600),
   claudeBin: process.env.KANBAN_CLAUDE_BIN ?? "claude",
   codexBin: process.env.KANBAN_CODEX_BIN ?? "codex",
+  agyBin: process.env.KANBAN_AGY_BIN ?? "agy",
   commitExcludes: (process.env.KANBAN_COMMIT_EXCLUDE ?? ".serena,.claude")
     .split(",")
     .map((entry) => entry.trim())
@@ -170,6 +175,15 @@ function agentCommand(task, worktree, prompt) {
     const cli = codexSlug(model.family, model.fallback);
     return { provider: "codex", cli, bin: config.codexBin, args: codexArgs(prompt, cli, task.requestedEffort, worktree) };
   }
+  if (model.provider === "agy") {
+    const cli = agyModelId(model, task.requestedEffort);
+    return {
+      provider: "agy",
+      cli,
+      bin: config.agyBin,
+      args: agyArgs(prompt, cli, task.requestedEffort, model.effortInModel),
+    };
+  }
   const { provider, cli } = model;
   const args = claudeArgs(prompt, cli, task.requestedEffort);
   if (provider === "openrouter") {
@@ -188,6 +202,9 @@ async function runMetadata(task, provider, cli, stdout) {
   const requestedEffort = task.requestedEffort ? { effort: task.requestedEffort } : {};
   if (provider === "codex") {
     return { ...parseCodexRunMetadata(stdout), model: cli, ...requestedEffort };
+  }
+  if (provider === "agy") {
+    return { ...parseAgyRunMetadata(stdout), model: `agy/${cli}`, ...requestedEffort };
   }
   const metadata = parseClaudeRunMetadata(stdout);
   return { ...metadata, ...requestedEffort, ...(await readEffort(metadata.sessionId)) };
@@ -297,7 +314,9 @@ async function runTask(task, directory) {
     log(`Worktree ${worktree} on ${branch} from ${base}`);
 
     const run = await runAgent(bin, args, env, worktree, logPath, output);
-    const { result, isError } = (provider === "codex" ? parseCodexOutput : parseClaudeOutput)(run.stdout);
+    const parseOutput =
+      provider === "codex" ? parseCodexOutput : provider === "agy" ? parseAgyOutput : parseClaudeOutput;
+    const { result, isError } = parseOutput(run.stdout);
     const metadata = await runMetadata(task, provider, cli, run.stdout);
 
     if (run.code !== 0 || isError) {
