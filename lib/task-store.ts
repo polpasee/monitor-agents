@@ -39,6 +39,7 @@ interface TaskRow {
   summary: string | null;
   status_history: string;
   workflow_steps: string;
+  review_score: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -128,6 +129,7 @@ function taskFromRow(row: TaskRow): KanbanTask {
     summary: row.summary,
     statusHistory: statusHistoryFromRow(row.status_history),
     workflowSteps: workflowStepsFromRow(row.workflow_steps),
+    reviewScore: row.review_score,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -189,6 +191,9 @@ function runMetadataValues(metadata: TaskRunMetadata | undefined) {
  */
 const workflowStepsSql = "workflow_steps = COALESCE(?, workflow_steps)";
 
+/** Same rule as `workflowSteps`: a report without a score keeps the stored one. */
+const reviewScoreSql = "review_score = COALESCE(?, review_score)";
+
 function workflowStepsValue(metadata: TaskRunMetadata | undefined) {
   return metadata?.workflowSteps
     ? JSON.stringify(metadata.workflowSteps)
@@ -231,6 +236,7 @@ function tasksTableSql(target: string) {
     summary TEXT,
     status_history TEXT NOT NULL DEFAULT '[]',
     workflow_steps TEXT NOT NULL DEFAULT '[]',
+    review_score REAL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -289,6 +295,7 @@ export class TaskStore {
       ["requested_review_model", "TEXT"],
       ["requested_review_effort", "TEXT"],
       ["workflow_steps", "TEXT NOT NULL DEFAULT '[]'"],
+      ["review_score", "REAL"],
     ];
     for (const [name, definition] of additions) {
       if (!columns.has(name)) {
@@ -645,7 +652,7 @@ export class TaskStore {
       .prepare(`
         UPDATE tasks
         SET lease_until = ?, ${runMetadataSql}, ${workflowStepsSql},
-            updated_at = ?
+            ${reviewScoreSql}, updated_at = ?
         WHERE id = ?
           AND status = 'in-progress'
           AND claimed_by = ?
@@ -655,6 +662,7 @@ export class TaskStore {
         new Date(now.getTime() + leaseMs).toISOString(),
         ...runMetadataValues(metadata),
         workflowStepsValue(metadata),
+        metadata?.reviewScore ?? null,
         timestamp,
         id,
         agentId,
@@ -682,6 +690,7 @@ export class TaskStore {
             status_history = ${appendStatusSql},
             ${runMetadataSql},
             ${workflowStepsSql},
+            ${reviewScoreSql},
             updated_at = ?
         WHERE id = ?
           AND status = 'in-progress'
@@ -696,6 +705,7 @@ export class TaskStore {
         now.toISOString(),
         ...runMetadataValues(metadata),
         workflowStepsValue(metadata),
+        metadata?.reviewScore ?? null,
         now.toISOString(),
         id,
         agentId,
@@ -720,6 +730,7 @@ export class TaskStore {
             status_history = ${appendStatusSql},
             ${runMetadataSql},
             ${workflowStepsSql},
+            ${reviewScoreSql},
             updated_at = ?
         WHERE id = ?
           AND status = 'in-progress'
@@ -732,6 +743,7 @@ export class TaskStore {
         now.toISOString(),
         ...runMetadataValues(metadata),
         workflowStepsValue(metadata),
+        metadata?.reviewScore ?? null,
         now.toISOString(),
         id,
         agentId,

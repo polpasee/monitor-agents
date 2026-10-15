@@ -105,7 +105,10 @@ export function KanbanGuide() {
             carry <code>inputTokens</code>, <code>cacheWriteTokens</code>,{" "}
             <code>cacheReadTokens</code> and <code>outputTokens</code>, the
             four kinds behind <code>usedTokens</code>; a kind left out shows
-            as —.
+            as —. <code>reviewScore</code> (0–10, decimals allowed) is the
+            Review Agent&apos;s mark for the coding agent&apos;s work, from the
+            first review round; it shows under Workflow Steps, and a report
+            without it keeps the stored one.
             <pre>
               <code>{`curl -sS -X POST "${base}/api/agent/tasks/TASK_ID/heartbeat" ${json} \\
   -d '{"agentId":"codex-worker-1","leaseSeconds":60,"usedTokens":12000,"workflowSteps":[{"step":1,"model":"codex-astra","effort":"high","usedTokens":12000,"startedAt":"2026-10-15T10:00:00Z","endedAt":"2026-10-15T10:04:12Z"}]}'`}</code>

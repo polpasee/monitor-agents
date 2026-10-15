@@ -1268,3 +1268,52 @@ test("TaskStore moves failed tasks of a database that still allows failed to rev
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("TaskStore keeps the review score a report sends and leaves it when one does not", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-score-"));
+  const path = join(directory, "tasks.sqlite");
+  const store = new TaskStore(path);
+  try {
+    const task = store.createTask({ title: "Scored", repository: "monitor-agents" });
+    assert.equal(task.reviewScore, null);
+    const at = (seconds: number) => new Date(`2026-08-04T00:00:${seconds}.000Z`);
+    store.claimTask({
+      agentId: "agent-1",
+      repositories: ["monitor-agents"],
+      now: at(10),
+      leaseMs: 600_000,
+    });
+
+    assert.equal(
+      store.heartbeatTask(task.id, "agent-1", at(20), 600_000, { reviewScore: 7.5 })
+        ?.reviewScore,
+      7.5,
+    );
+    // A report without a score leaves the stored one alone, 0 included.
+    assert.equal(
+      store.heartbeatTask(task.id, "agent-1", at(30), 600_000, { usedTokens: 5 })
+        ?.reviewScore,
+      7.5,
+    );
+    assert.equal(
+      store.completeTask(task.id, "agent-1", "done", at(40), { reviewScore: 0 })
+        ?.reviewScore,
+      0,
+    );
+    assert.equal(store.getTask(task.id)?.reviewScore, 0);
+  } finally {
+    store.close();
+  }
+
+  // A database from before the column existed gains it, empty.
+  const raw = new DatabaseSync(path);
+  raw.exec("ALTER TABLE tasks DROP COLUMN review_score");
+  raw.close();
+  const reopened = new TaskStore(path);
+  try {
+    assert.deepEqual(reopened.listTasks().map((task) => task.reviewScore), [null]);
+  } finally {
+    reopened.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
