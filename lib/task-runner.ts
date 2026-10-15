@@ -176,15 +176,11 @@ export function agyModelId(
 }
 
 /**
- * Print mode with stream-json, like Claude. A model that carries its effort in
- * the id takes no --effort; the others take the card's.
+ * Print mode with stream-json, like Claude. Never --effort: `agy` rejects it
+ * for every model it lists ("--effort is not supported for model", or "conflicts
+ * with --effort" for the ones whose id already names a level).
  */
-export function agyArgs(
-  prompt: string,
-  model: string,
-  effort: string | null,
-  effortInModel = false,
-): string[] {
+export function agyArgs(prompt: string, model: string): string[] {
   return [
     "-p",
     prompt,
@@ -193,7 +189,6 @@ export function agyArgs(
     "--output-format",
     "stream-json",
     "--dangerously-skip-permissions",
-    ...(effort && !effortInModel ? ["--effort", effort] : []),
   ];
 }
 

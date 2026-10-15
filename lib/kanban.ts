@@ -205,6 +205,25 @@ export function parseKanbanEffort(value: unknown): string | null | false {
   return parseRequestedOption(kanbanEfforts, value);
 }
 
+/**
+ * Antigravity takes no --effort for these (`agy` answers "--effort is not
+ * supported for model"), so a task cannot ask for one. AGY-Gemini is not here:
+ * its effort picks the Flash model id.
+ */
+const fixedEffortModels = new Set(["agy-sonnet", "agy-opus", "agy-gpt-oss"]);
+
+export function isEffortFixed(model: string | null | undefined): boolean {
+  return model !== null && model !== undefined && fixedEffortModels.has(model);
+}
+
+/** The effort to store for a model: none when the model does not take one. */
+export function effortForModel(
+  model: string | null | undefined,
+  effort: string | null,
+): string | null {
+  return isEffortFixed(model) ? null : effort;
+}
+
 const taskDetailKeys = new Set([
   "title",
   "repository",
@@ -265,6 +284,9 @@ export function parseKanbanTaskPatch(
   const title = requiredString(body.title, 200);
   const repository = requiredString(body.repository, 200);
   const description = optionalString(body.description, 5_000);
+  // Picking a model that takes no effort clears the stored one, sent or not.
+  const clearsEffort = isEffortFixed(requestedModel);
+  const clearsReviewEffort = isEffortFixed(requestedReviewModel);
   return title && repository && description !== null
     ? {
         title,
@@ -272,9 +294,16 @@ export function parseKanbanTaskPatch(
         description,
         ...(priority !== undefined && { priority }),
         ...(hasModel && { requestedModel }),
-        ...(hasEffort && { requestedEffort }),
+        ...((hasEffort || clearsEffort) && {
+          requestedEffort: effortForModel(requestedModel, requestedEffort ?? null),
+        }),
         ...(hasReviewModel && { requestedReviewModel }),
-        ...(hasReviewEffort && { requestedReviewEffort }),
+        ...((hasReviewEffort || clearsReviewEffort) && {
+          requestedReviewEffort: effortForModel(
+            requestedReviewModel,
+            requestedReviewEffort ?? null,
+          ),
+        }),
       }
     : null;
 }

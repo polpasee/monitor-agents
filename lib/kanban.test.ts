@@ -9,7 +9,9 @@ import {
   formatModelBadge,
   formatStatusAge,
   formatStepModel,
+  effortForModel,
   formatReviewScore,
+  isEffortFixed,
   formatStepTokens,
   formatTokenCount,
   isKanbanTaskEditable,
@@ -1202,4 +1204,39 @@ test("formatReviewScore shows the mark out of 10 to one decimal", () => {
   assert.equal(formatReviewScore(7.25), "7.3 / 10");
   assert.equal(formatReviewScore(0), "0 / 10");
   assert.equal(formatReviewScore(null), "—");
+});
+
+test("isEffortFixed is true only for the Antigravity models that take no effort", () => {
+  for (const model of ["agy-sonnet", "agy-opus", "agy-gpt-oss"]) {
+    assert.equal(isEffortFixed(model), true, model);
+    assert.equal(effortForModel(model, "high"), null, model);
+  }
+  // Gemini's effort picks its model id, so it stays adjustable.
+  for (const model of ["agy-gemini", "claude-opus", "codex-sol", "glm", "inherit", null, undefined]) {
+    assert.equal(isEffortFixed(model), false, String(model));
+    assert.equal(effortForModel(model, "high"), "high", String(model));
+  }
+});
+
+test("parseKanbanTaskPatch clears the effort of a model that takes none", () => {
+  const details = { title: "T", repository: "r", description: "d" };
+  // Sent together with a fixed-effort model: the effort is dropped.
+  assert.deepEqual(
+    parseKanbanTaskPatch({ ...details, requestedModel: "agy-opus", requestedEffort: "high" }),
+    { ...details, requestedModel: "agy-opus", requestedEffort: null },
+  );
+  // Switching to it without sending an effort resets the stored one too.
+  assert.deepEqual(
+    parseKanbanTaskPatch({ ...details, requestedReviewModel: "agy-sonnet" }),
+    { ...details, requestedReviewModel: "agy-sonnet", requestedReviewEffort: null },
+  );
+  // Other models keep what was sent, and leave the effort alone when none is.
+  assert.deepEqual(
+    parseKanbanTaskPatch({ ...details, requestedModel: "agy-gemini", requestedEffort: "low" }),
+    { ...details, requestedModel: "agy-gemini", requestedEffort: "low" },
+  );
+  assert.deepEqual(parseKanbanTaskPatch({ ...details, requestedModel: "claude-opus" }), {
+    ...details,
+    requestedModel: "claude-opus",
+  });
 });

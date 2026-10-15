@@ -181,7 +181,7 @@ function agentCommand(task, worktree, prompt) {
       provider: "agy",
       cli,
       bin: config.agyBin,
-      args: agyArgs(prompt, cli, task.requestedEffort, model.effortInModel),
+      args: agyArgs(prompt, cli),
     };
   }
   const { provider, cli } = model;
