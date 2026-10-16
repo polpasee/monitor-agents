@@ -14,6 +14,7 @@ import {
 
 import { AgentInspector } from "./agent-inspector";
 import { KanbanBoard } from "./kanban-board";
+import { PerformanceView } from "./performance-view";
 import { Topology } from "./topology";
 
 interface DashboardProps {
@@ -21,7 +22,7 @@ interface DashboardProps {
 }
 
 type MetricIconName = "agents" | "tokens" | "cost" | "health";
-type DashboardView = "topology" | "kanban";
+type DashboardView = "topology" | "kanban" | "performance";
 
 const compactNumber = new Intl.NumberFormat("en-US", {
   notation: "compact",
@@ -386,6 +387,13 @@ export function Dashboard({ snapshot: initialSnapshot }: DashboardProps) {
           >
             Kanban
           </button>
+          <button
+            aria-current={view === "performance" ? "page" : undefined}
+            onClick={() => setView("performance")}
+            type="button"
+          >
+            Performance
+          </button>
           <Link href="/docs">Docs</Link>
         </nav>
       </header>
@@ -413,12 +421,14 @@ export function Dashboard({ snapshot: initialSnapshot }: DashboardProps) {
             onSelectAgent={selectAgent}
           />
         </div>
-      ) : (
+      ) : view === "kanban" ? (
         <KanbanBoard
           agents={snapshot.agents}
           capturedAt={snapshot.capturedAt}
           quotaLimits={snapshot.quotaLimits}
         />
+      ) : (
+        <PerformanceView />
       )}
 
       <section className="metric-grid" aria-label="Session summary">
