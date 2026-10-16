@@ -108,7 +108,7 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
       "agentId: string, 1–200 chars",
       "repositories: string[], 1–100 items, each 1–200 chars",
       "leaseSeconds?: integer 15–3600 (default 60)",
-      "excludeModels?: string[] of model ids (not inherit), up to one per model; tasks whose model is listed are skipped",
+      "excludeModels?: string[] of model ids (not inherit), up to 14 items; tasks whose model is listed are skipped",
       "inheritModel?: model id (not inherit), the model an Inherit task runs on, matched against excludeModels",
       ...runMetadata,
     ],
