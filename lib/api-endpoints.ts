@@ -108,6 +108,8 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
       "agentId: string, 1–200 chars",
       "repositories: string[], 1–100 items, each 1–200 chars",
       "leaseSeconds?: integer 15–3600 (default 60)",
+      "excludeModels?: string[] of model ids (not inherit), up to 14 items; tasks whose model is listed are skipped",
+      "inheritModel?: model id (not inherit), the model an Inherit task runs on, matched against excludeModels",
       ...runMetadata,
     ],
     responses: [
@@ -115,7 +117,7 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
       {
         status: 204,
         description:
-          "No Todo task available, or In Coding Progress already holds the coding limit; no body",
+          "No Todo task available (or every one is excluded), or In Coding Progress already holds the coding limit; no body",
       },
       { status: 400, description: '{"error":"Invalid claim input."}' },
     ],

@@ -504,6 +504,107 @@ test("TaskStore claims nothing once the coding limit is reached", async () => {
   }
 });
 
+test("TaskStore skips tasks whose model is excluded from a claim", async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-exclude-"));
+  const now = new Date("2026-08-04T01:00:00.000Z");
+  let store: TaskStore;
+  let created = 0;
+  // One fresh store per case; created_at is spaced so the queue order is fixed.
+  const setup = (cards: { title: string; requestedModel?: string | null }[]) => {
+    store = new TaskStore(join(directory, `tasks-${created}.sqlite`));
+    store.updateBoardSettings({ codingLimit: 5 });
+    return cards.map((card) =>
+      store.createTask(
+        { ...card, repository: "monitor-agents" },
+        new Date(Date.UTC(2026, 7, 4, 0, created++)),
+      ),
+    );
+  };
+  const claim = (filter: { excludeModels?: string[]; inheritModel?: string } = {}) =>
+    store.claimTask({
+      agentId: "agent-1",
+      repositories: ["monitor-agents"],
+      now,
+      ...filter,
+    });
+
+  try {
+    await t.test("no filter keeps the head of the queue, NULL model included", () => {
+      setup([{ title: "Null" }, { title: "Codex", requestedModel: "codex-sol" }]);
+      assert.equal(claim()?.title, "Null");
+      assert.equal(claim({ excludeModels: [] })?.title, "Codex");
+      store.close();
+    });
+
+    await t.test("an excluded head is skipped and stays todo", () => {
+      const [codex] = setup([
+        { title: "Codex", requestedModel: "codex-sol" },
+        { title: "Opus", requestedModel: "claude-opus" },
+      ]);
+      assert.equal(claim({ excludeModels: ["codex-sol"] })?.title, "Opus");
+      assert.equal(store.getTask(codex.id)?.status, "todo");
+      assert.equal(store.getTask(codex.id)?.attemptCount, 0);
+      store.close();
+    });
+
+    await t.test("Inherit tasks take inheritModel", () => {
+      const [nullModel, inherit] = setup([
+        { title: "Null" },
+        { title: "Inherit", requestedModel: "inherit" },
+        { title: "Codex", requestedModel: "codex-sol" },
+        { title: "Opus", requestedModel: "claude-opus" },
+      ]);
+      const drained = { excludeModels: ["claude-opus"], inheritModel: "claude-opus" };
+      assert.equal(claim(drained)?.title, "Codex");
+      assert.equal(claim(drained), null);
+      assert.equal(store.getTask(nullModel.id)?.status, "todo");
+      assert.equal(store.getTask(inherit.id)?.status, "todo");
+
+      const other = { excludeModels: ["claude-opus"], inheritModel: "codex-sol" };
+      assert.equal(claim(other)?.title, "Null");
+      assert.equal(claim(other)?.title, "Inherit");
+      store.close();
+    });
+
+    await t.test("an Inherit task is claimable when no inheritModel is sent", () => {
+      setup([
+        { title: "Opus", requestedModel: "claude-opus" },
+        { title: "Null" },
+        { title: "Inherit", requestedModel: "inherit" },
+      ]);
+      assert.equal(claim({ excludeModels: ["claude-opus"] })?.title, "Null");
+      assert.equal(claim({ excludeModels: ["claude-opus"] })?.title, "Inherit");
+      store.close();
+    });
+
+    await t.test("every task excluded claims nothing and changes nothing", () => {
+      const tasks = setup([
+        { title: "Codex", requestedModel: "codex-sol" },
+        { title: "Null" },
+      ]);
+      assert.equal(
+        claim({ excludeModels: ["codex-sol", "claude-opus"], inheritModel: "claude-opus" }),
+        null,
+      );
+      assert.deepEqual(store.listTasks(), tasks);
+      store.close();
+    });
+
+    await t.test("the coding limit still stops a claim", () => {
+      setup([
+        { title: "Opus", requestedModel: "claude-opus" },
+        { title: "Codex", requestedModel: "codex-sol" },
+      ]);
+      store.updateBoardSettings({ codingLimit: 1 });
+      assert.equal(claim()?.title, "Opus");
+      assert.equal(claim({ excludeModels: ["claude-opus"] }), null);
+      store.close();
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("TaskStore records the run a claim names", async () => {
   const directory = await mkdtemp(join(tmpdir(), "monitor-task-claim-run-"));
   const store = new TaskStore(join(directory, "tasks.sqlite"));

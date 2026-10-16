@@ -72,6 +72,9 @@ export interface ClaimTaskInput {
   now?: Date;
   leaseMs?: number;
   metadata?: TaskRunMetadata;
+  /** Skip tasks whose model (requested, or inheritModel for Inherit) is listed. */
+  excludeModels?: string[];
+  inheritModel?: string;
 }
 
 function statusHistoryFromRow(value: string): KanbanStatusEvent[] {
@@ -565,6 +568,15 @@ export class TaskStore {
       now.getTime() + (input.leaseMs ?? 60_000),
     ).toISOString();
     const placeholders = repositories.map(() => "?").join(", ");
+    const excludeModels = input.excludeModels ?? [];
+    // '' stands in for a missing inheritModel: NOT IN on NULL would drop the row.
+    const modelFilterSql =
+      excludeModels.length === 0
+        ? ""
+        : `
+            AND COALESCE(NULLIF(requested_model, 'inherit'), ?) NOT IN (${excludeModels.map(() => "?").join(", ")})`;
+    const modelFilterValues =
+      excludeModels.length === 0 ? [] : [input.inheritModel ?? "", ...excludeModels];
 
     this.database.exec("BEGIN IMMEDIATE");
     try {
@@ -597,11 +609,11 @@ export class TaskStore {
         .prepare(`
           SELECT id FROM tasks
           WHERE status = 'todo'
-            AND repository IN (${placeholders})
+            AND repository IN (${placeholders})${modelFilterSql}
           ORDER BY priority DESC, created_at ASC
           LIMIT 1
         `)
-        .get(...repositories) as { id: string } | undefined;
+        .get(...repositories, ...modelFilterValues) as { id: string } | undefined;
 
       if (!candidate) {
         this.database.exec("COMMIT");

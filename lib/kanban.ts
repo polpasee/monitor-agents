@@ -205,6 +205,40 @@ export function parseKanbanEffort(value: unknown): string | null | false {
   return parseRequestedOption(kanbanEfforts, value);
 }
 
+/** Models a claim must not dispatch, and the model an Inherit task runs on. */
+export interface ClaimModelFilter {
+  excludeModels?: string[];
+  inheritModel?: string;
+}
+
+/**
+ * Both fields are optional; when sent, each id must be a known model other
+ * than Inherit. Anything else, null included, returns null so the claim is
+ * rejected.
+ */
+export function parseClaimModelFilter(
+  body: Record<string, unknown>,
+): ClaimModelFilter | null {
+  const isModel = (value: unknown) =>
+    value !== "inherit" && kanbanModels.some((model) => model.id === value);
+  const { excludeModels, inheritModel } = body;
+  if (
+    (excludeModels !== undefined &&
+      !(
+        Array.isArray(excludeModels) &&
+        excludeModels.length <= kanbanModels.length &&
+        excludeModels.every(isModel)
+      )) ||
+    (inheritModel !== undefined && !isModel(inheritModel))
+  ) {
+    return null;
+  }
+  return {
+    excludeModels: excludeModels && [...new Set(excludeModels as string[])],
+    inheritModel: inheritModel as string | undefined,
+  };
+}
+
 /**
  * Antigravity takes no --effort for these (`agy` answers "--effort is not
  * supported for model"), so a task cannot ask for one. AGY-Gemini is not here:

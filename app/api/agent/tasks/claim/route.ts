@@ -1,5 +1,5 @@
 import { readJsonObject, requiredString, stringArray } from "@/lib/api-input";
-import { parseTaskRunMetadata } from "@/lib/kanban";
+import { parseClaimModelFilter, parseTaskRunMetadata } from "@/lib/kanban";
 import { getTaskStore } from "@/lib/task-store";
 
 export const dynamic = "force-dynamic";
@@ -11,11 +11,13 @@ export async function POST(request: Request) {
   const repositories = stringArray(body?.repositories, 100, 200);
   const leaseSeconds = body?.leaseSeconds ?? 60;
   const metadata = body ? parseTaskRunMetadata(body) : null;
+  const modelFilter = body ? parseClaimModelFilter(body) : null;
   if (
     !body ||
     !agentId ||
     !repositories ||
     !metadata ||
+    !modelFilter ||
     typeof leaseSeconds !== "number" ||
     !Number.isInteger(leaseSeconds) ||
     leaseSeconds < 15 ||
@@ -29,6 +31,7 @@ export async function POST(request: Request) {
     repositories,
     leaseMs: leaseSeconds * 1_000,
     metadata,
+    ...modelFilter,
   });
   return task ? Response.json(task) : new Response(null, { status: 204 });
 }
