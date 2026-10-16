@@ -511,6 +511,72 @@ button:focus-visible,
   margin: 0;
 }
 
+/* Performance */
+
+.performance-panel {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  box-shadow: var(--shadow);
+}
+
+.performance-chart {
+  display: grid;
+  gap: 12px;
+  padding: 15px 18px;
+}
+
+.performance-chart__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 0;
+  padding: 0;
+  color: var(--text-soft);
+  font-size: 12px;
+  list-style: none;
+}
+
+.performance-chart__legend li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.performance-chart__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+.performance-chart__svg {
+  display: block;
+  height: auto;
+}
+
+.performance-chart__grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+
+.performance-chart__tick {
+  fill: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.performance-chart__line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+}
+
+.performance-chart__dot {
+  stroke: var(--surface-1);
+  stroke-width: 2;
+}
+
 /* Kanban */
 
 .kanban-panel {
