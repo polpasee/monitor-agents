@@ -20,9 +20,12 @@ const bangkokDate = new Intl.DateTimeFormat("en-US", {
   timeZone: "Asia/Bangkok",
 });
 
-function bangkokDay(at: string): string {
+/** null for a string that is not a valid time, which formatToParts would throw on. */
+function bangkokDay(at: string): string | null {
+  const date = new Date(at);
+  if (Number.isNaN(date.getTime())) return null;
   const part = new Map(
-    bangkokDate.formatToParts(new Date(at)).map(({ type, value }) => [type, value]),
+    bangkokDate.formatToParts(date).map(({ type, value }) => [type, value]),
   );
   return `${part.get("year")}-${part.get("month")}-${part.get("day")}`;
 }
@@ -43,6 +46,7 @@ export function buildPerformanceSeries(tasks: KanbanTask[]): PerformanceSeries[]
     if (!label) continue;
     const doneAt = task.statusHistory.findLast((event) => event.status === "done")?.at;
     const day = bangkokDay(doneAt ?? task.updatedAt);
+    if (!day) continue;
     const days = sums.get(label) ?? new Map();
     const sum = days.get(day) ?? { total: 0, count: 0 };
     sum.total += task.reviewScore;

@@ -113,6 +113,13 @@ test("uses the last done event, falling back to updatedAt without one", () => {
   );
 });
 
+test("skips a task whose date is not a valid time", () => {
+  const series = buildPerformanceSeries([
+    task({ statusHistory: [{ status: "done", at: "not a date" }] }),
+  ]);
+  assert.deepEqual(series, []);
+});
+
 test("drops a task with no model", () => {
   const series = buildPerformanceSeries([
     task({ model: null, requestedModel: null }),

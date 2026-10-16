@@ -550,9 +550,14 @@ button:focus-visible,
   border-radius: 50%;
 }
 
+.performance-chart__frame {
+  min-width: 0;
+  height: 240px;
+  overflow: hidden;
+}
+
 .performance-chart__svg {
   display: block;
-  height: auto;
 }
 
 .performance-chart__grid {
