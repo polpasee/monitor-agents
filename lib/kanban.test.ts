@@ -29,6 +29,7 @@ import {
   parseKanbanModel,
   parseKanbanPriority,
   parseBoardSettingsPatch,
+  parseClaimModelFilter,
   parseKanbanTaskPatch,
   parseTaskRunMetadata,
   type KanbanStatus,
@@ -352,6 +353,44 @@ test("parseBoardSettingsPatch accepts limits of 1 to 5 only", () => {
   assert.equal(parseBoardSettingsPatch({}), null);
   assert.equal(parseBoardSettingsPatch(null), null);
   assert.equal(parseBoardSettingsPatch({ codingLimit: 2, other: 1 }), null);
+});
+
+test("parseClaimModelFilter accepts known non-Inherit model ids only", () => {
+  assert.deepEqual(parseClaimModelFilter({ agentId: "a" }), {
+    excludeModels: undefined,
+    inheritModel: undefined,
+  });
+  assert.deepEqual(parseClaimModelFilter({ excludeModels: [] }), {
+    excludeModels: [],
+    inheritModel: undefined,
+  });
+  assert.deepEqual(
+    parseClaimModelFilter({
+      excludeModels: ["codex-sol", "claude-opus", "codex-sol"],
+      inheritModel: "claude-opus",
+    }),
+    { excludeModels: ["codex-sol", "claude-opus"], inheritModel: "claude-opus" },
+  );
+  const allModels = kanbanModels
+    .map((model) => model.id)
+    .filter((id) => id !== "inherit");
+  assert.deepEqual(parseClaimModelFilter({ excludeModels: allModels })?.excludeModels, allModels);
+
+  for (const excludeModels of [
+    null,
+    "codex-sol",
+    { 0: "codex-sol" },
+    ["inherit"],
+    ["gpt-4"],
+    ["codex-sol", 1],
+    ["codex-sol", null],
+    Array(kanbanModels.length + 1).fill("codex-sol"),
+  ]) {
+    assert.equal(parseClaimModelFilter({ excludeModels }), null);
+  }
+  for (const inheritModel of [null, "inherit", "gpt-4", "", 1, ["claude-opus"]]) {
+    assert.equal(parseClaimModelFilter({ inheritModel }), null);
+  }
 });
 
 test("kanbanRepositories returns sorted unique repository names", () => {
