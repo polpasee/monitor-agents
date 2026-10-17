@@ -525,8 +525,8 @@ export function parseAgyOutput(stdout: string): {
 /**
  * The conversation id names the session. Tokens are the final `result` usage;
  * until it arrives, the usage of each finished step (one per step index, as a
- * step can repeat its event) is what a heartbeat can report. AGY reports no
- * cache fields, so only input and output (thinking included) are split out.
+ * step can repeat its event) is what a heartbeat can report. `total_tokens`
+ * leaves out `cache_read_tokens`, so the used tokens are the kinds added up.
  */
 export function parseAgyRunMetadata(stdout: string): ClaudeRunMetadata {
   const metadata: ClaudeRunMetadata = {};
@@ -537,10 +537,6 @@ export function parseAgyRunMetadata(stdout: string): ClaudeRunMetadata {
     typeof usage === "object" && usage !== null
       ? (usage as Record<string, unknown>)
       : undefined;
-  const total = (fields: Record<string, unknown>): number =>
-    typeof fields.total_tokens === "number"
-      ? fields.total_tokens
-      : sumTokens(fields, ["input_tokens", "output_tokens", "thinking_tokens"]);
 
   for (const line of stdout.split("\n")) {
     const trimmed = line.trim();
@@ -577,13 +573,20 @@ export function parseAgyRunMetadata(stdout: string): ClaudeRunMetadata {
     (usage) =>
       typeof usage.input_tokens === "number" || typeof usage.output_tokens === "number",
   );
-  metadata.usedTokens = sum(total);
-  metadata.inputTokens = split ? sum((usage) => sumTokens(usage, ["input_tokens"])) : null;
-  metadata.cacheWriteTokens = null;
-  metadata.cacheReadTokens = null;
-  metadata.outputTokens = split
-    ? sum((usage) => sumTokens(usage, ["output_tokens", "thinking_tokens"]))
-    : null;
+  if (!split) {
+    metadata.usedTokens = sum((usage) => sumTokens(usage, ["total_tokens"]));
+    metadata.inputTokens = null;
+    metadata.cacheWriteTokens = null;
+    metadata.cacheReadTokens = null;
+    metadata.outputTokens = null;
+    return metadata;
+  }
+  metadata.inputTokens = sum((usage) => sumTokens(usage, ["input_tokens"]));
+  metadata.cacheWriteTokens = 0;
+  metadata.cacheReadTokens = sum((usage) => sumTokens(usage, ["cache_read_tokens"]));
+  metadata.outputTokens = sum((usage) => sumTokens(usage, ["output_tokens", "thinking_tokens"]));
+  metadata.usedTokens =
+    metadata.inputTokens + metadata.cacheReadTokens + metadata.outputTokens;
   return metadata;
 }
 
