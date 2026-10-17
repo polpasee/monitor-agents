@@ -55,7 +55,7 @@ test("prices every token kind of the coding model's steps", () => {
   assert.ok(Math.abs(cost! - 14.7) < 1e-9);
 });
 
-test("leaves out steps another model ran, such as an Opus review of Sonnet's work", () => {
+test("leaves out the Opus verify step of Sonnet's work", () => {
   const cost = codingCost({
     model: "sonnet",
     workflowSteps: [
@@ -78,7 +78,7 @@ test("counts only Implement, leaving out Explore and Verify even on the card's f
   assert.ok(Math.abs(cost! - 0.2) < 1e-9);
 });
 
-test("leaves out an Implement step another model ran, such as a Codex run's Opus driver", () => {
+test("leaves out an Implement step another model ran", () => {
   const cost = codingCost({
     model: "gpt-6.1-sol",
     workflowSteps: [

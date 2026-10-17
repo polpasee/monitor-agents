@@ -150,7 +150,7 @@ const implementStep = 3;
 
 /**
  * What the coding model's Implement steps cost. An Implement step another
- * model ran, such as the Opus driver of a Codex run, is left out. null unless
+ * model ran, which no reporter sends today, would be left out. null unless
  * every such step can be priced and the total is above $0.
  */
 export function codingCost(
