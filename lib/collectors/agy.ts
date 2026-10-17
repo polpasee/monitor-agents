@@ -36,7 +36,7 @@ const QUOTA_PERIODS: QuotaPeriod[] = ["hour", "week"];
 const DEFAULT_MAX_AGENTS = 24;
 const execFileAsync = promisify(execFile);
 const USAGE_CACHE_MS = 5 * 60_000;
-const USAGE_RETRY_CACHE_MS = 10_000;
+const USAGE_RETRY_CACHE_MS = 60_000;
 const USAGE_TIMEOUT_MS = 45_000;
 const USAGE_GROUPS = new Map([
   ["Gemini Models", { id: "agy-gemini", label: "Gemini" }],
@@ -47,8 +47,13 @@ const USAGE_WINDOWS = new Map<string, { period: QuotaPeriod; windowHours: number
   ["Five Hour Limit Remaining", { period: "hour", windowHours: 5 }],
 ]);
 
-let cachedUsage: { expiresAt: number; quotaLimits: QuotaLimit[] } | null = null;
-let pendingUsage: Promise<void> | null = null;
+// On globalThis so every module copy Next dev loads shares one cache.
+const usageGlobal = globalThis as typeof globalThis & {
+  monitorAgyUsage?: {
+    cached: { expiresAt: number; quotaLimits: QuotaLimit[] } | null;
+    pending: Promise<void> | null;
+  };
+};
 
 class ValidationError extends Error {}
 
@@ -512,19 +517,20 @@ async function loadAgyUsage(): Promise<QuotaLimit[]> {
 // Snapshots never wait on agy: they get the last cached quota, and a stale
 // cache starts one background refresh. A failed refresh keeps the old quota.
 function collectAgyUsage(): QuotaLimit[] {
-  if (!pendingUsage && (cachedUsage?.expiresAt ?? 0) <= Date.now()) {
-    pendingUsage = loadAgyUsage().then((quotaLimits) => {
-      cachedUsage =
+  const usage = (usageGlobal.monitorAgyUsage ??= { cached: null, pending: null });
+  if (!usage.pending && (usage.cached?.expiresAt ?? 0) <= Date.now()) {
+    usage.pending = loadAgyUsage().then((quotaLimits) => {
+      usage.cached =
         quotaLimits.length > 0
           ? { expiresAt: Date.now() + USAGE_CACHE_MS, quotaLimits }
           : {
               expiresAt: Date.now() + USAGE_RETRY_CACHE_MS,
-              quotaLimits: cachedUsage?.quotaLimits ?? [],
+              quotaLimits: usage.cached?.quotaLimits ?? [],
             };
-      pendingUsage = null;
+      usage.pending = null;
     });
   }
-  return cachedUsage?.quotaLimits ?? [];
+  return usage.cached?.quotaLimits ?? [];
 }
 
 export async function collectAgyTelemetry(): Promise<CollectorResult> {

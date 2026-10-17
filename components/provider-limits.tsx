@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+
 import {
   formatResetDuration,
   getProviderQuota,
@@ -69,6 +71,7 @@ export function ProviderLimits({
           : "provider-limits-overlay"
       }
       aria-label="Provider limits"
+      style={{ "--provider-cards": providers.length } as CSSProperties}
     >
       <div className="provider-limits-overlay__providers">
         {providers.map((card) => {
