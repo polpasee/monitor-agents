@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { KanbanTask } from "./kanban.ts";
+import { parseTaskRunMetadata, type KanbanTask } from "./kanban.ts";
 import {
   agyArgs,
   agyModelId,
@@ -21,6 +21,7 @@ import {
   pullRequestNumberFromUrl,
   repositoryDirectoryName,
   runnerModel,
+  runWorkflowSteps,
   stagePathspecs,
   taskBranchName,
   truncate,
@@ -211,6 +212,10 @@ test("parseClaudeRunMetadata reads the session, model, and tokens mid-run", () =
     sessionId: "5c8f0c1e",
     model: "claude-opus-5",
     usedTokens: 985,
+    inputTokens: 110,
+    cacheWriteTokens: 50,
+    cacheReadTokens: 800,
+    outputTokens: 25,
     // The run the board should open on, named the way the topology names it.
     agentRunId: "claude:5c8f0c1e",
   });
@@ -298,7 +303,12 @@ test("parseClaudeRunMetadata totals every model the run billed", () => {
     }),
   ].join("\n");
 
-  assert.equal(parseClaudeRunMetadata(stdout).usedTokens, 1_700);
+  const metadata = parseClaudeRunMetadata(stdout);
+  assert.equal(metadata.usedTokens, 1_700);
+  assert.deepEqual(
+    [metadata.inputTokens, metadata.cacheWriteTokens, metadata.cacheReadTokens, metadata.outputTokens],
+    [140, 80, 1_400, 80],
+  );
 });
 
 test("parseClaudeRunMetadata reports nothing for an empty stream", () => {
@@ -564,6 +574,11 @@ test("parseCodexRunMetadata names the thread the way the topology does", () => {
     sessionId: "01a0f64e-f903-7903-a145-186c455cc4f8",
     agentRunId: "codex:01a0f64e-f903-7903-a145-186c455cc4f8",
     usedTokens: 19_409,
+    // Cached input is billed as a cache read, not input.
+    inputTokens: 12_236,
+    cacheWriteTokens: 0,
+    cacheReadTokens: 7_168,
+    outputTokens: 5,
   });
   assert.ok(!("model" in metadata));
 });
@@ -581,6 +596,11 @@ test("parseCodexRunMetadata sums every completed turn without double counting", 
     parseCodexRunMetadata([codexSuccess, codexLunaUsage].join("\n")).usedTokens,
     19_409 + 18_343,
   );
+  const both = parseCodexRunMetadata([codexSuccess, codexLunaUsage].join("\n"));
+  assert.deepEqual(
+    [both.inputTokens, both.cacheWriteTokens, both.cacheReadTokens, both.outputTokens],
+    [12_236 + 10_388, 0, 7_168 + 7_936, 5 + 19],
+  );
   assert.deepEqual(parseCodexRunMetadata(""), {});
 });
 
@@ -594,6 +614,10 @@ test("parseClaudeRunMetadata reads a run started with --model haiku", () => {
     sessionId: "f5655906-c847-4b1d-aea7-554ec8d74abd",
     model: "claude-haiku-4-5-20251001",
     usedTokens: 29_384,
+    inputTokens: 10,
+    cacheWriteTokens: 15_071,
+    cacheReadTokens: 14_263,
+    outputTokens: 40,
     agentRunId: "claude:f5655906-c847-4b1d-aea7-554ec8d74abd",
   });
 });
@@ -644,6 +668,11 @@ test("parseAgyRunMetadata reads the conversation and the tokens so far", () => {
   assert.deepEqual(parseAgyRunMetadata(agyStream.join("\n")), {
     sessionId: "conv-1",
     usedTokens: 335,
+    // Thinking is billed as output; AGY reports no cache kinds.
+    inputTokens: 300,
+    cacheWriteTokens: null,
+    cacheReadTokens: null,
+    outputTokens: 35,
   });
   // A repeated step event counts once.
   assert.equal(
@@ -659,7 +688,49 @@ test("parseAgyRunMetadata prefers the final result usage", () => {
   assert.deepEqual(parseAgyRunMetadata([...agyStream, result].join("\n")), {
     sessionId: "conv-1",
     usedTokens: 340,
+    inputTokens: 300,
+    cacheWriteTokens: null,
+    cacheReadTokens: null,
+    outputTokens: 35,
   });
+});
+
+test("parseAgyRunMetadata leaves the kinds unknown when only a total is reported", () => {
+  const result =
+    '{"event":"result","result":{"conversation_id":"conv-1","status":"SUCCESS","usage":{"total_tokens":340}}}';
+  assert.deepEqual(parseAgyRunMetadata(result), {
+    sessionId: "conv-1",
+    usedTokens: 340,
+    inputTokens: null,
+    cacheWriteTokens: null,
+    cacheReadTokens: null,
+    outputTokens: null,
+  });
+});
+
+test("runWorkflowSteps reports the run as one step the server accepts", () => {
+  const metadata = { ...parseCodexRunMetadata(codexSuccess), model: "gpt-6.1-sol", effort: "high" };
+  const startedAt = new Date("2026-10-16T08:30:40.123Z");
+  const reported = runWorkflowSteps(metadata, startedAt, new Date("2026-10-16T08:42:05.987Z"));
+  assert.deepEqual(reported.workflowSteps, [
+    {
+      step: 3,
+      model: "gpt-6.1-sol",
+      effort: "high",
+      usedTokens: 19_409,
+      inputTokens: 12_236,
+      cacheWriteTokens: 0,
+      cacheReadTokens: 7_168,
+      outputTokens: 5,
+      startedAt: "2026-10-16T08:30:40Z",
+      endedAt: "2026-10-16T08:42:05Z",
+    },
+  ]);
+  assert.deepEqual(parseTaskRunMetadata(reported)?.workflowSteps, reported.workflowSteps);
+
+  // A heartbeat has no end yet, and one before any usage sends no steps at all.
+  assert.equal(runWorkflowSteps(metadata, startedAt, null).workflowSteps?.[0].endedAt, null);
+  assert.deepEqual(runWorkflowSteps(parseCodexRunMetadata(""), startedAt, null), {});
 });
 
 test("parseAgyOutput returns the response and flags a failed status", () => {
