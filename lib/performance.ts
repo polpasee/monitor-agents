@@ -1,66 +1,128 @@
-import { formatStepModel, type KanbanTask } from "./kanban.ts";
+import {
+  formatStepModel,
+  kanbanEfforts,
+  type KanbanTask,
+  type KanbanWorkflowStep,
+} from "./kanban.ts";
 
 export interface PerformancePoint {
-  /** YYYY-MM-DD in Bangkok time. */
-  day: string;
-  average: number;
+  /** "opus:med". */
+  label: string;
+  /** Average USD a task cost, every workflow step priced at its own model. */
+  cost: number;
+  /** Average review score. */
+  score: number;
   count: number;
 }
 
 export interface PerformanceSeries {
-  /** "opus:med", "codex:high". */
+  /** The model family, "opus". */
   label: string;
+  /** Ordered by effort, low to xhigh. */
   points: PerformancePoint[];
 }
 
-const bangkokDate = new Intl.DateTimeFormat("en-US", {
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  timeZone: "Asia/Bangkok",
-});
-
-/** null for a string that is not a valid time, which formatToParts would throw on. */
-function bangkokDay(at: string): string | null {
-  const date = new Date(at);
-  if (Number.isNaN(date.getTime())) return null;
-  const part = new Map(
-    bangkokDate.formatToParts(date).map(({ type, value }) => [type, value]),
-  );
-  return `${part.get("year")}-${part.get("month")}-${part.get("day")}`;
+interface TokenPrice {
+  input: number;
+  cacheWrite: number;
+  cacheRead: number;
+  output: number;
 }
 
 /**
- * The review score of scored tasks averaged per Bangkok day, one series per
- * coding "model:effort". A task's day is when it last went done, or its last
- * update when it never did.
+ * USD per million tokens, Anthropic API list prices as of 2026-10-06. Cache
+ * writes are at the 5-minute TTL rate (1.25x input), which the subagents that
+ * run workflow steps use.
+ */
+export const tokenPrices: Record<string, TokenPrice> = {
+  "claude-fable-5-1": { input: 10, cacheWrite: 12.5, cacheRead: 0.25, output: 50 },
+  "claude-opus-5-5": { input: 4, cacheWrite: 5, cacheRead: 0.2, output: 20 },
+  "claude-sonnet-5-5": { input: 2, cacheWrite: 2.5, cacheRead: 0.2, output: 10 },
+  "claude-haiku-5-5": { input: 0.1, cacheWrite: 0.125, cacheRead: 0.01, output: 0.5 },
+};
+
+/** Low to xhigh; an effort not listed sorts after them. */
+const effortOrder = kanbanEfforts
+  .map((option) => option.id as string)
+  .filter((id) => id !== "inherit")
+  .reverse();
+
+function effortRank(effort: string | null): number {
+  const rank = effortOrder.indexOf(effort ?? "");
+  return rank === -1 ? effortOrder.length : rank;
+}
+
+/** null when the step's model has no price or its four token kinds are missing. */
+function stepCost(step: KanbanWorkflowStep): number | null {
+  const price = step.model ? tokenPrices[step.model] : undefined;
+  const { inputTokens, cacheWriteTokens, cacheReadTokens, outputTokens } = step;
+  if (
+    !price ||
+    inputTokens == null ||
+    cacheWriteTokens == null ||
+    cacheReadTokens == null ||
+    outputTokens == null
+  ) {
+    return null;
+  }
+  return (
+    (inputTokens * price.input +
+      cacheWriteTokens * price.cacheWrite +
+      cacheReadTokens * price.cacheRead +
+      outputTokens * price.output) /
+    1_000_000
+  );
+}
+
+/** null unless every step can be priced and the total is above $0. */
+export function taskCost(task: Pick<KanbanTask, "workflowSteps">): number | null {
+  let total = 0;
+  for (const step of task.workflowSteps) {
+    const cost = stepCost(step);
+    if (cost === null) return null;
+    total += cost;
+  }
+  return total > 0 ? total : null;
+}
+
+/**
+ * The review score of scored tasks against what they cost, averaged per
+ * coding "model:effort" and joined into one series per model family.
  */
 export function buildPerformanceSeries(tasks: KanbanTask[]): PerformanceSeries[] {
-  const sums = new Map<string, Map<string, { total: number; count: number }>>();
+  const families = new Map<
+    string,
+    Map<string, { effort: string | null; label: string; cost: number; score: number; count: number }>
+  >();
   for (const task of tasks) {
     if (task.reviewScore === null) continue;
-    const label = formatStepModel(
-      task.model ?? task.requestedModel,
-      task.effort ?? task.requestedEffort,
-    )?.toLowerCase();
-    if (!label) continue;
-    const doneAt = task.statusHistory.findLast((event) => event.status === "done")?.at;
-    const day = bangkokDay(doneAt ?? task.updatedAt);
-    if (!day) continue;
-    const days = sums.get(label) ?? new Map();
-    const sum = days.get(day) ?? { total: 0, count: 0 };
-    sum.total += task.reviewScore;
+    const model = task.model ?? task.requestedModel;
+    const effort = (task.effort ?? task.requestedEffort)?.toLowerCase() ?? null;
+    const family = formatStepModel(model, null)?.toLowerCase();
+    const label = formatStepModel(model, effort)?.toLowerCase();
+    if (!family || !label) continue;
+    const cost = taskCost(task);
+    if (cost === null) continue;
+    const points = families.get(family) ?? new Map();
+    const sum = points.get(label) ?? { effort, label, cost: 0, score: 0, count: 0 };
+    sum.cost += cost;
+    sum.score += task.reviewScore;
     sum.count += 1;
-    days.set(day, sum);
-    sums.set(label, days);
+    points.set(label, sum);
+    families.set(family, points);
   }
 
-  return [...sums]
+  return [...families]
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([label, days]) => ({
+    .map(([label, points]) => ({
       label,
-      points: [...days]
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([day, { total, count }]) => ({ day, average: total / count, count })),
+      points: [...points.values()]
+        .sort((a, b) => effortRank(a.effort) - effortRank(b.effort))
+        .map(({ label, cost, score, count }) => ({
+          label,
+          cost: cost / count,
+          score: score / count,
+          count,
+        })),
     }));
 }
