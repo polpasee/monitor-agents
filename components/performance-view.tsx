@@ -29,8 +29,8 @@ const legendRowHeight = 20;
 /** USD per task; those inside the plotted range are labelled when there is room. */
 const costTicks = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200];
 const costLabelSpacing = 44;
-/** A point label's two lines, as a box centred on the point's x. */
-const label = { width: 40, height: 28, gap: 8 };
+/** A point label's two lines ("9.3" over "high(12)"), as a box centred on the point's x. */
+const label = { width: 60, height: 28, gap: 8 };
 /**
  * Drawn with attributes rather than stylesheet classes, so a browser holding an
  * old stylesheet still shows the axes and labels.
@@ -320,7 +320,7 @@ export function PerformanceView() {
                               >
                                 <tspan x={pointX}>{point.score.toFixed(1)}</tspan>
                                 <tspan dy={13} x={pointX}>
-                                  {point.label.split(":")[1] ?? ""}
+                                  {`${point.label.split(":")[1] ?? ""}(${point.count})`}
                                 </tspan>
                               </text>
                             )}
