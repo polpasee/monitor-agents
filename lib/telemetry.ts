@@ -324,7 +324,10 @@ export function linkCodexRootsToClaudeWorktrees(
   );
 
   return agents.map((agent) => {
-    if (agent.provider !== "codex" || agent.parentId !== null) {
+    if (
+      (agent.provider !== "codex" && agent.provider !== "agy") ||
+      agent.parentId !== null
+    ) {
       return agent;
     }
 

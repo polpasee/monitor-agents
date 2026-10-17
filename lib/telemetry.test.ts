@@ -337,6 +337,30 @@ test("linkCodexRootsToClaudeWorktrees leaves ambiguous matches unchanged", () =>
   assert.equal(linked[2].spawnMethod, "root");
 });
 
+test("linkCodexRootsToClaudeWorktrees links an AGY root in a Claude worktree", () => {
+  const agents: AgentRun[] = [
+    {
+      ...demoSnapshot.agents[0],
+      id: "root:a6b056b8e34ec0f97",
+      parentId: "root",
+      provider: "claude",
+    },
+    {
+      ...demoSnapshot.agents[1],
+      id: "agy:conversation",
+      parentId: null,
+      provider: "agy",
+      spawnMethod: "root",
+      cwd: "/repo/.claude/worktrees/agent-a6b056b8e34ec0f97",
+    },
+  ];
+
+  const linked = linkCodexRootsToClaudeWorktrees(agents);
+
+  assert.equal(linked[1].parentId, "root:a6b056b8e34ec0f97");
+  assert.equal(linked[1].spawnMethod, "bash");
+});
+
 test("linkExternalRootsToClaudeSpawns links one uniquely timed Codex root", () => {
   const spawnAt = "2026-07-11T04:59:30.000Z";
   const claude = {

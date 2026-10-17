@@ -33,6 +33,10 @@ const EVENT_KINDS: EventKind[] = [
   "usage.recorded",
 ];
 const QUOTA_PERIODS: QuotaPeriod[] = ["hour", "week"];
+// AGY transcripts carry no cwd, but a run launched in a Claude worktree names
+// that worktree in its tool calls, which is what links it to its parent.
+const CLAUDE_WORKTREE_PATH_PATTERN =
+  /(?:\/[^\s"'`\\/]+)*\/\.claude\/worktrees\/agent-[\w-]+/gu;
 const DEFAULT_MAX_AGENTS = 24;
 const execFileAsync = promisify(execFile);
 const USAGE_CACHE_MS = 5 * 60_000;
@@ -418,6 +422,14 @@ async function parseLocalAgyAgent(
 
   if (!startedAt) return null;
 
+  const worktreeCounts = new Map<string, number>();
+  for (const [path] of contents.matchAll(CLAUDE_WORKTREE_PATH_PATTERN)) {
+    worktreeCounts.set(path, (worktreeCounts.get(path) ?? 0) + 1);
+  }
+  const cwd =
+    [...worktreeCounts].sort((left, right) => right[1] - left[1])[0]?.[0] ??
+    "";
+
   const now = Date.now();
   const lastActivityMs = Date.parse(lastActivityAt);
   const isCompleted = now - lastActivityMs > 15 * 60 * 1000;
@@ -432,7 +444,7 @@ async function parseLocalAgyAgent(
     status: isCompleted ? "completed" : "running",
     task: task.substring(0, 200),
     spawnMethod: "root",
-    cwd: "",
+    cwd,
     startedAt,
     endedAt: isCompleted ? lastActivityAt : null,
     lastActivityAt,
