@@ -155,19 +155,20 @@ test("averages the cost and score of one model:effort and counts them", () => {
   assert.equal(point?.count, 2);
 });
 
-test("joins one model's efforts into one series ordered low to xhigh", () => {
+test("joins one model's efforts into one series ordered by cost per task", () => {
   const sonnetSteps = [step({ model: "claude-sonnet-5-5" })];
+  const costing = (cacheReadTokens: number) => [step({ cacheReadTokens })];
   const series = buildPerformanceSeries([
-    snapshot({ effort: "xhigh" }),
-    snapshot({ effort: "medium" }),
-    snapshot({ effort: "low" }),
-    snapshot({ effort: "high" }),
+    snapshot({ effort: "xhigh", workflowSteps: costing(4_000_000) }),
+    snapshot({ effort: "medium", workflowSteps: costing(3_000_000) }),
+    snapshot({ effort: "low", workflowSteps: costing(1_000_000) }),
+    snapshot({ effort: "high", workflowSteps: costing(2_000_000) }),
     snapshot({ model: "sonnet", effort: "high", workflowSteps: sonnetSteps }),
   ]);
   assert.deepEqual(
     series.map((entry) => [entry.label, entry.points.map((point) => point.label)]),
     [
-      ["opus", ["opus:low", "opus:med", "opus:high", "opus:xhigh"]],
+      ["opus", ["opus:low", "opus:high", "opus:med", "opus:xhigh"]],
       ["sonnet", ["sonnet:high"]],
     ],
   );
