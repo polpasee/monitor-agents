@@ -27,6 +27,7 @@ import {
   pullRequestNumberFromUrl,
   repositoryDirectoryName,
   runnerModel,
+  runWorkflowSteps,
   stagePathspecs,
   taskBranchName,
   truncate,
@@ -199,7 +200,7 @@ function agentCommand(task, worktree, prompt) {
  * value from the thread). Claude's effort comes from the statusline file when
  * that still describes this session.
  */
-async function runMetadata(task, provider, cli, stdout) {
+async function agentMetadata(task, provider, cli, stdout) {
   const requestedEffort = task.requestedEffort ? { effort: task.requestedEffort } : {};
   if (provider === "codex") {
     return { ...parseCodexRunMetadata(stdout), model: cli, ...requestedEffort };
@@ -214,6 +215,12 @@ async function runMetadata(task, provider, cli, stdout) {
   }
   const metadata = parseClaudeRunMetadata(stdout);
   return { ...metadata, ...requestedEffort, ...(await readEffort(metadata.sessionId)) };
+}
+
+/** Heartbeats leave `endedAt` null; complete and fail pass the time the run ended. */
+async function runMetadata(task, provider, cli, stdout, startedAt, endedAt = null) {
+  const metadata = await agentMetadata(task, provider, cli, stdout);
+  return { ...metadata, ...runWorkflowSteps(metadata, startedAt, endedAt) };
 }
 
 async function runAgent(bin, args, env, worktree, logPath, output) {
@@ -303,8 +310,9 @@ async function runTask(task, directory) {
     // An unknown model must reach the fail report below, so this runs inside
     // the try and the heartbeat starts once the provider is known.
     const { provider, cli, bin, args, env } = agentCommand(task, worktree, buildTaskPrompt(task));
+    const startedAt = new Date();
     heartbeat = setInterval(() => {
-      runMetadata(task, provider, cli, output.stdout)
+      runMetadata(task, provider, cli, output.stdout, startedAt)
         .then((metadata) =>
           api(`/api/agent/tasks/${encodeURIComponent(task.id)}/heartbeat`, {
             agentId: config.agentId,
@@ -323,7 +331,7 @@ async function runTask(task, directory) {
     const parseOutput =
       provider === "codex" ? parseCodexOutput : provider === "agy" ? parseAgyOutput : parseClaudeOutput;
     const { result, isError } = parseOutput(run.stdout);
-    const metadata = await runMetadata(task, provider, cli, run.stdout);
+    const metadata = await runMetadata(task, provider, cli, run.stdout, startedAt, new Date());
 
     if (run.code !== 0 || isError) {
       await api(`/api/agent/tasks/${encodeURIComponent(task.id)}/fail`, {

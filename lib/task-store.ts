@@ -690,6 +690,8 @@ export class TaskStore {
               lease_until = ?,
               last_error = NULL,
               attempt_count = attempt_count + 1,
+              -- The last attempt's score would otherwise be snapshotted under this one's model.
+              review_score = NULL,
               ${claimRunMetadataSql},
               status_history = ${appendStatusSql},
               updated_at = ?

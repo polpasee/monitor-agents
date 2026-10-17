@@ -1,4 +1,4 @@
-import type { KanbanTask } from "./kanban.ts";
+import type { KanbanTask, KanbanWorkflowStep } from "./kanban.ts";
 
 export const maxResultLength = 10_000;
 
@@ -278,7 +278,17 @@ export interface ClaudeRunMetadata {
   agentRunId?: string;
   model?: string;
   usedTokens?: number;
+  /** The usage behind `usedTokens` in the four kinds a workflow step reports. */
+  inputTokens?: number | null;
+  cacheWriteTokens?: number | null;
+  cacheReadTokens?: number | null;
+  outputTokens?: number | null;
 }
+
+type TokenKinds = Record<
+  "inputTokens" | "cacheWriteTokens" | "cacheReadTokens" | "outputTokens",
+  number
+>;
 
 function stringField(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
@@ -292,8 +302,34 @@ function sumTokens(usage: Record<string, unknown>, keys: string[]): number {
   );
 }
 
-function usageTokens(usage: Record<string, unknown>): number {
-  return sumTokens(usage, [
+/** Usage fields named in the order input, cache write, cache read, output. */
+function usageKinds(usage: Record<string, unknown>, keys: string[]): TokenKinds {
+  return {
+    inputTokens: sumTokens(usage, [keys[0]]),
+    cacheWriteTokens: sumTokens(usage, [keys[1]]),
+    cacheReadTokens: sumTokens(usage, [keys[2]]),
+    outputTokens: sumTokens(usage, [keys[3]]),
+  };
+}
+
+function addKinds(a: TokenKinds, b: TokenKinds): TokenKinds {
+  return {
+    inputTokens: a.inputTokens + b.inputTokens,
+    cacheWriteTokens: a.cacheWriteTokens + b.cacheWriteTokens,
+    cacheReadTokens: a.cacheReadTokens + b.cacheReadTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+  };
+}
+
+const noTokens: TokenKinds = {
+  inputTokens: 0,
+  cacheWriteTokens: 0,
+  cacheReadTokens: 0,
+  outputTokens: 0,
+};
+
+function usageTokens(usage: Record<string, unknown>): TokenKinds {
+  return usageKinds(usage, [
     "input_tokens",
     "cache_creation_input_tokens",
     "cache_read_input_tokens",
@@ -305,18 +341,20 @@ function usageTokens(usage: Record<string, unknown>): number {
  * A `result` event's `usage` covers only that turn, while `modelUsage` is the
  * running total for the whole session, subagents included.
  */
-function modelUsageTokens(modelUsage: Record<string, unknown>): number {
-  return Object.values(modelUsage).reduce((total: number, entry) => {
+function modelUsageTokens(modelUsage: Record<string, unknown>): TokenKinds {
+  return Object.values(modelUsage).reduce((total: TokenKinds, entry) => {
     return typeof entry === "object" && entry !== null
-      ? total +
-          sumTokens(entry as Record<string, unknown>, [
+      ? addKinds(
+          total,
+          usageKinds(entry as Record<string, unknown>, [
             "inputTokens",
-            "outputTokens",
-            "cacheReadInputTokens",
             "cacheCreationInputTokens",
-          ])
+            "cacheReadInputTokens",
+            "outputTokens",
+          ]),
+        )
       : total;
-  }, 0);
+  }, noTokens);
 }
 
 /**
@@ -331,8 +369,8 @@ function modelUsageTokens(modelUsage: Record<string, unknown>): number {
  */
 export function parseClaudeRunMetadata(stdout: string): ClaudeRunMetadata {
   const metadata: ClaudeRunMetadata = {};
-  const requests = new Map<string, number>();
-  let resultTokens: number | undefined;
+  const requests = new Map<string, TokenKinds>();
+  let resultTokens: TokenKinds | undefined;
   let anonymousRequest = 0;
 
   for (const line of stdout.split("\n")) {
@@ -358,7 +396,7 @@ export function parseClaudeRunMetadata(stdout: string): ClaudeRunMetadata {
       } else if (typeof usage === "object" && usage !== null) {
         // Without `modelUsage` there is only the per-turn number, and a run can
         // close with several result events, so those are summed.
-        resultTokens = (resultTokens ?? 0) + usageTokens(usage);
+        resultTokens = addKinds(resultTokens ?? noTokens, usageTokens(usage));
       }
       continue;
     }
@@ -387,13 +425,13 @@ export function parseClaudeRunMetadata(stdout: string): ClaudeRunMetadata {
     requests.set(requestKey, usageTokens(usage));
   }
 
-  if (resultTokens !== undefined) {
-    metadata.usedTokens = resultTokens;
-  } else if (requests.size > 0) {
-    metadata.usedTokens = [...requests.values()].reduce(
-      (total, tokens) => total + tokens,
-      0,
-    );
+  const kinds =
+    resultTokens ??
+    (requests.size > 0 ? [...requests.values()].reduce(addKinds, noTokens) : undefined);
+  if (kinds) {
+    Object.assign(metadata, kinds);
+    metadata.usedTokens =
+      kinds.inputTokens + kinds.cacheWriteTokens + kinds.cacheReadTokens + kinds.outputTokens;
   }
 
   // The runner gives the task a session of its own, which the topology names
@@ -487,20 +525,22 @@ export function parseAgyOutput(stdout: string): {
 /**
  * The conversation id names the session. Tokens are the final `result` usage;
  * until it arrives, the usage of each finished step (one per step index, as a
- * step can repeat its event) is what a heartbeat can report.
+ * step can repeat its event) is what a heartbeat can report. AGY reports no
+ * cache fields, so only input and output (thinking included) are split out.
  */
 export function parseAgyRunMetadata(stdout: string): ClaudeRunMetadata {
   const metadata: ClaudeRunMetadata = {};
-  const steps = new Map<number, number>();
-  let resultTokens: number | undefined;
+  const steps = new Map<number, Record<string, unknown>>();
+  let resultUsage: Record<string, unknown> | undefined;
 
-  const total = (usage: unknown): number | undefined => {
-    if (typeof usage !== "object" || usage === null) return undefined;
-    const fields = usage as Record<string, unknown>;
-    return typeof fields.total_tokens === "number"
+  const usageOf = (usage: unknown): Record<string, unknown> | undefined =>
+    typeof usage === "object" && usage !== null
+      ? (usage as Record<string, unknown>)
+      : undefined;
+  const total = (fields: Record<string, unknown>): number =>
+    typeof fields.total_tokens === "number"
       ? fields.total_tokens
       : sumTokens(fields, ["input_tokens", "output_tokens", "thinking_tokens"]);
-  };
 
   for (const line of stdout.split("\n")) {
     const trimmed = line.trim();
@@ -517,20 +557,33 @@ export function parseAgyRunMetadata(stdout: string): ClaudeRunMetadata {
       metadata.sessionId = stringField(event.conversation_id) ?? metadata.sessionId;
     } else if (event.event === "step_update") {
       const step = event.step_update as Record<string, unknown> | undefined;
-      const tokens = total(step?.usage);
-      if (step && typeof step.step_index === "number" && tokens !== undefined) {
-        steps.set(step.step_index, tokens);
+      const usage = usageOf(step?.usage);
+      if (step && typeof step.step_index === "number" && usage) {
+        steps.set(step.step_index, usage);
       }
     } else if (event.event === "result") {
       const result = event.result as Record<string, unknown> | undefined;
       metadata.sessionId = stringField(result?.conversation_id) ?? metadata.sessionId;
-      resultTokens = total(result?.usage) ?? resultTokens;
+      resultUsage = usageOf(result?.usage) ?? resultUsage;
     }
   }
 
-  const summed = [...steps.values()].reduce((sum, tokens) => sum + tokens, 0);
-  const tokens = resultTokens ?? (steps.size ? summed : undefined);
-  if (tokens !== undefined) metadata.usedTokens = tokens;
+  const usages = resultUsage ? [resultUsage] : [...steps.values()];
+  if (usages.length === 0) return metadata;
+  const sum = (count: (usage: Record<string, unknown>) => number) =>
+    usages.reduce((tokens, usage) => tokens + count(usage), 0);
+  // A usage with only `total_tokens` cannot be split.
+  const split = usages.some(
+    (usage) =>
+      typeof usage.input_tokens === "number" || typeof usage.output_tokens === "number",
+  );
+  metadata.usedTokens = sum(total);
+  metadata.inputTokens = split ? sum((usage) => sumTokens(usage, ["input_tokens"])) : null;
+  metadata.cacheWriteTokens = null;
+  metadata.cacheReadTokens = null;
+  metadata.outputTokens = split
+    ? sum((usage) => sumTokens(usage, ["output_tokens", "thinking_tokens"]))
+    : null;
   return metadata;
 }
 
@@ -542,6 +595,7 @@ export function parseAgyRunMetadata(stdout: string): ClaudeRunMetadata {
  */
 export function parseCodexRunMetadata(stdout: string): ClaudeRunMetadata {
   const metadata: ClaudeRunMetadata = {};
+  let kinds: TokenKinds | undefined;
 
   for (const line of stdout.split("\n")) {
     const trimmed = line.trim();
@@ -563,15 +617,57 @@ export function parseCodexRunMetadata(stdout: string): ClaudeRunMetadata {
         metadata.usedTokens =
           (metadata.usedTokens ?? 0) +
           sumTokens(usage, ["input_tokens", "output_tokens"]);
+        const input = sumTokens(usage, ["input_tokens"]);
+        const cached = sumTokens(usage, ["cached_input_tokens"]);
+        kinds = addKinds(kinds ?? noTokens, {
+          inputTokens: Math.max(input - cached, 0),
+          cacheWriteTokens: sumTokens(usage, ["cache_write_input_tokens"]),
+          cacheReadTokens: cached,
+          outputTokens: sumTokens(usage, ["output_tokens"]),
+        });
       }
     }
   }
 
+  if (kinds) Object.assign(metadata, kinds);
   if (metadata.sessionId) {
     metadata.agentRunId = `codex:${metadata.sessionId}`;
   }
 
   return metadata;
+}
+
+/** Stored step times carry no milliseconds, e.g. "2026-10-16T08:30:40Z". */
+function stepTimestamp(date: Date | null): string | null {
+  return date ? date.toISOString().replace(/\.\d{3}Z$/u, "Z") : null;
+}
+
+/**
+ * The runner's whole run is one Implement step (3). It is left out until the
+ * stream reports usage, so an early heartbeat keeps whatever is stored.
+ */
+export function runWorkflowSteps(
+  metadata: ClaudeRunMetadata & { effort?: string },
+  startedAt: Date,
+  endedAt: Date | null,
+): { workflowSteps?: KanbanWorkflowStep[] } {
+  if (metadata.inputTokens === undefined) return {};
+  return {
+    workflowSteps: [
+      {
+        step: 3,
+        model: metadata.model ?? null,
+        effort: metadata.effort ?? null,
+        usedTokens: metadata.usedTokens ?? null,
+        inputTokens: metadata.inputTokens,
+        cacheWriteTokens: metadata.cacheWriteTokens ?? null,
+        cacheReadTokens: metadata.cacheReadTokens ?? null,
+        outputTokens: metadata.outputTokens ?? null,
+        startedAt: stepTimestamp(startedAt),
+        endedAt: stepTimestamp(endedAt),
+      },
+    ],
+  };
 }
 
 /**

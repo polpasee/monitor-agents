@@ -1469,6 +1469,28 @@ test("TaskStore keeps a scored task's performance after the task is deleted", as
       },
     ]);
 
+    // A re-run on another model starts unscored and keeps the last run's
+    // snapshot until it is scored itself.
+    store.updateTaskStatus(scored.id, "todo", at(40));
+    const rerun = store.claimTask({
+      agentId: "agent-1",
+      repositories: ["monitor-agents"],
+      now: at(50),
+      leaseMs: 600_000,
+      metadata: { model: "gpt-6.1-sol" },
+    });
+    assert.equal(rerun?.id, scored.id);
+    assert.equal(rerun?.reviewScore, null);
+    assert.deepEqual(
+      store.listPerformanceSnapshots().map((row) => [row.model, row.reviewScore]),
+      [["opus", 9]],
+    );
+    store.heartbeatTask(scored.id, "agent-1", at(55), 600_000, { reviewScore: 6 });
+    assert.deepEqual(
+      store.listPerformanceSnapshots().map((row) => [row.model, row.reviewScore]),
+      [["gpt-6.1-sol", 6]],
+    );
+
     store.deleteTask(scored.id);
     store.deleteTask(unscored.id);
     assert.equal(store.listPerformanceSnapshots()[0]?.taskId, scored.id);
