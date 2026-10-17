@@ -1080,13 +1080,15 @@ test("parseKanbanPriority defaults to Normal and accepts only known levels", () 
   assert.equal(parseKanbanPriority("low"), -1);
   assert.equal(parseKanbanPriority("normal"), 0);
   assert.equal(parseKanbanPriority("high"), 1);
+  assert.equal(parseKanbanPriority("critical"), 2);
   for (const value of ["urgent", 1, "High", ""]) {
     assert.equal(parseKanbanPriority(value), null);
   }
 });
 
-test("kanbanPriorityOf reads the level from the sign of the stored number", () => {
-  assert.equal(kanbanPriorityOf(2).id, "high");
+test("kanbanPriorityOf reads the level from the sign of the stored number, 2 and up as Critical", () => {
+  assert.equal(kanbanPriorityOf(5).id, "critical");
+  assert.equal(kanbanPriorityOf(2).label, "Critical");
   assert.equal(kanbanPriorityOf(-5).id, "low");
   assert.equal(kanbanPriorityOf(0).id, "normal");
   assert.equal(kanbanPriorityOf(1).label, "High");
