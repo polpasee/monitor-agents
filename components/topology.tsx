@@ -1139,7 +1139,11 @@ export function Topology({
 
       {displayedAgents.length > 0 ? (
         <div className="force-graph-viewport" ref={containerRef}>
-          <ProviderLimits capturedAt={capturedAt} quotaLimits={quotaLimits} />
+          <ProviderLimits
+            capturedAt={capturedAt}
+            providers={["codex", "claude", "agy-gemini", "agy-claude"]}
+            quotaLimits={quotaLimits}
+          />
           <svg
             aria-label={`Agent force topology with ${displayedAgents.length} visible agents. Drag the background to pan, drag nodes to rearrange, and scroll to zoom.`}
             className="force-graph"
