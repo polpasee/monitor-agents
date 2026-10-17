@@ -1,6 +1,5 @@
 import {
   formatStepModel,
-  kanbanEfforts,
   type KanbanWorkflowStep,
 } from "./kanban.ts";
 
@@ -28,7 +27,7 @@ export interface PerformancePoint {
 export interface PerformanceSeries {
   /** The model family, "opus". */
   label: string;
-  /** Ordered by effort, low to xhigh. */
+  /** Ordered by cost per task, cheapest first. */
   points: PerformancePoint[];
 }
 
@@ -105,17 +104,6 @@ export function tokenPrice(model: string): TokenPrice | null {
   return prefix ? tokenPrices[prefix] : null;
 }
 
-/** Low to xhigh; an effort not listed sorts after them. */
-const effortOrder = kanbanEfforts
-  .map((option) => option.id as string)
-  .filter((id) => id !== "inherit")
-  .reverse();
-
-function effortRank(effort: string | null): number {
-  const rank = effortOrder.indexOf(effort ?? "");
-  return rank === -1 ? effortOrder.length : rank;
-}
-
 function family(model: string | null): string | null {
   return formatStepModel(model, null)?.toLowerCase() ?? null;
 }
@@ -176,7 +164,7 @@ export function buildPerformanceSeries(
 ): PerformanceSeries[] {
   const families = new Map<
     string,
-    Map<string, { effort: string | null; label: string; cost: number; score: number; count: number }>
+    Map<string, { label: string; cost: number; score: number; count: number }>
   >();
   for (const snapshot of snapshots) {
     const effort = snapshot.effort?.toLowerCase() ?? null;
@@ -186,7 +174,7 @@ export function buildPerformanceSeries(
     const cost = codingCost(snapshot);
     if (cost === null) continue;
     const points = families.get(seriesLabel) ?? new Map();
-    const sum = points.get(label) ?? { effort, label, cost: 0, score: 0, count: 0 };
+    const sum = points.get(label) ?? { label, cost: 0, score: 0, count: 0 };
     sum.cost += cost;
     sum.score += snapshot.reviewScore;
     sum.count += 1;
@@ -199,12 +187,12 @@ export function buildPerformanceSeries(
     .map(([label, points]) => ({
       label,
       points: [...points.values()]
-        .sort((a, b) => effortRank(a.effort) - effortRank(b.effort))
         .map(({ label, cost, score, count }) => ({
           label,
           cost: cost / count,
           score: score / count,
           count,
-        })),
+        }))
+        .sort((a, b) => a.cost - b.cost),
     }));
 }
