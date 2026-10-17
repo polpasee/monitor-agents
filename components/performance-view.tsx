@@ -19,11 +19,28 @@ const seriesColors = [
   "var(--red)",
 ];
 
-const height = 240;
-const margin = { top: 24, right: 16, bottom: 28, left: 32 };
-const yTicks = [0, 2, 4, 6, 8, 10];
-/** USD per task; those inside the plotted range are drawn. */
+const height = 340;
+/** The top margin holds the legend; the bottom and left ones the axis titles. */
+const margin = { top: 44, right: 32, bottom: 52, left: 60 };
+/** USD per task; those inside the plotted range are labelled. */
 const costTicks = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200];
+/** Room for a label's two lines between the point and the plot's top. */
+const labelHeight = 30;
+/**
+ * Drawn with attributes rather than stylesheet classes, so a browser holding an
+ * old stylesheet still shows the axes and labels.
+ */
+const ink = { axis: "var(--border-strong)", grid: "var(--border)", text: "var(--muted)" };
+
+/** A point's label goes on the side away from its neighbours, so it does not sit on its own line. */
+function labelBelow(points: PerformancePoint[], index: number, pointY: number): boolean {
+  const neighbours = [points[index - 1], points[index + 1]].filter(Boolean);
+  const below =
+    neighbours.length > 0 &&
+    points[index].score <
+      neighbours.reduce((total, point) => total + point.score, 0) / neighbours.length;
+  return below || pointY - labelHeight < margin.top;
+}
 
 export function PerformanceView() {
   const [snapshots, setSnapshots] = useState<PerformanceSnapshot[]>([]);
@@ -68,7 +85,8 @@ export function PerformanceView() {
 
   const series = useMemo(() => buildPerformanceSeries(snapshots), [snapshots]);
   const hasSeries = series.length > 0;
-  const costs = series.flatMap((entry) => entry.points.map((point) => point.cost));
+  const points = series.flatMap((entry) => entry.points);
+  const costs = points.map((point) => point.cost);
 
   // The svg is drawn at the chart's real width, so its text and dots stay true px.
   useEffect(() => {
@@ -81,18 +99,37 @@ export function PerformanceView() {
     return () => observer.disconnect();
   }, [hasSeries]);
 
+  const plotLeft = margin.left;
+  const plotRight = Math.max(plotLeft, width - margin.right);
+  const plotBottom = height - margin.bottom;
   // Log, so a cheap model's efforts do not bunch up against an expensive one's.
   // Padded 2x each way so the range always spans one of the costTicks.
   const x = scaleLog()
     .domain([Math.min(...costs) / 2, Math.max(...costs) * 2])
-    .range([margin.left, Math.max(margin.left, width - margin.right)]);
+    .range([plotLeft, plotRight]);
   const [minCost, maxCost] = x.domain();
+  // Starts a point below the lowest score, so close scores do not all sit on one line.
+  const minScore = Math.max(0, Math.floor(Math.min(...points.map((point) => point.score))) - 1);
   const y = scaleLinear()
-    .domain([0, maxReviewScore])
-    .range([height - margin.bottom, margin.top]);
+    .domain([minScore, maxReviewScore])
+    .range([plotBottom, margin.top]);
+  const scoreStep = maxReviewScore - minScore <= 5 ? 1 : 2;
+  const scoreTicks = Array.from(
+    { length: Math.floor((maxReviewScore - minScore) / scoreStep) + 1 },
+    (_, index) => minScore + index * scoreStep,
+  );
   const path = line<PerformancePoint>()
     .x((point) => x(point.cost))
     .y((point) => y(point.score));
+
+  // Legend items laid out left to right, centred over the plot.
+  const legendWidths = series.map((entry) => 34 + entry.label.length * 7);
+  const legendStart =
+    (plotLeft + plotRight - legendWidths.reduce((total, itemWidth) => total + itemWidth + 16, -16)) / 2;
+  const legendItems = series.map((entry, index) => ({
+    label: entry.label,
+    x: legendStart + legendWidths.slice(0, index).reduce((total, itemWidth) => total + itemWidth + 16, 0),
+  }));
 
   return (
     <section className="performance-panel" aria-labelledby="performance-title">
@@ -113,92 +150,115 @@ export function PerformanceView() {
         </div>
       ) : (
         <div className="performance-chart">
-          <ul className="performance-chart__legend">
-            {series.map((entry, index) => (
-              <li key={entry.label}>
-                <span
-                  className="performance-chart__swatch"
-                  style={{ background: seriesColors[index % seriesColors.length] }}
-                />
-                {entry.label}
-              </li>
-            ))}
-          </ul>
           <div className="performance-chart__frame" ref={chartRef}>
             {width > 0 && (
               <svg
                 className="performance-chart__svg"
                 role="img"
                 aria-label="Average review score against average API cost per task for each Model:Effort"
+                fontSize={11}
                 height={height}
                 viewBox={`0 0 ${width} ${height}`}
                 width={width}
               >
-                {yTicks.map((tick) => (
+                {legendItems.map((item, index) => {
+                  const color = seriesColors[index % seriesColors.length];
+                  return (
+                    <g key={item.label} transform={`translate(${item.x}, 16)`}>
+                      <line stroke={color} strokeWidth={2} x1={0} x2={22} y1={0} y2={0} />
+                      <circle cx={11} cy={0} fill={color} r={4} />
+                      <text dominantBaseline="middle" fill="var(--text-soft)" fontSize={12} x={30} y={0}>
+                        {item.label}
+                      </text>
+                    </g>
+                  );
+                })}
+
+                {scoreTicks.map((tick) => (
                   <g key={tick}>
-                    <line
-                      className="performance-chart__grid"
-                      x1={margin.left}
-                      x2={width - margin.right}
-                      y1={y(tick)}
-                      y2={y(tick)}
-                    />
-                    <text
-                      className="performance-chart__tick"
-                      dominantBaseline="middle"
-                      textAnchor="end"
-                      x={margin.left - 8}
-                      y={y(tick)}
-                    >
+                    <line stroke={ink.grid} strokeOpacity={0.6} x1={plotLeft} x2={plotRight} y1={y(tick)} y2={y(tick)} />
+                    <text dominantBaseline="middle" fill={ink.text} textAnchor="end" x={plotLeft - 8} y={y(tick)}>
                       {tick}
                     </text>
                   </g>
                 ))}
+                {x.ticks().map((tick) => {
+                  const major = costTicks.includes(tick);
+                  return (
+                    <line
+                      key={tick}
+                      stroke={ink.axis}
+                      x1={x(tick)}
+                      x2={x(tick)}
+                      y1={plotBottom}
+                      y2={plotBottom + (major ? 6 : 3)}
+                    />
+                  );
+                })}
                 {costTicks
                   .filter((tick) => tick >= minCost && tick <= maxCost)
                   .map((tick) => (
-                    <text
-                      className="performance-chart__tick"
-                      key={tick}
-                      textAnchor="middle"
-                      x={x(tick)}
-                      y={height - 8}
-                    >
+                    <text fill={ink.text} key={tick} textAnchor="middle" x={x(tick)} y={plotBottom + 20}>
                       ${tick}
                     </text>
                   ))}
+                <line stroke={ink.axis} x1={plotLeft} x2={plotLeft} y1={margin.top} y2={plotBottom} />
+                <line stroke={ink.axis} x1={plotLeft} x2={plotRight} y1={plotBottom} y2={plotBottom} />
+                <text fill={ink.text} fontSize={12} textAnchor="middle" x={(plotLeft + plotRight) / 2} y={height - 10}>
+                  Average cost per task (USD, log scale)
+                </text>
+                <text
+                  fill={ink.text}
+                  fontSize={12}
+                  textAnchor="middle"
+                  transform={`translate(16, ${(margin.top + plotBottom) / 2}) rotate(-90)`}
+                >
+                  Review score (0–10)
+                </text>
+
                 {series.map((entry, index) => {
                   const color = seriesColors[index % seriesColors.length];
                   return (
                     <g key={entry.label}>
                       <path
-                        className="performance-chart__line"
                         d={path(entry.points) ?? undefined}
+                        fill="none"
                         stroke={color}
+                        strokeLinejoin="round"
+                        strokeWidth={2}
                       />
-                      {entry.points.map((point) => (
-                        <g key={point.label}>
-                          <circle
-                            className="performance-chart__dot"
-                            cx={x(point.cost)}
-                            cy={y(point.score)}
-                            fill={color}
-                            r={4}
-                          >
-                            <title>
-                              {`${point.label} · avg $${point.cost.toFixed(2)} per task · avg score ${point.score.toFixed(1)} · ${point.count} ${point.count === 1 ? "task" : "tasks"}`}
-                            </title>
-                          </circle>
-                          <text
-                            className="performance-chart__tick"
-                            textAnchor="middle"
-                            x={x(point.cost)}
-                            y={y(point.score) - 8}
-                          >
-                            {point.label.split(":")[1] ?? ""}
-                          </text>
-                        </g>
-                      ))}
+                      {entry.points.map((point, pointIndex) => {
+                        const pointX = x(point.cost);
+                        const pointY = y(point.score);
+                        const below = labelBelow(entry.points, pointIndex, pointY);
+                        const scoreY = below ? pointY + 18 : pointY - 22;
+                        return (
+                          <g key={point.label}>
+                            <circle cx={pointX} cy={pointY} fill={color} r={5} stroke="var(--surface-1)" strokeWidth={2}>
+                              <title>
+                                {`${point.label} · avg $${point.cost.toFixed(2)} per task · avg score ${point.score.toFixed(1)} · ${point.count} ${point.count === 1 ? "task" : "tasks"}`}
+                              </title>
+                            </circle>
+                            {/* A halo of the panel colour keeps another series' line from cutting through the text. */}
+                            <text
+                              fill={color}
+                              fontSize={12}
+                              paintOrder="stroke"
+                              stroke="var(--surface-1)"
+                              strokeLinejoin="round"
+                              strokeWidth={4}
+                              textAnchor="middle"
+                              x={pointX}
+                              y={scoreY}
+                            >
+                              <tspan x={pointX}>{point.score.toFixed(1)}</tspan>
+                              <tspan dy={13} x={pointX}>
+                                {point.label.split(":")[1] ?? ""}
+                              </tspan>
+                            </text>
+                          </g>
+                        );
+                      })}
                     </g>
                   );
                 })}
