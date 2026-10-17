@@ -1811,6 +1811,96 @@ test("Claude collector reads a subagent's own effort before falling back to the 
   }
 });
 
+test("Claude collector records a subagent's agy launches as its own spawns", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-claude-agy-"));
+  const workspace = "/workspace/repo";
+  const sessionId = "agy-session";
+  const projectDirectory = join(directory, "projects", "-workspace-repo");
+  const subagentsDirectory = join(projectDirectory, sessionId, "subagents");
+  const previousDirectory = process.env.CLAUDE_CONFIG_DIR;
+  const previousRateLimitsFile = process.env.CLAUDE_RATE_LIMITS_FILE;
+  const previousWorkspace = process.env.MONITOR_WORKSPACE;
+  const now = Date.now();
+  const at = new Date(now - 2_000).toISOString();
+  const bashLine = (command: string) =>
+    JSON.stringify({
+      type: "assistant",
+      timestamp: at,
+      message: {
+        model: "claude-opus-5",
+        stop_reason: "tool_use",
+        content: [{ type: "tool_use", name: "Bash", input: { command } }],
+      },
+    });
+
+  try {
+    process.env.CLAUDE_CONFIG_DIR = directory;
+    delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    process.env.MONITOR_WORKSPACE = workspace;
+    await mkdir(join(directory, "sessions"), { recursive: true });
+    await mkdir(subagentsDirectory, { recursive: true });
+    await writeFile(
+      join(directory, "sessions", "agy.json"),
+      JSON.stringify({
+        sessionId,
+        pid: process.pid,
+        cwd: workspace,
+        status: "busy",
+        startedAt: new Date(now - 60_000).toISOString(),
+        updatedAt: new Date(now - 1_000).toISOString(),
+      }),
+    );
+    await writeFile(join(projectDirectory, `${sessionId}.jsonl`), "");
+    await writeFile(
+      join(subagentsDirectory, "agent-driver.jsonl"),
+      `${[
+        'agy -p "Reply with exactly: OK" --model gemini-3.8-flash-medium --sandbox --dangerously-skip-permissions --output-format json < /dev/null',
+        'cd /x/.claude/worktrees/agent-a && agy -p "Fix the bug"',
+        'cat > $D/run1.sh <<\'EOF\'\ncd "$W"\nagy -p "$(cat $D/brief.md)" --sandbox > $D/out.log\nEOF',
+        "mkdir -p ${TMPDIR}8d763d8e-agy && echo ok",
+        "nohup /bin/zsh /var/folders/xy/T/8d763d8e-agy/run2.sh >/dev/null 2>&1 </dev/null & disown; echo started",
+        "agy --help",
+      ]
+        .map(bashLine)
+        .join("\n")}\n`,
+    );
+    await writeFile(
+      join(subagentsDirectory, "agent-driver.meta.json"),
+      JSON.stringify({ agentType: "worker" }),
+    );
+
+    const result = await collectClaudeTelemetry();
+    const spawn = {
+      parentId: `claude:${sessionId}:driver`,
+      childProvider: "agy",
+      spawnMethod: "bash",
+      at,
+    };
+
+    assert.ok(
+      result.agents.some((agent) => agent.id === `claude:${sessionId}:driver`),
+    );
+    assert.deepEqual(result.externalSpawns, [spawn, spawn, spawn]);
+  } finally {
+    if (previousDirectory === undefined) {
+      delete process.env.CLAUDE_CONFIG_DIR;
+    } else {
+      process.env.CLAUDE_CONFIG_DIR = previousDirectory;
+    }
+    if (previousRateLimitsFile === undefined) {
+      delete process.env.CLAUDE_RATE_LIMITS_FILE;
+    } else {
+      process.env.CLAUDE_RATE_LIMITS_FILE = previousRateLimitsFile;
+    }
+    if (previousWorkspace === undefined) {
+      delete process.env.MONITOR_WORKSPACE;
+    } else {
+      process.env.MONITOR_WORKSPACE = previousWorkspace;
+    }
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
 test("Claude collector keeps a subagent running while a background task it started is still in the fan-out", async () => {
   const directory = await mkdtemp(join(tmpdir(), "monitor-claude-parked-"));
   const workspace = "/workspace/parked";
