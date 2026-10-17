@@ -2489,6 +2489,18 @@ button:focus-visible,
   }
 }
 
+/* Below this four cards in one row get too narrow to read, so they go 2x2. */
+@media (max-width: 899px) {
+  /* !important: ProviderLimits sets the one-row layout inline. */
+  .provider-limits-overlay--inline {
+    width: min(360px, 100%) !important;
+  }
+
+  .provider-limits-overlay--inline .provider-limits-overlay__providers {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
 @media (max-width: 620px) {
   .dashboard-shell {
     padding: 18px 14px 32px;
@@ -2514,15 +2526,6 @@ button:focus-visible,
 
   .kanban-header__actions {
     width: 100%;
-  }
-
-  /* !important: ProviderLimits sets the one-row layout inline. */
-  .provider-limits-overlay--inline {
-    width: min(360px, 100%) !important;
-  }
-
-  .provider-limits-overlay--inline .provider-limits-overlay__providers {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 
   .kanban-filter {
