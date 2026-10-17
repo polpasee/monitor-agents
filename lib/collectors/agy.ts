@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 import type {
   AgentRun,
@@ -32,6 +34,26 @@ const EVENT_KINDS: EventKind[] = [
 ];
 const QUOTA_PERIODS: QuotaPeriod[] = ["hour", "week"];
 const DEFAULT_MAX_AGENTS = 24;
+const execFileAsync = promisify(execFile);
+const USAGE_CACHE_MS = 5 * 60_000;
+const USAGE_RETRY_CACHE_MS = 60_000;
+const USAGE_TIMEOUT_MS = 45_000;
+const USAGE_GROUPS = new Map([
+  ["Gemini Models", { id: "agy-gemini", label: "Gemini" }],
+  ["Claude and GPT models", { id: "agy-claude", label: "Claude and GPT" }],
+]);
+const USAGE_WINDOWS = new Map<string, { period: QuotaPeriod; windowHours: number }>([
+  ["Weekly Limit Remaining", { period: "week", windowHours: 168 }],
+  ["Five Hour Limit Remaining", { period: "hour", windowHours: 5 }],
+]);
+
+// On globalThis so every module copy Next dev loads shares one cache.
+const usageGlobal = globalThis as typeof globalThis & {
+  monitorAgyUsage?: {
+    cached: { expiresAt: number; quotaLimits: QuotaLimit[] } | null;
+    pending: Promise<void> | null;
+  };
+};
 
 class ValidationError extends Error {}
 
@@ -449,7 +471,75 @@ async function collectLocalAgyAgents(): Promise<{
   return { agents: selected, total: agents.length };
 }
 
+// `agy -p /usage` prints "<group>\t<window> Limit Remaining\t<pct>%\t<reset>".
+export function parseAgyUsage(stdout: string): QuotaLimit[] {
+  return stdout.split("\n").flatMap((line): QuotaLimit[] => {
+    const parts = line.trim().split("\t");
+    const group = USAGE_GROUPS.get(parts[0]);
+    const window = USAGE_WINDOWS.get(parts[1]);
+    const remaining = /^(\d+(?:\.\d+)?)%$/u.exec(parts[2] ?? "");
+    if (parts.length !== 4 || !group || !window || !remaining) {
+      return [];
+    }
+
+    return [
+      {
+        id: `${group.id}-${window.period}`,
+        provider: "agy",
+        label: group.label,
+        period: window.period,
+        windowHours: window.windowHours,
+        usedTokens: null,
+        tokenLimit: null,
+        usedCostUsd: null,
+        costLimitUsd: null,
+        usedPercent: 100 - Number(remaining[1]),
+        resetsAt: Number.isNaN(Date.parse(parts[3])) ? null : parts[3],
+      },
+    ];
+  });
+}
+
+async function loadAgyUsage(): Promise<QuotaLimit[]> {
+  try {
+    const pending = execFileAsync(
+      process.env.AGY_BIN?.trim() || join(homedir(), ".local", "bin", "agy"),
+      ["-p", "/usage", "--model", "gemini-3.8-flash-low"],
+      { cwd: tmpdir(), timeout: USAGE_TIMEOUT_MS },
+    );
+    pending.child.stdin?.end();
+    return parseAgyUsage((await pending).stdout);
+  } catch {
+    return [];
+  }
+}
+
+// Snapshots never wait on agy: they get the last cached quota, and a stale
+// cache starts one background refresh. A failed refresh keeps the old quota.
+function collectAgyUsage(): QuotaLimit[] {
+  const usage = (usageGlobal.monitorAgyUsage ??= { cached: null, pending: null });
+  if (!usage.pending && (usage.cached?.expiresAt ?? 0) <= Date.now()) {
+    usage.pending = loadAgyUsage().then((quotaLimits) => {
+      usage.cached =
+        quotaLimits.length > 0
+          ? { expiresAt: Date.now() + USAGE_CACHE_MS, quotaLimits }
+          : {
+              expiresAt: Date.now() + USAGE_RETRY_CACHE_MS,
+              quotaLimits: usage.cached?.quotaLimits ?? [],
+            };
+      usage.pending = null;
+    });
+  }
+  return usage.cached?.quotaLimits ?? [];
+}
+
 export async function collectAgyTelemetry(): Promise<CollectorResult> {
+  const usage = collectAgyUsage();
+  const result = await collectAgyAgents();
+  return { ...result, quotaLimits: [...result.quotaLimits, ...usage] };
+}
+
+async function collectAgyAgents(): Promise<CollectorResult> {
   const file = process.env.AGY_TELEMETRY_FILE?.trim();
   if (!file) {
     try {

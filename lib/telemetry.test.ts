@@ -208,6 +208,33 @@ test("getProviderQuota selects Codex quotas by period instead of slot id", () =>
   assert.equal(getProviderQuota([weeklyQuota], "codex", "hour"), undefined);
 });
 
+test("getProviderQuota selects an AGY model group by id prefix", () => {
+  const quotaLimits: QuotaLimit[] = ["agy-gemini-week", "agy-claude-week"].map(
+    (id) => ({
+      id,
+      provider: "agy",
+      label: id,
+      period: "week",
+      windowHours: 168,
+      usedTokens: null,
+      tokenLimit: null,
+      usedCostUsd: null,
+      costLimitUsd: null,
+      usedPercent: 54,
+      resetsAt: null,
+    }),
+  );
+
+  assert.equal(
+    getProviderQuota(quotaLimits, "agy", "week", "agy-claude"),
+    quotaLimits[1],
+  );
+  assert.equal(
+    getProviderQuota(quotaLimits, "agy", "hour", "agy-claude"),
+    undefined,
+  );
+});
+
 test("linkCodexRootsToClaudeWorktrees links a unique matching Codex root", () => {
   const agents: AgentRun[] = [
     {

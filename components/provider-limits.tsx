@@ -1,3 +1,5 @@
+import type { CSSProperties } from "react";
+
 import {
   formatResetDuration,
   getProviderQuota,
@@ -6,16 +8,26 @@ import {
   type QuotaLimit,
 } from "@/lib/telemetry";
 
-const displayedProviders = [
-  "codex",
-  "claude",
-  "gemini",
-] as const satisfies readonly Provider[];
+type QuotaCard = "codex" | "claude" | "gemini" | "agy-gemini" | "agy-claude";
+
+// AGY reports one quota per model group, so it renders one card per group.
+const quotaCards: Record<
+  QuotaCard,
+  { provider: Provider; label: string; idPrefix?: string }
+> = {
+  codex: { provider: "codex", label: "Codex" },
+  claude: { provider: "claude", label: "Claude" },
+  gemini: { provider: "gemini", label: "Gemini" },
+  "agy-gemini": { provider: "agy", label: "AGY Gemini", idPrefix: "agy-gemini" },
+  "agy-claude": { provider: "agy", label: "AGY Claude", idPrefix: "agy-claude" },
+};
+
+const displayedProviders: readonly QuotaCard[] = ["codex", "claude", "gemini"];
 
 interface ProviderLimitsProps {
   capturedAt: string;
   className?: string;
-  providers?: readonly (typeof displayedProviders)[number][];
+  providers?: readonly QuotaCard[];
   quotaLimits: QuotaLimit[];
 }
 
@@ -23,12 +35,6 @@ const displayedPeriods = [
   { period: "hour", label: "5h" },
   { period: "week", label: "7d" },
 ] as const;
-
-const providerLabels: Record<(typeof displayedProviders)[number], string> = {
-  codex: "Codex",
-  claude: "Claude",
-  gemini: "Gemini",
-};
 
 function quotaUsagePercent(quota: QuotaLimit | undefined): number | null {
   if (!quota) {
@@ -65,23 +71,25 @@ export function ProviderLimits({
           : "provider-limits-overlay"
       }
       aria-label="Provider limits"
+      style={{ "--provider-cards": providers.length } as CSSProperties}
     >
       <div className="provider-limits-overlay__providers">
-        {providers.map((provider) => {
+        {providers.map((card) => {
+          const { provider, label: providerLabel, idPrefix } = quotaCards[card];
           const providerQuotasByPeriod = {
-            hour: getProviderQuota(quotaLimits, provider, "hour"),
-            week: getProviderQuota(quotaLimits, provider, "week"),
+            hour: getProviderQuota(quotaLimits, provider, "hour", idPrefix),
+            week: getProviderQuota(quotaLimits, provider, "week", idPrefix),
           };
 
           return (
             <article
               className="provider-limits-overlay__provider quota-card"
               data-provider={provider}
-              key={provider}
-              aria-label={`${providerLabels[provider]} limits`}
+              key={card}
+              aria-label={`${providerLabel} limits`}
             >
               <h3 className="provider-limits-overlay__provider-name">
-                {providerLabels[provider]}
+                {providerLabel}
               </h3>
               <div className="provider-limit-list">
                 {displayedPeriods.map(({ period, label }) => {
@@ -107,8 +115,8 @@ export function ProviderLimits({
                       <progress
                         aria-label={
                           available
-                            ? `${providerLabels[provider]} ${label} usage: ${Math.round(usagePercent)}%`
-                            : `${providerLabels[provider]} ${label} usage unavailable`
+                            ? `${providerLabel} ${label} usage: ${Math.round(usagePercent)}%`
+                            : `${providerLabel} ${label} usage unavailable`
                         }
                         className="quota-meter__progress"
                         data-level={usageLevel}

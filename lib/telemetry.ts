@@ -89,9 +89,13 @@ export function getProviderQuota(
   quotaLimits: readonly QuotaLimit[],
   provider: Provider,
   period: QuotaPeriod,
+  idPrefix?: string,
 ): QuotaLimit | undefined {
   return quotaLimits.find(
-    (quota) => quota.provider === provider && quota.period === period,
+    (quota) =>
+      quota.provider === provider &&
+      quota.period === period &&
+      (idPrefix === undefined || quota.id.startsWith(idPrefix)),
   );
 }
 

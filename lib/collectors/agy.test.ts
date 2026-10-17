@@ -1,10 +1,59 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 
-import { collectAgyTelemetry } from "./agy.ts";
+import { collectAgyTelemetry, parseAgyUsage } from "./agy.ts";
+
+const usageOutput = [
+  "Gemini Models\tWeekly Limit Remaining\t100%\t2026-10-24T02:18:45Z",
+  "Gemini Models\tFive Hour Limit Remaining\t100%\t2026-10-17T07:18:45Z",
+  "Claude and GPT models\tWeekly Limit Remaining\t46%\t2026-10-21T05:59:18Z",
+  "Claude and GPT models\tFive Hour Limit Remaining\t100%\t2026-10-17T08:05:15Z",
+].join("\n");
+
+// A fake agy for every collector call in this file; it logs each run.
+const fakeAgyDirectory = await mkdtemp(join(tmpdir(), "monitor-agy-bin-"));
+const fakeAgyRuns = join(fakeAgyDirectory, "runs");
+process.env.AGY_BIN = join(fakeAgyDirectory, "agy");
+await writeFile(join(fakeAgyDirectory, "usage"), usageOutput);
+await writeFile(
+  process.env.AGY_BIN,
+  `#!/bin/sh\necho run >> "${fakeAgyRuns}"\ncat "${fakeAgyDirectory}/usage"\n`,
+);
+await chmod(process.env.AGY_BIN, 0o755);
+test.after(() => rm(fakeAgyDirectory, { force: true, recursive: true }));
+
+async function fakeAgyRunCount(): Promise<number> {
+  return (await readFile(fakeAgyRuns, "utf8").catch(() => ""))
+    .split("\n")
+    .filter(Boolean).length;
+}
+
+// Runs first: the module's usage cache is still empty.
+test("AGY collector serves cached quota while one agy run refreshes it", async () => {
+  const first = await Promise.all([
+    collectAgyTelemetry(),
+    collectAgyTelemetry(),
+  ]);
+  assert.deepEqual(
+    first.map((result) => result.quotaLimits),
+    [[], []],
+  );
+
+  while ((await collectAgyTelemetry()).quotaLimits.length === 0) {
+    await delay(10);
+  }
+  const refreshed = await collectAgyTelemetry();
+  assert.equal(
+    refreshed.quotaLimits.find((quota) => quota.id === "agy-claude-week")
+      ?.usedPercent,
+    54,
+  );
+  assert.equal(await fakeAgyRunCount(), 1);
+});
 
 const agent = {
   id: "root",
@@ -62,6 +111,7 @@ test("AGY collector validates and namespaces an explicit live snapshot", async (
     assert.equal(result.agents[0].costUsd, null);
     assert.equal(result.agents[0].toolCalls, null);
     assert.equal(result.events[0].agentId, "agy:root");
+    assert.equal(result.quotaLimits.length, 4);
 
     await writeFile(
       telemetryFile,
@@ -153,4 +203,37 @@ test("AGY collector keeps the newest local conversations and reports the rest", 
     }
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("parseAgyUsage reads each AGY model group and window as used percent", () => {
+  const quotaLimits = parseAgyUsage(
+    `${usageOutput}\nClaude and GPT models\tWeekly Limit Remaining\tsoon\nUnknown\tWeekly Limit Remaining\t5%\t2026-10-21T05:59:18Z\n`,
+  );
+
+  assert.deepEqual(
+    quotaLimits.map((quota) => [
+      quota.id,
+      quota.label,
+      quota.period,
+      quota.windowHours,
+      quota.usedPercent,
+      quota.resetsAt,
+    ]),
+    [
+      ["agy-gemini-week", "Gemini", "week", 168, 0, "2026-10-24T02:18:45Z"],
+      ["agy-gemini-hour", "Gemini", "hour", 5, 0, "2026-10-17T07:18:45Z"],
+      ["agy-claude-week", "Claude and GPT", "week", 168, 54, "2026-10-21T05:59:18Z"],
+      ["agy-claude-hour", "Claude and GPT", "hour", 5, 0, "2026-10-17T08:05:15Z"],
+    ],
+  );
+  assert.ok(
+    quotaLimits.every(
+      (quota) => quota.provider === "agy" && quota.usedTokens === null,
+    ),
+  );
+  assert.equal(
+    parseAgyUsage("Gemini Models\tWeekly Limit Remaining\t40%\tlater")[0]
+      .resetsAt,
+    null,
+  );
 });
