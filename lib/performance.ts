@@ -69,16 +69,35 @@ export const tokenPrices: Record<string, TokenPrice> = {
   "gpt-oss-120b": { input: 0.15, cacheWrite: 0.15, cacheRead: 0.075, output: 0.6 },
 };
 
+/** A board model id reported in place of a run's own, priced as the model runnerModels runs. */
+const boardModelIds: Record<string, string> = {
+  "claude-fable": "claude-fable-5-1",
+  "claude-opus": "claude-opus-5-5",
+  "claude-sonnet": "claude-sonnet-5-5",
+  "claude-haiku": "claude-haiku-5-5",
+  "codex-astra": "gpt-6-astra",
+  "codex-sol": "gpt-6.1-sol",
+  "codex-luna": "gpt-6-luna",
+  deepseek: "deepseek-v4-pro",
+  glm: "glm-5.3",
+  "agy-gemini": "gemini-3.8-flash",
+  "agy-sonnet": "claude-sonnet-4-6",
+  "agy-opus": "claude-opus-4-6",
+  "agy-gpt-oss": "gpt-oss-120b",
+};
+
 /**
  * The price of a reported model id. A provider prefix ("z-ai/", "agy/") and an
- * effort suffix ("-medium") are dropped, then an id without its own price
- * takes the longest priced id it starts with ("claude-opus-4-6-thinking").
+ * effort suffix ("-medium") are dropped, a board id ("codex-sol") becomes the
+ * model it runs, then an id without its own price takes the longest priced id
+ * it starts with ("claude-opus-4-6-thinking").
  */
 export function tokenPrice(model: string): TokenPrice | null {
-  const id = model
+  const reported = model
     .toLowerCase()
     .replace(/^.*\//, "")
     .replace(/-(low|medium|high|xhigh)$/, "");
+  const id = boardModelIds[reported] ?? reported;
   if (tokenPrices[id]) return tokenPrices[id];
   const prefix = Object.keys(tokenPrices)
     .filter((priced) => id.startsWith(`${priced}-`))

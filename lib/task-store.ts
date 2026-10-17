@@ -266,6 +266,9 @@ export class TaskStore {
         review_limit INTEGER NOT NULL DEFAULT ${defaultKanbanLimit}
       );
       INSERT OR IGNORE INTO board_settings (id) VALUES (1);
+
+      -- A trigger blocks ALTER TABLE DROP COLUMN on the columns it reads.
+      DROP TRIGGER IF EXISTS tasks_performance_snapshot;
     `);
     this.migrate();
     this.trackPerformance();
@@ -275,7 +278,8 @@ export class TaskStore {
    * A scored task's run is copied into performance_snapshots whenever its
    * score, steps or model change, so the Performance chart keeps it after the
    * task is deleted. Created after migrate(), whose table rebuild drops
-   * triggers, and recreated each start so a changed body takes effect.
+   * triggers and whose column drops a trigger would block, and so recreated
+   * each start, which also lets a changed body take effect.
    */
   private trackPerformance() {
     const snapshotColumns = `
@@ -292,7 +296,6 @@ export class TaskStore {
         recorded_at TEXT NOT NULL
       );
 
-      DROP TRIGGER IF EXISTS tasks_performance_snapshot;
       CREATE TRIGGER tasks_performance_snapshot
       AFTER UPDATE OF review_score, workflow_steps, model, effort ON tasks
       WHEN NEW.review_score IS NOT NULL

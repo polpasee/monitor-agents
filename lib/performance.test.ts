@@ -96,6 +96,13 @@ test("prices a reported id by dropping its provider prefix and effort suffix", (
   assert.equal(tokenPrice("claude-opus-5"), null);
 });
 
+test("prices a board model id as the model it runs", () => {
+  assert.equal(tokenPrice("codex-astra"), tokenPrices["gpt-6-astra"]);
+  assert.equal(tokenPrice("agy-opus"), tokenPrices["claude-opus-4-6"]);
+  assert.equal(tokenPrice("claude-sonnet"), tokenPrices["claude-sonnet-5-5"]);
+  assert.equal(tokenPrice("glm"), tokenPrices["glm-5.3"]);
+});
+
 test("cannot price a task with an unpriced model, missing token kinds or no coding steps", () => {
   assert.equal(codingCost({ model: "mystery", workflowSteps: [step({ model: "mystery-1" })] }), null);
   assert.equal(codingCost({ model: "opus", workflowSteps: [step({ outputTokens: undefined })] }), null);
