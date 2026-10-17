@@ -142,13 +142,16 @@ function stepCost(step: KanbanWorkflowStep): number | null {
   );
 }
 
-/** Test & Verification: the reviewer that gives the score, always Opus whatever the card asks. */
-const verifyStep = 4;
+/**
+ * Implement: the only step on the card's own model. Explore and Test &
+ * Verification run on Opus whatever the card asks.
+ */
+const implementStep = 3;
 
 /**
- * What the coding model's own steps cost: the verify step and steps another
- * model ran are left out. null unless every such step can be priced and the
- * total is above $0.
+ * What the coding model's Implement steps cost. An Implement step another
+ * model ran, which no reporter sends today, would be left out. null unless
+ * every such step can be priced and the total is above $0.
  */
 export function codingCost(
   snapshot: Pick<PerformanceSnapshot, "model" | "workflowSteps">,
@@ -156,7 +159,7 @@ export function codingCost(
   const codingFamily = family(snapshot.model);
   let total = 0;
   for (const step of snapshot.workflowSteps) {
-    if (step.step === verifyStep || family(step.model) !== codingFamily) continue;
+    if (step.step !== implementStep || family(step.model) !== codingFamily) continue;
     const cost = stepCost(step);
     if (cost === null) return null;
     total += cost;
