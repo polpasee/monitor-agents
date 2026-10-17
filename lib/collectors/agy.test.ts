@@ -205,6 +205,73 @@ test("AGY collector keeps the newest local conversations and reports the rest", 
   }
 });
 
+test("AGY collector takes cwd from its run_command Cwd, not paths it mentions", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-agy-cwd-"));
+  const previousFile = process.env.AGY_TELEMETRY_FILE;
+  const previousHome = process.env.AGY_HOME;
+  const worktree = "/repo/.claude/worktrees/agent-a6b056b8e34ec0f97";
+  const createdAt = new Date().toISOString();
+
+  try {
+    delete process.env.AGY_TELEMETRY_FILE;
+    process.env.AGY_HOME = directory;
+    const decoy = "/other/.claude/worktrees/agent-reviewed";
+    const runs = {
+      withCwd: [
+        {
+          type: "USER_INPUT",
+          content: `Review ${decoy} and ${decoy}/lib/a.ts`,
+          created_at: createdAt,
+        },
+        {
+          type: "PLANNER_RESPONSE",
+          content: `Reading file://${decoy}/lib/a.ts`,
+          tool_calls: [
+            { name: "view_file", args: { AbsolutePath: JSON.stringify(decoy) } },
+            { name: "run_command", args: { Cwd: JSON.stringify(worktree) } },
+          ],
+          created_at: createdAt,
+        },
+      ],
+      withoutCwd: [
+        { type: "USER_INPUT", content: `Look at ${decoy}`, created_at: createdAt },
+      ],
+    };
+    for (const [conversationId, steps] of Object.entries(runs)) {
+      const logs = join(
+        directory,
+        "brain",
+        conversationId,
+        ".system_generated",
+        "logs",
+      );
+      await mkdir(logs, { recursive: true });
+      await writeFile(
+        join(logs, "transcript.jsonl"),
+        steps.map((step) => JSON.stringify(step)).join("\n"),
+      );
+    }
+
+    const result = await collectAgyTelemetry();
+    const cwdById = new Map(result.agents.map((agent) => [agent.id, agent.cwd]));
+
+    assert.equal(cwdById.get("agy:withCwd"), worktree);
+    assert.equal(cwdById.get("agy:withoutCwd"), "");
+  } finally {
+    if (previousFile === undefined) {
+      delete process.env.AGY_TELEMETRY_FILE;
+    } else {
+      process.env.AGY_TELEMETRY_FILE = previousFile;
+    }
+    if (previousHome === undefined) {
+      delete process.env.AGY_HOME;
+    } else {
+      process.env.AGY_HOME = previousHome;
+    }
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("parseAgyUsage reads each AGY model group and window as used percent", () => {
   const quotaLimits = parseAgyUsage(
     `${usageOutput}\nClaude and GPT models\tWeekly Limit Remaining\tsoon\nUnknown\tWeekly Limit Remaining\t5%\t2026-10-21T05:59:18Z\n`,

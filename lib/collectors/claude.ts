@@ -44,6 +44,9 @@ const CODEX_EXEC_COMMAND_PATTERN =
 // can still read as a command here, the same limitation the codex pattern has.
 const QWEN_PROMPT_COMMAND_PATTERN =
   /(?:^|[\n;&|(){}])[\t ]*(?:nohup[\t ]+)?qwen[\t ]+(?:[^\n;&|]*[\t ])?-(?:p|-prompt)(?:[\t \\="']|$)/u;
+// AGY runs headless the same way (`agy -p "..." --model ... --sandbox`).
+const AGY_PROMPT_COMMAND_PATTERN =
+  /(?:^|[\n;&|(){}])[\t ]*(?:nohup[\t ]+)?agy[\t ]+(?:[^\n;&|]*[\t ])?-(?:p|-prompt)(?:[\t \\="']|$)/u;
 
 const EXTERNAL_SPAWN_COMMAND_PATTERNS: ReadonlyArray<{
   provider: Provider;
@@ -51,6 +54,7 @@ const EXTERNAL_SPAWN_COMMAND_PATTERNS: ReadonlyArray<{
 }> = [
   { provider: "codex", pattern: CODEX_EXEC_COMMAND_PATTERN },
   { provider: "qwen", pattern: QWEN_PROMPT_COMMAND_PATTERN },
+  { provider: "agy", pattern: AGY_PROMPT_COMMAND_PATTERN },
 ];
 
 const execFileAsync = promisify(execFile);
@@ -1583,8 +1587,17 @@ export async function collectClaudeTelemetry(): Promise<CollectorResult> {
       transcript.lastAtMs ?? candidate.modifiedAtMs,
       providerLastActivityAtMs ?? 0,
     );
+    const subagentId = `${candidate.rootId}:${candidate.agentId}`;
+    for (const mark of transcript.externalSpawns) {
+      externalSpawns.push({
+        parentId: subagentId,
+        childProvider: mark.provider,
+        spawnMethod: "bash",
+        at: isoTime(mark.atMs),
+      });
+    }
     agents.push({
-      id: `${candidate.rootId}:${candidate.agentId}`,
+      id: subagentId,
       // A parent whose own meta or transcript could not be read never
       // becomes an agent, and a child pointing at a missing parent is
       // dropped from the topology instead of drawn. Fall back to the

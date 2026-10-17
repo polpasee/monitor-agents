@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 
 import type {
@@ -357,6 +357,19 @@ function emptyResult(
   };
 }
 
+// AGY transcripts carry no cwd field; the run's directory is the `Cwd` its
+// run_command calls carry, stored JSON-encoded (`"Cwd":"\"/repo\""`).
+function runCommandCwd(call: unknown): string | null {
+  const cwd = (call as { args?: { Cwd?: unknown } } | null)?.args?.Cwd;
+  if (typeof cwd !== "string") return null;
+  try {
+    const parsed: unknown = JSON.parse(cwd);
+    return typeof parsed === "string" && isAbsolute(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 async function parseLocalAgyAgent(
   conversationId: string,
 ): Promise<AgentRun | null> {
@@ -384,6 +397,7 @@ async function parseLocalAgyAgent(
   let task = "Unknown task";
   let model = "Gemini";
   let toolCalls = 0;
+  const cwdCounts = new Map<string, number>();
 
   for (const line of lines) {
     try {
@@ -410,6 +424,12 @@ async function parseLocalAgyAgent(
       }
       if (Array.isArray(step.tool_calls)) {
         toolCalls += step.tool_calls.length;
+        for (const call of step.tool_calls) {
+          const toolCwd = runCommandCwd(call);
+          if (toolCwd) {
+            cwdCounts.set(toolCwd, (cwdCounts.get(toolCwd) ?? 0) + 1);
+          }
+        }
       }
     } catch {
       // Ignore parse errors on individual lines
@@ -417,6 +437,10 @@ async function parseLocalAgyAgent(
   }
 
   if (!startedAt) return null;
+
+  // Stable sort: on a tie the Cwd seen first wins.
+  const cwd =
+    [...cwdCounts].sort((left, right) => right[1] - left[1])[0]?.[0] ?? "";
 
   const now = Date.now();
   const lastActivityMs = Date.parse(lastActivityAt);
@@ -432,7 +456,7 @@ async function parseLocalAgyAgent(
     status: isCompleted ? "completed" : "running",
     task: task.substring(0, 200),
     spawnMethod: "root",
-    cwd: "",
+    cwd,
     startedAt,
     endedAt: isCompleted ? lastActivityAt : null,
     lastActivityAt,
