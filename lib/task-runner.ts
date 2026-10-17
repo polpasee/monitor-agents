@@ -525,8 +525,9 @@ export function parseAgyOutput(stdout: string): {
 /**
  * The conversation id names the session. Tokens are the final `result` usage;
  * until it arrives, the usage of each finished step (one per step index, as a
- * step can repeat its event) is what a heartbeat can report. `total_tokens`
- * leaves out `cache_read_tokens`, so the used tokens are the kinds added up.
+ * step can repeat its event) is what a heartbeat can report. `output_tokens`
+ * already counts thinking, and `total_tokens` is input plus output without
+ * `cache_read_tokens`, so the used tokens are the kinds added up.
  */
 export function parseAgyRunMetadata(stdout: string): ClaudeRunMetadata {
   const metadata: ClaudeRunMetadata = {};
@@ -584,7 +585,7 @@ export function parseAgyRunMetadata(stdout: string): ClaudeRunMetadata {
   metadata.inputTokens = sum((usage) => sumTokens(usage, ["input_tokens"]));
   metadata.cacheWriteTokens = 0;
   metadata.cacheReadTokens = sum((usage) => sumTokens(usage, ["cache_read_tokens"]));
-  metadata.outputTokens = sum((usage) => sumTokens(usage, ["output_tokens", "thinking_tokens"]));
+  metadata.outputTokens = sum((usage) => sumTokens(usage, ["output_tokens"]));
   metadata.usedTokens =
     metadata.inputTokens + metadata.cacheReadTokens + metadata.outputTokens;
   return metadata;
