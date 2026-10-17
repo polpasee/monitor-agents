@@ -1,8 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { KanbanTask, KanbanWorkflowStep } from "./kanban.ts";
-import { buildPerformanceSeries, taskCost } from "./performance.ts";
+import type { KanbanWorkflowStep } from "./kanban.ts";
+import {
+  buildPerformanceSeries,
+  codingCost,
+  tokenPrice,
+  tokenPrices,
+  type PerformanceSnapshot,
+} from "./performance.ts";
 
 function step(overrides: Partial<KanbanWorkflowStep>): KanbanWorkflowStep {
   return {
@@ -20,42 +26,21 @@ function step(overrides: Partial<KanbanWorkflowStep>): KanbanWorkflowStep {
   };
 }
 
-function task(overrides: Partial<KanbanTask>): KanbanTask {
+function snapshot(overrides: Partial<PerformanceSnapshot>): PerformanceSnapshot {
   return {
-    id: "task",
-    title: "Task",
-    description: "",
-    repository: "repo",
-    status: "done",
-    priority: 0,
-    requestedModel: null,
-    requestedEffort: null,
-    requestedReviewModel: null,
-    requestedReviewEffort: null,
-    claimedBy: null,
-    claimedAt: null,
-    leaseUntil: null,
-    result: null,
-    lastError: null,
-    attemptCount: 0,
-    sessionId: null,
-    agentRunId: null,
-    model: "claude-opus-5",
+    taskId: "task",
+    model: "opus",
     effort: "medium",
-    usedTokens: null,
-    pullRequestNumber: null,
-    summary: null,
-    statusHistory: [{ status: "done", at: "2026-10-15T03:00:00.000Z" }],
-    workflowSteps: [step({})],
     reviewScore: 8,
-    createdAt: "2026-10-15T00:00:00.000Z",
-    updatedAt: "2026-10-15T03:00:00.000Z",
+    workflowSteps: [step({})],
+    recordedAt: "2026-10-15T03:00:00.000Z",
     ...overrides,
   };
 }
 
-test("prices every token kind of every step at that step's own model", () => {
-  const cost = taskCost({
+test("prices every token kind of the coding model's steps", () => {
+  const cost = codingCost({
+    model: "sonnet",
     workflowSteps: [
       step({
         model: "claude-sonnet-5-5",
@@ -64,24 +49,71 @@ test("prices every token kind of every step at that step's own model", () => {
         cacheReadTokens: 1_000_000,
         outputTokens: 1_000_000,
       }),
-      step({ model: "claude-opus-5-5", cacheReadTokens: 0, outputTokens: 1_000_000 }),
     ],
   });
-  // Sonnet 2 + 2.5 + 0.2 + 10, then Opus output 20.
-  assert.ok(Math.abs(cost! - 34.7) < 1e-9);
+  // 2 + 2.5 + 0.2 + 10.
+  assert.ok(Math.abs(cost! - 14.7) < 1e-9);
 });
 
-test("cannot price a task with an unpriced model, missing token kinds or no steps", () => {
-  assert.equal(taskCost({ workflowSteps: [step({ model: "gpt-6-sol" })] }), null);
-  assert.equal(taskCost({ workflowSteps: [step({ outputTokens: undefined })] }), null);
-  assert.equal(taskCost({ workflowSteps: [] }), null);
+test("leaves out steps another model ran, such as an Opus review of Sonnet's work", () => {
+  const cost = codingCost({
+    model: "sonnet",
+    workflowSteps: [
+      step({ model: "claude-sonnet-5-5", step: 3 }),
+      step({ model: "claude-opus-5-5", step: 4, outputTokens: 1_000_000 }),
+    ],
+  });
+  assert.ok(Math.abs(cost! - 0.2) < 1e-9);
 });
 
-test("leaves out tasks without a review score or a cost", () => {
+test("matches a task's model to its steps across the runners' id shapes", () => {
+  const cases: [string, string][] = [
+    ["opus", "claude-opus-5-5"],
+    ["codex-sol", "gpt-6.1-sol"],
+    ["gpt-6.1-sol", "gpt-6.1-sol"],
+    ["agy/gemini-3.8-flash-medium", "agy/gemini-3.8-flash-medium"],
+    ["deepseek", "deepseek/deepseek-v4-pro"],
+    ["glm", "z-ai/glm-5.3"],
+  ];
+  for (const [model, stepModel] of cases) {
+    assert.notEqual(
+      codingCost({ model, workflowSteps: [step({ model: stepModel })] }),
+      null,
+      `${model} / ${stepModel}`,
+    );
+  }
+});
+
+test("prices a reported id by dropping its provider prefix and effort suffix", () => {
+  assert.equal(tokenPrice("z-ai/glm-5.3"), tokenPrices["glm-5.3"]);
+  assert.equal(tokenPrice("deepseek/deepseek-v4-pro"), tokenPrices["deepseek-v4-pro"]);
+  assert.equal(tokenPrice("agy/gemini-3.8-flash-medium"), tokenPrices["gemini-3.8-flash"]);
+  assert.equal(tokenPrice("agy/gpt-oss-120b-medium"), tokenPrices["gpt-oss-120b"]);
+  assert.equal(tokenPrice("agy/claude-opus-4-6-thinking"), tokenPrices["claude-opus-4-6"]);
+  assert.equal(tokenPrice("gpt-6.1-sol"), tokenPrices["gpt-6.1-sol"]);
+  assert.equal(tokenPrice("gpt-6-sol"), tokenPrices["gpt-6-sol"]);
+  assert.equal(tokenPrice("glm-5.3-flash"), tokenPrices["glm-5.3-flash"]);
+  assert.equal(tokenPrice("claude-opus-5"), null);
+});
+
+test("prices a board model id as the model it runs", () => {
+  assert.equal(tokenPrice("codex-astra"), tokenPrices["gpt-6-astra"]);
+  assert.equal(tokenPrice("agy-opus"), tokenPrices["claude-opus-4-6"]);
+  assert.equal(tokenPrice("claude-sonnet"), tokenPrices["claude-sonnet-5-5"]);
+  assert.equal(tokenPrice("glm"), tokenPrices["glm-5.3"]);
+});
+
+test("cannot price a task with an unpriced model, missing token kinds or no coding steps", () => {
+  assert.equal(codingCost({ model: "mystery", workflowSteps: [step({ model: "mystery-1" })] }), null);
+  assert.equal(codingCost({ model: "opus", workflowSteps: [step({ outputTokens: undefined })] }), null);
+  assert.equal(codingCost({ model: "opus", workflowSteps: [step({ model: "claude-sonnet-5-5" })] }), null);
+  assert.equal(codingCost({ model: "opus", workflowSteps: [] }), null);
+});
+
+test("leaves out snapshots without a cost", () => {
   const series = buildPerformanceSeries([
-    task({ reviewScore: 8 }),
-    task({ reviewScore: null }),
-    task({ workflowSteps: [] }),
+    snapshot({ reviewScore: 8 }),
+    snapshot({ workflowSteps: [] }),
   ]);
   assert.deepEqual(series, [
     { label: "opus", points: [{ label: "opus:med", cost: 0.2, score: 8, count: 1 }] },
@@ -90,8 +122,8 @@ test("leaves out tasks without a review score or a cost", () => {
 
 test("averages the cost and score of one model:effort and counts them", () => {
   const series = buildPerformanceSeries([
-    task({ reviewScore: 6 }),
-    task({ reviewScore: 9, workflowSteps: [step({ cacheReadTokens: 3_000_000 })] }),
+    snapshot({ reviewScore: 6 }),
+    snapshot({ reviewScore: 9, workflowSteps: [step({ cacheReadTokens: 3_000_000 })] }),
   ]);
   const point = series[0]?.points[0];
   assert.equal(point?.score, 7.5);
@@ -100,12 +132,13 @@ test("averages the cost and score of one model:effort and counts them", () => {
 });
 
 test("joins one model's efforts into one series ordered low to xhigh", () => {
+  const sonnetSteps = [step({ model: "claude-sonnet-5-5" })];
   const series = buildPerformanceSeries([
-    task({ effort: "xhigh" }),
-    task({ effort: "medium" }),
-    task({ effort: "low" }),
-    task({ effort: "high" }),
-    task({ model: "sonnet", effort: "high" }),
+    snapshot({ effort: "xhigh" }),
+    snapshot({ effort: "medium" }),
+    snapshot({ effort: "low" }),
+    snapshot({ effort: "high" }),
+    snapshot({ model: "sonnet", effort: "high", workflowSteps: sonnetSteps }),
   ]);
   assert.deepEqual(
     series.map((entry) => [entry.label, entry.points.map((point) => point.label)]),
@@ -118,15 +151,16 @@ test("joins one model's efforts into one series ordered low to xhigh", () => {
 
 test("labels codex-sol by its family, codex", () => {
   const series = buildPerformanceSeries([
-    task({ model: null, effort: null, requestedModel: "codex-sol", requestedEffort: "high" }),
+    snapshot({
+      model: "codex-sol",
+      effort: "high",
+      workflowSteps: [step({ model: "gpt-6.1-sol" })],
+    }),
   ]);
   assert.equal(series[0]?.label, "codex");
   assert.equal(series[0]?.points[0]?.label, "codex:high");
 });
 
-test("drops a task with no model", () => {
-  const series = buildPerformanceSeries([
-    task({ model: null, requestedModel: null }),
-  ]);
-  assert.deepEqual(series, []);
+test("drops a snapshot with no model", () => {
+  assert.deepEqual(buildPerformanceSeries([snapshot({ model: null })]), []);
 });

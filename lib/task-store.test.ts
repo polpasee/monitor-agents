@@ -1408,11 +1408,90 @@ test("TaskStore keeps the review score a report sends and leaves it when one doe
 
   // A database from before the column existed gains it, empty.
   const raw = new DatabaseSync(path);
-  raw.exec("ALTER TABLE tasks DROP COLUMN review_score");
+  raw.exec(`
+    DROP TRIGGER tasks_performance_snapshot;
+    ALTER TABLE tasks DROP COLUMN review_score;
+  `);
   raw.close();
   const reopened = new TaskStore(path);
   try {
     assert.deepEqual(reopened.listTasks().map((task) => task.reviewScore), [null]);
+  } finally {
+    reopened.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("TaskStore keeps a scored task's performance after the task is deleted", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-performance-"));
+  const path = join(directory, "tasks.sqlite");
+  const steps = [
+    {
+      step: 3,
+      model: "claude-opus-5-5",
+      effort: "low",
+      usedTokens: 10,
+      inputTokens: 1,
+      cacheWriteTokens: 2,
+      cacheReadTokens: 3,
+      outputTokens: 4,
+      startedAt: null,
+      endedAt: null,
+    },
+  ];
+  const store = new TaskStore(path);
+  try {
+    const scored = store.createTask({ title: "Scored", repository: "monitor-agents" });
+    const unscored = store.createTask({ title: "Unscored", repository: "monitor-agents" });
+    const at = (seconds: number) => new Date(`2026-08-04T00:00:${seconds}.000Z`);
+    store.claimTask({
+      agentId: "agent-1",
+      repositories: ["monitor-agents"],
+      now: at(10),
+      leaseMs: 600_000,
+    });
+    store.heartbeatTask(scored.id, "agent-1", at(20), 600_000, {
+      model: "opus",
+      effort: "low",
+      workflowSteps: steps,
+      reviewScore: 7,
+    });
+    store.completeTask(scored.id, "agent-1", "done", at(30), { reviewScore: 9 });
+
+    assert.deepEqual(store.listPerformanceSnapshots(), [
+      {
+        taskId: scored.id,
+        model: "opus",
+        effort: "low",
+        reviewScore: 9,
+        workflowSteps: steps,
+        recordedAt: at(30).toISOString(),
+      },
+    ]);
+
+    store.deleteTask(scored.id);
+    store.deleteTask(unscored.id);
+    assert.equal(store.listPerformanceSnapshots()[0]?.taskId, scored.id);
+  } finally {
+    store.close();
+  }
+
+  // Scored tasks from before the table existed are copied in on start.
+  const raw = new DatabaseSync(path);
+  raw.exec("DROP TABLE performance_snapshots");
+  raw
+    .prepare(`
+      INSERT INTO tasks (id, title, repository, status, requested_model, review_score, created_at, updated_at)
+      VALUES ('old', 'Old', 'monitor-agents', 'done', 'claude-sonnet', 6, ?, ?)
+    `)
+    .run("2026-08-01T00:00:00.000Z", "2026-08-01T00:00:00.000Z");
+  raw.close();
+  const reopened = new TaskStore(path);
+  try {
+    assert.deepEqual(
+      reopened.listPerformanceSnapshots().map((row) => [row.taskId, row.model, row.reviewScore]),
+      [["old", "claude-sonnet", 6]],
+    );
   } finally {
     reopened.close();
     await rm(directory, { recursive: true, force: true });
