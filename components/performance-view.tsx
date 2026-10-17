@@ -16,7 +16,7 @@ const seriesColors = [
 ];
 
 const height = 240;
-const margin = { top: 12, right: 16, bottom: 28, left: 32 };
+const margin = { top: 24, right: 16, bottom: 28, left: 32 };
 const yTicks = [0, 2, 4, 6, 8, 10];
 /** USD per task; those inside the plotted range are drawn. */
 const costTicks = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200];
@@ -78,8 +78,9 @@ export function PerformanceView() {
   }, [hasSeries]);
 
   // Log, so a cheap model's efforts do not bunch up against an expensive one's.
+  // Padded 2x each way so the range always spans one of the costTicks.
   const x = scaleLog()
-    .domain([Math.min(...costs) / 1.5, Math.max(...costs) * 1.5])
+    .domain([Math.min(...costs) / 2, Math.max(...costs) * 2])
     .range([margin.left, Math.max(margin.left, width - margin.right)]);
   const [minCost, maxCost] = x.domain();
   const y = scaleLinear()
@@ -104,7 +105,7 @@ export function PerformanceView() {
 
       {!hasSeries ? (
         <div className="panel-empty-state">
-          <p>{loading ? "Loading tasks…" : "No scored tasks yet."}</p>
+          <p>{loading ? "Loading tasks…" : "No scored tasks with a known API price yet."}</p>
         </div>
       ) : (
         <div className="performance-chart">

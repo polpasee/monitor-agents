@@ -67,8 +67,8 @@ test("prices every token kind of every step at that step's own model", () => {
       step({ model: "claude-opus-5-5", cacheReadTokens: 0, outputTokens: 1_000_000 }),
     ],
   });
-  // Sonnet 2 + 4 + 0.2 + 10, then Opus output 20.
-  assert.ok(Math.abs(cost! - 36.2) < 1e-9);
+  // Sonnet 2 + 2.5 + 0.2 + 10, then Opus output 20.
+  assert.ok(Math.abs(cost! - 34.7) < 1e-9);
 });
 
 test("cannot price a task with an unpriced model, missing token kinds or no steps", () => {

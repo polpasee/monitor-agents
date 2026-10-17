@@ -31,13 +31,14 @@ interface TokenPrice {
 
 /**
  * USD per million tokens, Anthropic API list prices as of 2026-10-06. Cache
- * writes are at the 1-hour TTL rate (2x input), which Claude Code uses.
+ * writes are at the 5-minute TTL rate (1.25x input), which the subagents that
+ * run workflow steps use.
  */
 export const tokenPrices: Record<string, TokenPrice> = {
-  "claude-fable-5-1": { input: 10, cacheWrite: 20, cacheRead: 0.25, output: 50 },
-  "claude-opus-5-5": { input: 4, cacheWrite: 8, cacheRead: 0.2, output: 20 },
-  "claude-sonnet-5-5": { input: 2, cacheWrite: 4, cacheRead: 0.2, output: 10 },
-  "claude-haiku-5-5": { input: 0.1, cacheWrite: 0.2, cacheRead: 0.01, output: 0.5 },
+  "claude-fable-5-1": { input: 10, cacheWrite: 12.5, cacheRead: 0.25, output: 50 },
+  "claude-opus-5-5": { input: 4, cacheWrite: 5, cacheRead: 0.2, output: 20 },
+  "claude-sonnet-5-5": { input: 2, cacheWrite: 2.5, cacheRead: 0.2, output: 10 },
+  "claude-haiku-5-5": { input: 0.1, cacheWrite: 0.125, cacheRead: 0.01, output: 0.5 },
 };
 
 /** Low to xhigh; an effort not listed sorts after them. */
