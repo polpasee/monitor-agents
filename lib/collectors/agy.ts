@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { readdir, readFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 
 import type {
@@ -33,10 +33,6 @@ const EVENT_KINDS: EventKind[] = [
   "usage.recorded",
 ];
 const QUOTA_PERIODS: QuotaPeriod[] = ["hour", "week"];
-// AGY transcripts carry no cwd, but a run launched in a Claude worktree names
-// that worktree in its tool calls, which is what links it to its parent.
-const CLAUDE_WORKTREE_PATH_PATTERN =
-  /(?:\/[^\s"'`\\/]+)*\/\.claude\/worktrees\/agent-[\w-]+/gu;
 const DEFAULT_MAX_AGENTS = 24;
 const execFileAsync = promisify(execFile);
 const USAGE_CACHE_MS = 5 * 60_000;
@@ -361,6 +357,19 @@ function emptyResult(
   };
 }
 
+// AGY transcripts carry no cwd field; the run's directory is the `Cwd` its
+// run_command calls carry, stored JSON-encoded (`"Cwd":"\"/repo\""`).
+function runCommandCwd(call: unknown): string | null {
+  const cwd = (call as { args?: { Cwd?: unknown } } | null)?.args?.Cwd;
+  if (typeof cwd !== "string") return null;
+  try {
+    const parsed: unknown = JSON.parse(cwd);
+    return typeof parsed === "string" && isAbsolute(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 async function parseLocalAgyAgent(
   conversationId: string,
 ): Promise<AgentRun | null> {
@@ -388,6 +397,7 @@ async function parseLocalAgyAgent(
   let task = "Unknown task";
   let model = "Gemini";
   let toolCalls = 0;
+  const cwdCounts = new Map<string, number>();
 
   for (const line of lines) {
     try {
@@ -414,6 +424,12 @@ async function parseLocalAgyAgent(
       }
       if (Array.isArray(step.tool_calls)) {
         toolCalls += step.tool_calls.length;
+        for (const call of step.tool_calls) {
+          const toolCwd = runCommandCwd(call);
+          if (toolCwd) {
+            cwdCounts.set(toolCwd, (cwdCounts.get(toolCwd) ?? 0) + 1);
+          }
+        }
       }
     } catch {
       // Ignore parse errors on individual lines
@@ -422,13 +438,9 @@ async function parseLocalAgyAgent(
 
   if (!startedAt) return null;
 
-  const worktreeCounts = new Map<string, number>();
-  for (const [path] of contents.matchAll(CLAUDE_WORKTREE_PATH_PATTERN)) {
-    worktreeCounts.set(path, (worktreeCounts.get(path) ?? 0) + 1);
-  }
+  // Stable sort: on a tie the Cwd seen first wins.
   const cwd =
-    [...worktreeCounts].sort((left, right) => right[1] - left[1])[0]?.[0] ??
-    "";
+    [...cwdCounts].sort((left, right) => right[1] - left[1])[0]?.[0] ?? "";
 
   const now = Date.now();
   const lastActivityMs = Date.parse(lastActivityAt);

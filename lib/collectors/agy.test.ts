@@ -205,7 +205,7 @@ test("AGY collector keeps the newest local conversations and reports the rest", 
   }
 });
 
-test("AGY collector takes cwd from the Claude worktree its transcript names most", async () => {
+test("AGY collector takes cwd from its run_command Cwd, not paths it mentions", async () => {
   const directory = await mkdtemp(join(tmpdir(), "monitor-agy-cwd-"));
   const previousFile = process.env.AGY_TELEMETRY_FILE;
   const previousHome = process.env.AGY_HOME;
@@ -215,31 +215,48 @@ test("AGY collector takes cwd from the Claude worktree its transcript names most
   try {
     delete process.env.AGY_TELEMETRY_FILE;
     process.env.AGY_HOME = directory;
-    const logs = join(directory, "brain", "run", ".system_generated", "logs");
-    await mkdir(logs, { recursive: true });
-    await writeFile(
-      join(logs, "transcript.jsonl"),
-      [
-        { type: "USER_INPUT", content: "Fix it", created_at: createdAt },
+    const decoy = "/other/.claude/worktrees/agent-reviewed";
+    const runs = {
+      withCwd: [
+        {
+          type: "USER_INPUT",
+          content: `Review ${decoy} and ${decoy}/lib/a.ts`,
+          created_at: createdAt,
+        },
         {
           type: "PLANNER_RESPONSE",
-          content: `Compare /other/.claude/worktrees/agent-b with file://${worktree}/lib/a.ts.`,
+          content: `Reading file://${decoy}/lib/a.ts`,
           tool_calls: [
+            { name: "view_file", args: { AbsolutePath: JSON.stringify(decoy) } },
             { name: "run_command", args: { Cwd: JSON.stringify(worktree) } },
           ],
           created_at: createdAt,
         },
-      ]
-        .map((step) => JSON.stringify(step))
-        .join("\n"),
-    );
+      ],
+      withoutCwd: [
+        { type: "USER_INPUT", content: `Look at ${decoy}`, created_at: createdAt },
+      ],
+    };
+    for (const [conversationId, steps] of Object.entries(runs)) {
+      const logs = join(
+        directory,
+        "brain",
+        conversationId,
+        ".system_generated",
+        "logs",
+      );
+      await mkdir(logs, { recursive: true });
+      await writeFile(
+        join(logs, "transcript.jsonl"),
+        steps.map((step) => JSON.stringify(step)).join("\n"),
+      );
+    }
 
     const result = await collectAgyTelemetry();
+    const cwdById = new Map(result.agents.map((agent) => [agent.id, agent.cwd]));
 
-    assert.deepEqual(
-      result.agents.map((agent) => agent.cwd),
-      [worktree],
-    );
+    assert.equal(cwdById.get("agy:withCwd"), worktree);
+    assert.equal(cwdById.get("agy:withoutCwd"), "");
   } finally {
     if (previousFile === undefined) {
       delete process.env.AGY_TELEMETRY_FILE;
