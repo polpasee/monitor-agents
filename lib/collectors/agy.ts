@@ -48,7 +48,7 @@ const USAGE_WINDOWS = new Map<string, { period: QuotaPeriod; windowHours: number
 ]);
 
 let cachedUsage: { expiresAt: number; quotaLimits: QuotaLimit[] } | null = null;
-let pendingUsage: Promise<QuotaLimit[]> | null = null;
+let pendingUsage: Promise<void> | null = null;
 
 class ValidationError extends Error {}
 
@@ -509,30 +509,27 @@ async function loadAgyUsage(): Promise<QuotaLimit[]> {
   }
 }
 
-// One agy process at a time, cached, so concurrent snapshots share it.
-async function collectAgyUsage(): Promise<QuotaLimit[]> {
-  if (cachedUsage && cachedUsage.expiresAt > Date.now()) {
-    return cachedUsage.quotaLimits;
+// Snapshots never wait on agy: they get the last cached quota, and a stale
+// cache starts one background refresh. A failed refresh keeps the old quota.
+function collectAgyUsage(): QuotaLimit[] {
+  if (!pendingUsage && (cachedUsage?.expiresAt ?? 0) <= Date.now()) {
+    pendingUsage = loadAgyUsage().then((quotaLimits) => {
+      cachedUsage =
+        quotaLimits.length > 0
+          ? { expiresAt: Date.now() + USAGE_CACHE_MS, quotaLimits }
+          : {
+              expiresAt: Date.now() + USAGE_RETRY_CACHE_MS,
+              quotaLimits: cachedUsage?.quotaLimits ?? [],
+            };
+      pendingUsage = null;
+    });
   }
-
-  pendingUsage ??= loadAgyUsage().then((quotaLimits) => {
-    cachedUsage = {
-      expiresAt:
-        Date.now() +
-        (quotaLimits.length > 0 ? USAGE_CACHE_MS : USAGE_RETRY_CACHE_MS),
-      quotaLimits,
-    };
-    pendingUsage = null;
-    return quotaLimits;
-  });
-  return pendingUsage;
+  return cachedUsage?.quotaLimits ?? [];
 }
 
 export async function collectAgyTelemetry(): Promise<CollectorResult> {
-  const [result, usage] = await Promise.all([
-    collectAgyAgents(),
-    collectAgyUsage(),
-  ]);
+  const usage = collectAgyUsage();
+  const result = await collectAgyAgents();
   return { ...result, quotaLimits: [...result.quotaLimits, ...usage] };
 }
 

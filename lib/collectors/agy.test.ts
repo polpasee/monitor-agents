@@ -3,6 +3,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { collectAgyTelemetry, parseAgyUsage } from "./agy.ts";
 
@@ -24,6 +25,35 @@ await writeFile(
 );
 await chmod(process.env.AGY_BIN, 0o755);
 test.after(() => rm(fakeAgyDirectory, { force: true, recursive: true }));
+
+async function fakeAgyRunCount(): Promise<number> {
+  return (await readFile(fakeAgyRuns, "utf8").catch(() => ""))
+    .split("\n")
+    .filter(Boolean).length;
+}
+
+// Runs first: the module's usage cache is still empty.
+test("AGY collector serves cached quota while one agy run refreshes it", async () => {
+  const first = await Promise.all([
+    collectAgyTelemetry(),
+    collectAgyTelemetry(),
+  ]);
+  assert.deepEqual(
+    first.map((result) => result.quotaLimits),
+    [[], []],
+  );
+
+  while ((await collectAgyTelemetry()).quotaLimits.length === 0) {
+    await delay(10);
+  }
+  const refreshed = await collectAgyTelemetry();
+  assert.equal(
+    refreshed.quotaLimits.find((quota) => quota.id === "agy-claude-week")
+      ?.usedPercent,
+    54,
+  );
+  assert.equal(await fakeAgyRunCount(), 1);
+});
 
 const agent = {
   id: "root",
@@ -205,25 +235,5 @@ test("parseAgyUsage reads each AGY model group and window as used percent", () =
     parseAgyUsage("Gemini Models\tWeekly Limit Remaining\t40%\tlater")[0]
       .resetsAt,
     null,
-  );
-});
-
-test("AGY collector runs agy once for concurrent and cached snapshots", async () => {
-  const results = await Promise.all([
-    collectAgyTelemetry(),
-    collectAgyTelemetry(),
-  ]);
-  results.push(await collectAgyTelemetry());
-
-  for (const result of results) {
-    assert.equal(
-      result.quotaLimits.find((quota) => quota.id === "agy-claude-week")
-        ?.usedPercent,
-      54,
-    );
-  }
-  assert.equal(
-    (await readFile(fakeAgyRuns, "utf8")).trim().split("\n").length,
-    1,
   );
 });
