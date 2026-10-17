@@ -66,15 +66,28 @@ test("leaves out steps another model ran, such as an Opus review of Sonnet's wor
   assert.ok(Math.abs(cost! - 0.2) < 1e-9);
 });
 
-test("leaves out the verify step even when the coding model's family ran it", () => {
+test("counts only Implement, leaving out Explore and Verify even on the card's family", () => {
   const cost = codingCost({
     model: "opus",
     workflowSteps: [
+      step({ step: 1, effort: null, outputTokens: 1_000_000 }),
       step({ step: 3 }),
       step({ step: 4, outputTokens: 1_000_000 }),
     ],
   });
   assert.ok(Math.abs(cost! - 0.2) < 1e-9);
+});
+
+test("leaves out an Implement step another model ran, such as a Codex run's Opus driver", () => {
+  const cost = codingCost({
+    model: "gpt-6.1-sol",
+    workflowSteps: [
+      step({ step: 3, model: "claude-opus-5-5", outputTokens: 1_000_000 }),
+      step({ step: 3, model: "gpt-6.1-sol", cacheReadTokens: 1_000_000 }),
+    ],
+  });
+  // GPT-6.1 Sol cache read at $0.10.
+  assert.ok(Math.abs(cost! - 0.1) < 1e-9);
 });
 
 test("matches a task's model to its steps across the runners' id shapes", () => {
