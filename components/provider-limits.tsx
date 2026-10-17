@@ -8,7 +8,7 @@ import {
   type QuotaLimit,
 } from "@/lib/telemetry";
 
-type QuotaCard = "codex" | "claude" | "gemini" | "agy-gemini" | "agy-claude";
+type QuotaCard = "codex" | "claude" | "agy-gemini" | "agy-claude";
 
 // AGY reports one quota per model group, so it renders one card per group.
 const quotaCards: Record<
@@ -17,18 +17,15 @@ const quotaCards: Record<
 > = {
   codex: { provider: "codex", label: "Codex" },
   claude: { provider: "claude", label: "Claude" },
-  gemini: { provider: "gemini", label: "Gemini" },
   "agy-gemini": { provider: "agy", label: "AGY Gemini", idPrefix: "agy-gemini" },
   "agy-claude": { provider: "agy", label: "AGY Claude", idPrefix: "agy-claude" },
 };
-
-const displayedProviders: readonly QuotaCard[] = ["codex", "claude", "gemini"];
 
 interface ProviderLimitsProps {
   capturedAt: string;
   /** In a header row: one column per card, 180px each, rather than the overlay's layout. */
   inline?: boolean;
-  providers?: readonly QuotaCard[];
+  providers: readonly QuotaCard[];
   quotaLimits: QuotaLimit[];
 }
 
@@ -61,7 +58,7 @@ function quotaUsagePercent(quota: QuotaLimit | undefined): number | null {
 export function ProviderLimits({
   capturedAt,
   inline = false,
-  providers = displayedProviders,
+  providers,
   quotaLimits,
 }: ProviderLimitsProps) {
   // Set inline rather than from the stylesheet, so a browser holding an older
@@ -71,7 +68,11 @@ export function ProviderLimits({
         overlay: { width: `min(${180 * providers.length}px, 100%)` } as CSSProperties,
         cards: { gridTemplateColumns: `repeat(${providers.length}, minmax(0, 1fr))` },
       }
-    : null;
+    : {
+        // Wide enough for one row; the stylesheet's auto-fit grid still wraps when narrow.
+        overlay: { width: `min(${180 * providers.length}px, calc(100% - 28px))` },
+        cards: undefined,
+      };
   return (
     <aside
       className={
