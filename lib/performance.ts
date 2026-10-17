@@ -142,9 +142,12 @@ function stepCost(step: KanbanWorkflowStep): number | null {
   );
 }
 
+/** Test & Verification: the reviewer that gives the score, always Opus whatever the card asks. */
+const verifyStep = 4;
+
 /**
- * What the coding model's own steps cost: steps another model ran, such as a
- * review, are left out. null unless every such step can be priced and the
+ * What the coding model's own steps cost: the verify step and steps another
+ * model ran are left out. null unless every such step can be priced and the
  * total is above $0.
  */
 export function codingCost(
@@ -153,7 +156,7 @@ export function codingCost(
   const codingFamily = family(snapshot.model);
   let total = 0;
   for (const step of snapshot.workflowSteps) {
-    if (family(step.model) !== codingFamily) continue;
+    if (step.step === verifyStep || family(step.model) !== codingFamily) continue;
     const cost = stepCost(step);
     if (cost === null) return null;
     total += cost;

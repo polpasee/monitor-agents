@@ -66,6 +66,17 @@ test("leaves out steps another model ran, such as an Opus review of Sonnet's wor
   assert.ok(Math.abs(cost! - 0.2) < 1e-9);
 });
 
+test("leaves out the verify step even when the coding model's family ran it", () => {
+  const cost = codingCost({
+    model: "opus",
+    workflowSteps: [
+      step({ step: 3 }),
+      step({ step: 4, outputTokens: 1_000_000 }),
+    ],
+  });
+  assert.ok(Math.abs(cost! - 0.2) < 1e-9);
+});
+
 test("matches a task's model to its steps across the runners' id shapes", () => {
   const cases: [string, string][] = [
     ["opus", "claude-opus-5-5"],
