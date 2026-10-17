@@ -533,7 +533,7 @@ export function KanbanBoard({
         <ProviderLimits
           capturedAt={capturedAt}
           className="provider-limits-overlay--inline"
-          providers={["codex", "claude"]}
+          providers={["codex", "claude", "agy-gemini", "agy-claude"]}
           quotaLimits={quotaLimits}
         />
         <div className="kanban-header__actions">
