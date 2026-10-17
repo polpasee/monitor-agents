@@ -17,13 +17,43 @@ const seriesColors = [
   "var(--amber)",
   "var(--green)",
   "var(--red)",
+  "var(--color-fuchsia-400)",
+  "var(--color-blue-400)",
 ];
 
-const height = 240;
-const margin = { top: 24, right: 16, bottom: 28, left: 32 };
-const yTicks = [0, 2, 4, 6, 8, 10];
-/** USD per task; those inside the plotted range are drawn. */
+/** The plot's own height; the legend rows above it add to the svg's. */
+const plotHeight = 240;
+/** The bottom and left margins hold the axis titles. */
+const margin = { right: 32, bottom: 52, left: 60 };
+const legendRowHeight = 20;
+/** USD per task; those inside the plotted range are labelled when there is room. */
 const costTicks = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200];
+const costLabelSpacing = 44;
+/** A point label's two lines, as a box centred on the point's x. */
+const label = { width: 40, height: 28, gap: 8 };
+/**
+ * Drawn with attributes rather than stylesheet classes, so a browser holding an
+ * old stylesheet still shows the axes and labels.
+ */
+const ink = { axis: "var(--border-strong)", grid: "var(--border)", text: "var(--muted)" };
+
+interface LabelBox {
+  x: number;
+  top: number;
+}
+
+function overlaps(a: LabelBox, b: LabelBox): boolean {
+  return Math.abs(a.x - b.x) < label.width && Math.abs(a.top - b.top) < label.height;
+}
+
+/** Whether a label box covers a dot, with the dot's 5px radius as margin. */
+function coversDot(box: LabelBox, dotX: number, dotY: number): boolean {
+  return (
+    Math.abs(box.x - dotX) < label.width / 2 + 5 &&
+    dotY > box.top - 5 &&
+    dotY < box.top + label.height + 5
+  );
+}
 
 export function PerformanceView() {
   const [snapshots, setSnapshots] = useState<PerformanceSnapshot[]>([]);
@@ -68,7 +98,8 @@ export function PerformanceView() {
 
   const series = useMemo(() => buildPerformanceSeries(snapshots), [snapshots]);
   const hasSeries = series.length > 0;
-  const costs = series.flatMap((entry) => entry.points.map((point) => point.cost));
+  const points = series.flatMap((entry) => entry.points);
+  const costs = points.map((point) => point.cost);
 
   // The svg is drawn at the chart's real width, so its text and dots stay true px.
   useEffect(() => {
@@ -81,18 +112,91 @@ export function PerformanceView() {
     return () => observer.disconnect();
   }, [hasSeries]);
 
+  const plotLeft = margin.left;
+  const plotRight = Math.max(plotLeft, width - margin.right);
+
+  // Legend items flow left to right, wrap at the plot's width, and each row is centred.
+  const legendRows: { label: string; color: string; x: number }[][] = [];
+  series.forEach((entry, index) => {
+    const itemWidth = 34 + entry.label.length * 7;
+    const row = legendRows.at(-1);
+    const rowEnd = row?.length ? row.at(-1)!.x + 34 + row.at(-1)!.label.length * 7 + 16 : 0;
+    const item = { label: entry.label, color: seriesColors[index % seriesColors.length], x: rowEnd };
+    if (!row || (rowEnd > 0 && rowEnd + itemWidth > plotRight - plotLeft)) {
+      legendRows.push([{ ...item, x: 0 }]);
+    } else {
+      row.push(item);
+    }
+  });
+  const legendItems = legendRows.flatMap((row, rowIndex) => {
+    const last = row.at(-1)!;
+    const offset = (plotLeft + plotRight - (last.x + 34 + last.label.length * 7)) / 2;
+    return row.map((item) => ({ ...item, x: item.x + offset, y: 16 + rowIndex * legendRowHeight }));
+  });
+
+  const plotTop = 16 + legendRows.length * legendRowHeight;
+  const plotBottom = plotTop + plotHeight;
+  const height = plotBottom + margin.bottom;
   // Log, so a cheap model's efforts do not bunch up against an expensive one's.
   // Padded 2x each way so the range always spans one of the costTicks.
   const x = scaleLog()
     .domain([Math.min(...costs) / 2, Math.max(...costs) * 2])
-    .range([margin.left, Math.max(margin.left, width - margin.right)]);
+    .range([plotLeft, plotRight]);
   const [minCost, maxCost] = x.domain();
+  // Labels at least costLabelSpacing apart, so a narrow chart does not run them together.
+  const costLabels = costTicks
+    .filter((tick) => tick >= minCost && tick <= maxCost)
+    .reduce<number[]>((kept, tick) => {
+      const previous = kept.at(-1);
+      return previous === undefined || x(tick) - x(previous) >= costLabelSpacing ? [...kept, tick] : kept;
+    }, []);
+  // Starts a point below the lowest score, so close scores do not all sit on one line.
+  const minScore = Math.max(0, Math.floor(Math.min(...points.map((point) => point.score))) - 1);
   const y = scaleLinear()
-    .domain([0, maxReviewScore])
-    .range([height - margin.bottom, margin.top]);
+    .domain([minScore, maxReviewScore])
+    .range([plotBottom, plotTop]);
+  // Counted down from the top so the plot's top is always a labelled tick.
+  const scoreStep = maxReviewScore - minScore <= 5 ? 1 : 2;
+  const scoreTicks = Array.from(
+    { length: Math.floor((maxReviewScore - minScore) / scoreStep) + 1 },
+    (_, index) => maxReviewScore - index * scoreStep,
+  );
   const path = line<PerformancePoint>()
     .x((point) => x(point.cost))
     .y((point) => y(point.score));
+
+  // Each label goes on the side away from its own neighbours unless that side
+  // leaves the plot or covers a label already placed, from any series. A label
+  // with no free place is left out; its dot's tooltip still has the numbers.
+  const placed: LabelBox[] = [];
+  const labelTops = new Map<string, number>();
+  const dots = points.map((point) => ({ x: x(point.cost), y: y(point.score) }));
+  for (const entry of series) {
+    entry.points.forEach((point, index) => {
+      const pointX = x(point.cost);
+      const pointY = y(point.score);
+      const above = { x: pointX, top: pointY - label.gap - label.height };
+      const below = { x: pointX, top: pointY + label.gap };
+      const neighbours = [entry.points[index - 1], entry.points[index + 1]].filter(Boolean);
+      const prefersBelow =
+        neighbours.length > 0 &&
+        point.score < neighbours.reduce((total, other) => total + other.score, 0) / neighbours.length;
+      // Then one label height further out on each side, before giving up.
+      const near = prefersBelow ? [below, above] : [above, below];
+      const sides = [
+        ...near,
+        ...near.map((box) => ({ x: box.x, top: box.top + (box === above ? -1 : 1) * label.height })),
+      ].filter((box) => box.top >= plotTop && box.top + label.height <= plotBottom);
+      const box = sides.find(
+        (side) =>
+          !placed.some((other) => overlaps(side, other)) &&
+          !dots.some((dot) => coversDot(side, dot.x, dot.y)),
+      );
+      if (!box) return;
+      placed.push(box);
+      labelTops.set(point.label, box.top);
+    });
+  }
 
   return (
     <section className="performance-panel" aria-labelledby="performance-title">
@@ -113,92 +217,116 @@ export function PerformanceView() {
         </div>
       ) : (
         <div className="performance-chart">
-          <ul className="performance-chart__legend">
-            {series.map((entry, index) => (
-              <li key={entry.label}>
-                <span
-                  className="performance-chart__swatch"
-                  style={{ background: seriesColors[index % seriesColors.length] }}
-                />
-                {entry.label}
-              </li>
-            ))}
-          </ul>
-          <div className="performance-chart__frame" ref={chartRef}>
+          {/* Sized here, not in the stylesheet, so a cached older sheet cannot clip the axis. */}
+          <div
+            className="performance-chart__frame"
+            ref={chartRef}
+            style={width > 0 ? { height } : undefined}
+          >
             {width > 0 && (
               <svg
                 className="performance-chart__svg"
                 role="img"
                 aria-label="Average review score against average API cost per task for each Model:Effort"
+                fontSize={11}
                 height={height}
                 viewBox={`0 0 ${width} ${height}`}
                 width={width}
               >
-                {yTicks.map((tick) => (
+                {legendItems.map((item) => (
+                  <g key={item.label} transform={`translate(${item.x}, ${item.y})`}>
+                    <line stroke={item.color} strokeWidth={2} x1={0} x2={22} y1={0} y2={0} />
+                    <circle cx={11} cy={0} fill={item.color} r={4} />
+                    <text dominantBaseline="middle" fill="var(--text-soft)" fontSize={12} x={30} y={0}>
+                      {item.label}
+                    </text>
+                  </g>
+                ))}
+
+                {scoreTicks.map((tick) => (
                   <g key={tick}>
-                    <line
-                      className="performance-chart__grid"
-                      x1={margin.left}
-                      x2={width - margin.right}
-                      y1={y(tick)}
-                      y2={y(tick)}
-                    />
-                    <text
-                      className="performance-chart__tick"
-                      dominantBaseline="middle"
-                      textAnchor="end"
-                      x={margin.left - 8}
-                      y={y(tick)}
-                    >
+                    <line stroke={ink.grid} strokeOpacity={0.6} x1={plotLeft} x2={plotRight} y1={y(tick)} y2={y(tick)} />
+                    <text dominantBaseline="middle" fill={ink.text} textAnchor="end" x={plotLeft - 8} y={y(tick)}>
                       {tick}
                     </text>
                   </g>
                 ))}
-                {costTicks
-                  .filter((tick) => tick >= minCost && tick <= maxCost)
-                  .map((tick) => (
-                    <text
-                      className="performance-chart__tick"
+                {x.ticks().map((tick) => {
+                  const major = costTicks.includes(tick);
+                  return (
+                    <line
                       key={tick}
-                      textAnchor="middle"
-                      x={x(tick)}
-                      y={height - 8}
-                    >
-                      ${tick}
-                    </text>
-                  ))}
+                      stroke={ink.axis}
+                      x1={x(tick)}
+                      x2={x(tick)}
+                      y1={plotBottom}
+                      y2={plotBottom + (major ? 6 : 3)}
+                    />
+                  );
+                })}
+                {costLabels.map((tick) => (
+                  <text fill={ink.text} key={tick} textAnchor="middle" x={x(tick)} y={plotBottom + 20}>
+                    ${tick}
+                  </text>
+                ))}
+                <line stroke={ink.axis} x1={plotLeft} x2={plotLeft} y1={plotTop} y2={plotBottom} />
+                <line stroke={ink.axis} x1={plotLeft} x2={plotRight} y1={plotBottom} y2={plotBottom} />
+                <text fill={ink.text} fontSize={12} textAnchor="middle" x={(plotLeft + plotRight) / 2} y={height - 10}>
+                  Average cost per task (USD, log scale)
+                </text>
+                <text
+                  fill={ink.text}
+                  fontSize={12}
+                  textAnchor="middle"
+                  transform={`translate(16, ${(plotTop + plotBottom) / 2}) rotate(-90)`}
+                >
+                  Review score (0–10)
+                </text>
+
                 {series.map((entry, index) => {
                   const color = seriesColors[index % seriesColors.length];
                   return (
                     <g key={entry.label}>
                       <path
-                        className="performance-chart__line"
                         d={path(entry.points) ?? undefined}
+                        fill="none"
                         stroke={color}
+                        strokeLinejoin="round"
+                        strokeWidth={2}
                       />
-                      {entry.points.map((point) => (
-                        <g key={point.label}>
-                          <circle
-                            className="performance-chart__dot"
-                            cx={x(point.cost)}
-                            cy={y(point.score)}
-                            fill={color}
-                            r={4}
-                          >
-                            <title>
-                              {`${point.label} · avg $${point.cost.toFixed(2)} per task · avg score ${point.score.toFixed(1)} · ${point.count} ${point.count === 1 ? "task" : "tasks"}`}
-                            </title>
-                          </circle>
-                          <text
-                            className="performance-chart__tick"
-                            textAnchor="middle"
-                            x={x(point.cost)}
-                            y={y(point.score) - 8}
-                          >
-                            {point.label.split(":")[1] ?? ""}
-                          </text>
-                        </g>
-                      ))}
+                      {entry.points.map((point) => {
+                        const pointX = x(point.cost);
+                        const pointY = y(point.score);
+                        const labelTop = labelTops.get(point.label);
+                        return (
+                          <g key={point.label}>
+                            <circle cx={pointX} cy={pointY} fill={color} r={5} stroke="var(--surface-1)" strokeWidth={2}>
+                              <title>
+                                {`${point.label} · avg $${point.cost.toFixed(2)} per task · avg score ${point.score.toFixed(1)} · ${point.count} ${point.count === 1 ? "task" : "tasks"}`}
+                              </title>
+                            </circle>
+                            {/* A halo of the panel colour keeps another series' line from cutting through the text. */}
+                            {labelTop !== undefined && (
+                              <text
+                                fill={color}
+                                fontSize={12}
+                                paintOrder="stroke"
+                                stroke="var(--surface-1)"
+                                strokeLinejoin="round"
+                                strokeWidth={4}
+                                textAnchor="middle"
+                                x={pointX}
+                                y={labelTop + 11}
+                              >
+                                <tspan x={pointX}>{point.score.toFixed(1)}</tspan>
+                                <tspan dy={13} x={pointX}>
+                                  {point.label.split(":")[1] ?? ""}
+                                </tspan>
+                              </text>
+                            )}
+                          </g>
+                        );
+                      })}
                     </g>
                   );
                 })}
