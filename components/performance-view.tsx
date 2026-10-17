@@ -17,29 +17,42 @@ const seriesColors = [
   "var(--amber)",
   "var(--green)",
   "var(--red)",
+  "var(--color-fuchsia-400)",
+  "var(--color-blue-400)",
 ];
 
-const height = 340;
-/** The top margin holds the legend; the bottom and left ones the axis titles. */
-const margin = { top: 44, right: 32, bottom: 52, left: 60 };
-/** USD per task; those inside the plotted range are labelled. */
+/** The plot's own height; the legend rows above it add to the svg's. */
+const plotHeight = 240;
+/** The bottom and left margins hold the axis titles. */
+const margin = { right: 32, bottom: 52, left: 60 };
+const legendRowHeight = 20;
+/** USD per task; those inside the plotted range are labelled when there is room. */
 const costTicks = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200];
-/** Room for a label's two lines between the point and the plot's top. */
-const labelHeight = 30;
+const costLabelSpacing = 44;
+/** A point label's two lines, as a box centred on the point's x. */
+const label = { width: 40, height: 28, gap: 8 };
 /**
  * Drawn with attributes rather than stylesheet classes, so a browser holding an
  * old stylesheet still shows the axes and labels.
  */
 const ink = { axis: "var(--border-strong)", grid: "var(--border)", text: "var(--muted)" };
 
-/** A point's label goes on the side away from its neighbours, so it does not sit on its own line. */
-function labelBelow(points: PerformancePoint[], index: number, pointY: number): boolean {
-  const neighbours = [points[index - 1], points[index + 1]].filter(Boolean);
-  const below =
-    neighbours.length > 0 &&
-    points[index].score <
-      neighbours.reduce((total, point) => total + point.score, 0) / neighbours.length;
-  return below || pointY - labelHeight < margin.top;
+interface LabelBox {
+  x: number;
+  top: number;
+}
+
+function overlaps(a: LabelBox, b: LabelBox): boolean {
+  return Math.abs(a.x - b.x) < label.width && Math.abs(a.top - b.top) < label.height;
+}
+
+/** Whether a label box covers a dot, with the dot's 5px radius as margin. */
+function coversDot(box: LabelBox, dotX: number, dotY: number): boolean {
+  return (
+    Math.abs(box.x - dotX) < label.width / 2 + 5 &&
+    dotY > box.top - 5 &&
+    dotY < box.top + label.height + 5
+  );
 }
 
 export function PerformanceView() {
@@ -101,35 +114,89 @@ export function PerformanceView() {
 
   const plotLeft = margin.left;
   const plotRight = Math.max(plotLeft, width - margin.right);
-  const plotBottom = height - margin.bottom;
+
+  // Legend items flow left to right, wrap at the plot's width, and each row is centred.
+  const legendRows: { label: string; color: string; x: number }[][] = [];
+  series.forEach((entry, index) => {
+    const itemWidth = 34 + entry.label.length * 7;
+    const row = legendRows.at(-1);
+    const rowEnd = row?.length ? row.at(-1)!.x + 34 + row.at(-1)!.label.length * 7 + 16 : 0;
+    const item = { label: entry.label, color: seriesColors[index % seriesColors.length], x: rowEnd };
+    if (!row || (rowEnd > 0 && rowEnd + itemWidth > plotRight - plotLeft)) {
+      legendRows.push([{ ...item, x: 0 }]);
+    } else {
+      row.push(item);
+    }
+  });
+  const legendItems = legendRows.flatMap((row, rowIndex) => {
+    const last = row.at(-1)!;
+    const offset = (plotLeft + plotRight - (last.x + 34 + last.label.length * 7)) / 2;
+    return row.map((item) => ({ ...item, x: item.x + offset, y: 16 + rowIndex * legendRowHeight }));
+  });
+
+  const plotTop = 16 + legendRows.length * legendRowHeight;
+  const plotBottom = plotTop + plotHeight;
+  const height = plotBottom + margin.bottom;
   // Log, so a cheap model's efforts do not bunch up against an expensive one's.
   // Padded 2x each way so the range always spans one of the costTicks.
   const x = scaleLog()
     .domain([Math.min(...costs) / 2, Math.max(...costs) * 2])
     .range([plotLeft, plotRight]);
   const [minCost, maxCost] = x.domain();
+  // Labels at least costLabelSpacing apart, so a narrow chart does not run them together.
+  const costLabels = costTicks
+    .filter((tick) => tick >= minCost && tick <= maxCost)
+    .reduce<number[]>((kept, tick) => {
+      const previous = kept.at(-1);
+      return previous === undefined || x(tick) - x(previous) >= costLabelSpacing ? [...kept, tick] : kept;
+    }, []);
   // Starts a point below the lowest score, so close scores do not all sit on one line.
   const minScore = Math.max(0, Math.floor(Math.min(...points.map((point) => point.score))) - 1);
   const y = scaleLinear()
     .domain([minScore, maxReviewScore])
-    .range([plotBottom, margin.top]);
+    .range([plotBottom, plotTop]);
+  // Counted down from the top so the plot's top is always a labelled tick.
   const scoreStep = maxReviewScore - minScore <= 5 ? 1 : 2;
   const scoreTicks = Array.from(
     { length: Math.floor((maxReviewScore - minScore) / scoreStep) + 1 },
-    (_, index) => minScore + index * scoreStep,
+    (_, index) => maxReviewScore - index * scoreStep,
   );
   const path = line<PerformancePoint>()
     .x((point) => x(point.cost))
     .y((point) => y(point.score));
 
-  // Legend items laid out left to right, centred over the plot.
-  const legendWidths = series.map((entry) => 34 + entry.label.length * 7);
-  const legendStart =
-    (plotLeft + plotRight - legendWidths.reduce((total, itemWidth) => total + itemWidth + 16, -16)) / 2;
-  const legendItems = series.map((entry, index) => ({
-    label: entry.label,
-    x: legendStart + legendWidths.slice(0, index).reduce((total, itemWidth) => total + itemWidth + 16, 0),
-  }));
+  // Each label goes on the side away from its own neighbours unless that side
+  // leaves the plot or covers a label already placed, from any series. A label
+  // with no free place is left out; its dot's tooltip still has the numbers.
+  const placed: LabelBox[] = [];
+  const labelTops = new Map<string, number>();
+  const dots = points.map((point) => ({ x: x(point.cost), y: y(point.score) }));
+  for (const entry of series) {
+    entry.points.forEach((point, index) => {
+      const pointX = x(point.cost);
+      const pointY = y(point.score);
+      const above = { x: pointX, top: pointY - label.gap - label.height };
+      const below = { x: pointX, top: pointY + label.gap };
+      const neighbours = [entry.points[index - 1], entry.points[index + 1]].filter(Boolean);
+      const prefersBelow =
+        neighbours.length > 0 &&
+        point.score < neighbours.reduce((total, other) => total + other.score, 0) / neighbours.length;
+      // Then one label height further out on each side, before giving up.
+      const near = prefersBelow ? [below, above] : [above, below];
+      const sides = [
+        ...near,
+        ...near.map((box) => ({ x: box.x, top: box.top + (box === above ? -1 : 1) * label.height })),
+      ].filter((box) => box.top >= plotTop && box.top + label.height <= plotBottom);
+      const box = sides.find(
+        (side) =>
+          !placed.some((other) => overlaps(side, other)) &&
+          !dots.some((dot) => coversDot(side, dot.x, dot.y)),
+      );
+      if (!box) return;
+      placed.push(box);
+      labelTops.set(point.label, box.top);
+    });
+  }
 
   return (
     <section className="performance-panel" aria-labelledby="performance-title">
@@ -150,7 +217,12 @@ export function PerformanceView() {
         </div>
       ) : (
         <div className="performance-chart">
-          <div className="performance-chart__frame" ref={chartRef}>
+          {/* Sized here, not in the stylesheet, so a cached older sheet cannot clip the axis. */}
+          <div
+            className="performance-chart__frame"
+            ref={chartRef}
+            style={width > 0 ? { height } : undefined}
+          >
             {width > 0 && (
               <svg
                 className="performance-chart__svg"
@@ -161,18 +233,15 @@ export function PerformanceView() {
                 viewBox={`0 0 ${width} ${height}`}
                 width={width}
               >
-                {legendItems.map((item, index) => {
-                  const color = seriesColors[index % seriesColors.length];
-                  return (
-                    <g key={item.label} transform={`translate(${item.x}, 16)`}>
-                      <line stroke={color} strokeWidth={2} x1={0} x2={22} y1={0} y2={0} />
-                      <circle cx={11} cy={0} fill={color} r={4} />
-                      <text dominantBaseline="middle" fill="var(--text-soft)" fontSize={12} x={30} y={0}>
-                        {item.label}
-                      </text>
-                    </g>
-                  );
-                })}
+                {legendItems.map((item) => (
+                  <g key={item.label} transform={`translate(${item.x}, ${item.y})`}>
+                    <line stroke={item.color} strokeWidth={2} x1={0} x2={22} y1={0} y2={0} />
+                    <circle cx={11} cy={0} fill={item.color} r={4} />
+                    <text dominantBaseline="middle" fill="var(--text-soft)" fontSize={12} x={30} y={0}>
+                      {item.label}
+                    </text>
+                  </g>
+                ))}
 
                 {scoreTicks.map((tick) => (
                   <g key={tick}>
@@ -195,14 +264,12 @@ export function PerformanceView() {
                     />
                   );
                 })}
-                {costTicks
-                  .filter((tick) => tick >= minCost && tick <= maxCost)
-                  .map((tick) => (
-                    <text fill={ink.text} key={tick} textAnchor="middle" x={x(tick)} y={plotBottom + 20}>
-                      ${tick}
-                    </text>
-                  ))}
-                <line stroke={ink.axis} x1={plotLeft} x2={plotLeft} y1={margin.top} y2={plotBottom} />
+                {costLabels.map((tick) => (
+                  <text fill={ink.text} key={tick} textAnchor="middle" x={x(tick)} y={plotBottom + 20}>
+                    ${tick}
+                  </text>
+                ))}
+                <line stroke={ink.axis} x1={plotLeft} x2={plotLeft} y1={plotTop} y2={plotBottom} />
                 <line stroke={ink.axis} x1={plotLeft} x2={plotRight} y1={plotBottom} y2={plotBottom} />
                 <text fill={ink.text} fontSize={12} textAnchor="middle" x={(plotLeft + plotRight) / 2} y={height - 10}>
                   Average cost per task (USD, log scale)
@@ -211,7 +278,7 @@ export function PerformanceView() {
                   fill={ink.text}
                   fontSize={12}
                   textAnchor="middle"
-                  transform={`translate(16, ${(margin.top + plotBottom) / 2}) rotate(-90)`}
+                  transform={`translate(16, ${(plotTop + plotBottom) / 2}) rotate(-90)`}
                 >
                   Review score (0–10)
                 </text>
@@ -227,11 +294,10 @@ export function PerformanceView() {
                         strokeLinejoin="round"
                         strokeWidth={2}
                       />
-                      {entry.points.map((point, pointIndex) => {
+                      {entry.points.map((point) => {
                         const pointX = x(point.cost);
                         const pointY = y(point.score);
-                        const below = labelBelow(entry.points, pointIndex, pointY);
-                        const scoreY = below ? pointY + 18 : pointY - 22;
+                        const labelTop = labelTops.get(point.label);
                         return (
                           <g key={point.label}>
                             <circle cx={pointX} cy={pointY} fill={color} r={5} stroke="var(--surface-1)" strokeWidth={2}>
@@ -240,22 +306,24 @@ export function PerformanceView() {
                               </title>
                             </circle>
                             {/* A halo of the panel colour keeps another series' line from cutting through the text. */}
-                            <text
-                              fill={color}
-                              fontSize={12}
-                              paintOrder="stroke"
-                              stroke="var(--surface-1)"
-                              strokeLinejoin="round"
-                              strokeWidth={4}
-                              textAnchor="middle"
-                              x={pointX}
-                              y={scoreY}
-                            >
-                              <tspan x={pointX}>{point.score.toFixed(1)}</tspan>
-                              <tspan dy={13} x={pointX}>
-                                {point.label.split(":")[1] ?? ""}
-                              </tspan>
-                            </text>
+                            {labelTop !== undefined && (
+                              <text
+                                fill={color}
+                                fontSize={12}
+                                paintOrder="stroke"
+                                stroke="var(--surface-1)"
+                                strokeLinejoin="round"
+                                strokeWidth={4}
+                                textAnchor="middle"
+                                x={pointX}
+                                y={labelTop + 11}
+                              >
+                                <tspan x={pointX}>{point.score.toFixed(1)}</tspan>
+                                <tspan dy={13} x={pointX}>
+                                  {point.label.split(":")[1] ?? ""}
+                                </tspan>
+                              </text>
+                            )}
                           </g>
                         );
                       })}

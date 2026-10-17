@@ -529,7 +529,6 @@ button:focus-visible,
 
 .performance-chart__frame {
   min-width: 0;
-  height: 340px;
   overflow: hidden;
 }
 
