@@ -12,6 +12,7 @@ import type {
   KanbanWorkflowStep,
   TaskRunMetadata,
 } from "./kanban";
+import type { PerformanceSnapshot } from "./performance.ts";
 
 interface TaskRow {
   id: string;
@@ -267,6 +268,42 @@ export class TaskStore {
       INSERT OR IGNORE INTO board_settings (id) VALUES (1);
     `);
     this.migrate();
+    this.trackPerformance();
+  }
+
+  /**
+   * A scored task's run is copied into performance_snapshots whenever its
+   * score, steps or model change, so the Performance chart keeps it after the
+   * task is deleted. Created after migrate(), whose table rebuild drops
+   * triggers, and recreated each start so a changed body takes effect.
+   */
+  private trackPerformance() {
+    const snapshotColumns = `
+      SELECT id, COALESCE(model, requested_model), COALESCE(effort, requested_effort),
+        review_score, workflow_steps, updated_at
+    `;
+    this.database.exec(`
+      CREATE TABLE IF NOT EXISTS performance_snapshots (
+        task_id TEXT PRIMARY KEY,
+        model TEXT,
+        effort TEXT,
+        review_score REAL NOT NULL,
+        workflow_steps TEXT NOT NULL DEFAULT '[]',
+        recorded_at TEXT NOT NULL
+      );
+
+      DROP TRIGGER IF EXISTS tasks_performance_snapshot;
+      CREATE TRIGGER tasks_performance_snapshot
+      AFTER UPDATE OF review_score, workflow_steps, model, effort ON tasks
+      WHEN NEW.review_score IS NOT NULL
+      BEGIN
+        INSERT OR REPLACE INTO performance_snapshots
+        ${snapshotColumns} FROM tasks WHERE id = NEW.id;
+      END;
+
+      INSERT OR REPLACE INTO performance_snapshots
+      ${snapshotColumns} FROM tasks WHERE review_score IS NOT NULL;
+    `);
   }
 
   /**
@@ -378,6 +415,27 @@ export class TaskStore {
 
   close() {
     this.database.close();
+  }
+
+  listPerformanceSnapshots(): PerformanceSnapshot[] {
+    const rows = this.database
+      .prepare("SELECT * FROM performance_snapshots ORDER BY recorded_at ASC")
+      .all() as unknown as {
+      task_id: string;
+      model: string | null;
+      effort: string | null;
+      review_score: number;
+      workflow_steps: string;
+      recorded_at: string;
+    }[];
+    return rows.map((row) => ({
+      taskId: row.task_id,
+      model: row.model,
+      effort: row.effort,
+      reviewScore: row.review_score,
+      workflowSteps: workflowStepsFromRow(row.workflow_steps),
+      recordedAt: row.recorded_at,
+    }));
   }
 
   getBoardSettings(): BoardSettings {

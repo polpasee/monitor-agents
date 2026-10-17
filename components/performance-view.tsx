@@ -3,8 +3,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { line, scaleLinear, scaleLog } from "d3";
 
-import { maxReviewScore, type KanbanTask } from "@/lib/kanban";
-import { buildPerformanceSeries, type PerformancePoint } from "@/lib/performance";
+import { maxReviewScore } from "@/lib/kanban";
+import {
+  buildPerformanceSeries,
+  type PerformancePoint,
+  type PerformanceSnapshot,
+} from "@/lib/performance";
 
 const seriesColors = [
   "var(--lime)",
@@ -22,7 +26,7 @@ const yTicks = [0, 2, 4, 6, 8, 10];
 const costTicks = [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200];
 
 export function PerformanceView() {
-  const [tasks, setTasks] = useState<KanbanTask[]>([]);
+  const [snapshots, setSnapshots] = useState<PerformanceSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const chartRef = useRef<HTMLDivElement>(null);
@@ -34,18 +38,18 @@ export function PerformanceView() {
 
     async function refresh() {
       try {
-        const response = await fetch("/api/tasks", { cache: "no-store" });
+        const response = await fetch("/api/performance", { cache: "no-store" });
         if (!response.ok) {
-          throw new Error(`Task request failed with ${response.status}`);
+          throw new Error(`Performance request failed with ${response.status}`);
         }
-        const nextTasks = (await response.json()) as KanbanTask[];
+        const nextSnapshots = (await response.json()) as PerformanceSnapshot[];
         if (!stopped) {
-          setTasks(nextTasks);
+          setSnapshots(nextSnapshots);
           setError(null);
         }
       } catch {
         if (!stopped) {
-          setError("Unable to load shared tasks.");
+          setError("Unable to load performance.");
         }
       } finally {
         if (!stopped) {
@@ -62,7 +66,7 @@ export function PerformanceView() {
     };
   }, []);
 
-  const series = useMemo(() => buildPerformanceSeries(tasks), [tasks]);
+  const series = useMemo(() => buildPerformanceSeries(snapshots), [snapshots]);
   const hasSeries = series.length > 0;
   const costs = series.flatMap((entry) => entry.points.map((point) => point.cost));
 
