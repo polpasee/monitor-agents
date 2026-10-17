@@ -26,7 +26,8 @@ const displayedProviders: readonly QuotaCard[] = ["codex", "claude", "gemini"];
 
 interface ProviderLimitsProps {
   capturedAt: string;
-  className?: string;
+  /** In a header row: one column per card, 180px each, rather than the overlay's layout. */
+  inline?: boolean;
   providers?: readonly QuotaCard[];
   quotaLimits: QuotaLimit[];
 }
@@ -59,21 +60,29 @@ function quotaUsagePercent(quota: QuotaLimit | undefined): number | null {
 
 export function ProviderLimits({
   capturedAt,
-  className,
+  inline = false,
   providers = displayedProviders,
   quotaLimits,
 }: ProviderLimitsProps) {
+  // Set inline rather than from the stylesheet, so a browser holding an older
+  // sheet still lays the cards out in one row; narrow screens override it there.
+  const inlineLayout = inline
+    ? {
+        overlay: { width: `min(${180 * providers.length}px, 100%)` } as CSSProperties,
+        cards: { gridTemplateColumns: `repeat(${providers.length}, minmax(0, 1fr))` },
+      }
+    : null;
   return (
     <aside
       className={
-        className
-          ? `provider-limits-overlay ${className}`
+        inline
+          ? "provider-limits-overlay provider-limits-overlay--inline"
           : "provider-limits-overlay"
       }
       aria-label="Provider limits"
-      style={{ "--provider-cards": providers.length } as CSSProperties}
+      style={inlineLayout?.overlay}
     >
-      <div className="provider-limits-overlay__providers">
+      <div className="provider-limits-overlay__providers" style={inlineLayout?.cards}>
         {providers.map((card) => {
           const { provider, label: providerLabel, idPrefix } = quotaCards[card];
           const providerQuotasByPeriod = {

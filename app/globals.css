@@ -2385,11 +2385,6 @@ button:focus-visible,
 .provider-limits-overlay--inline {
   position: static;
   z-index: auto;
-  width: min(calc(180px * var(--provider-cards, 2)), 100%);
-}
-
-.provider-limits-overlay--inline .provider-limits-overlay__providers {
-  grid-template-columns: repeat(var(--provider-cards, 2), minmax(0, 1fr));
 }
 
 .provider-limits-overlay__provider {
@@ -2521,12 +2516,13 @@ button:focus-visible,
     width: 100%;
   }
 
+  /* !important: ProviderLimits sets the one-row layout inline. */
   .provider-limits-overlay--inline {
-    width: min(360px, 100%);
+    width: min(360px, 100%) !important;
   }
 
   .provider-limits-overlay--inline .provider-limits-overlay__providers {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 
   .kanban-filter {
