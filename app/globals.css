@@ -1192,6 +1192,11 @@ button:focus-visible,
   margin: 0;
 }
 
+.kanban-card__priority--critical {
+  border-color: color-mix(in oklch, var(--red) 45%, var(--border));
+  color: var(--red);
+}
+
 .kanban-card__priority--high {
   border-color: color-mix(in oklch, var(--amber) 45%, var(--border));
   color: var(--amber);

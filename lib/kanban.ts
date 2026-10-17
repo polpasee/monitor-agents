@@ -14,6 +14,7 @@ export type KanbanStatus = (typeof kanbanStatuses)[number]["id"];
 
 /** Stored as a number so `ORDER BY priority DESC` keeps working unchanged. */
 export const kanbanPriorities = [
+  { id: "critical", label: "Critical", value: 2 },
   { id: "high", label: "High", value: 1 },
   { id: "normal", label: "Normal", value: 0 },
   { id: "low", label: "Low", value: -1 },
@@ -174,9 +175,9 @@ export function isKanbanTaskEditable(task: KanbanTask): boolean {
   return task.status === "todo";
 }
 
-/** Older tasks may hold any integer, so only the sign decides the level. */
+/** Older tasks may hold any integer: 2 and up is Critical, otherwise the sign decides. */
 export function kanbanPriorityOf(value: number) {
-  return kanbanPriorities[value > 0 ? 0 : value < 0 ? 2 : 1];
+  return kanbanPriorities[value >= 2 ? 0 : value > 0 ? 1 : value < 0 ? 3 : 2];
 }
 
 /** A missing priority means Normal; anything but a known level is rejected. */
