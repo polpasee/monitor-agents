@@ -660,38 +660,74 @@ test("agyArgs runs print mode with stream-json and never passes --effort", () =>
 const agyStream = [
   '{"event":"init","conversation_id":"conv-1","init":{"model":"gemini-3.8-flash-low"}}',
   '{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"O"}}',
-  '{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":1,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":100,"output_tokens":5,"total_tokens":105}}}',
-  '{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":3,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":200,"output_tokens":20,"thinking_tokens":10,"total_tokens":230}}}',
+  '{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":1,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":100,"output_tokens":5,"thinking_tokens":0,"cache_read_tokens":40,"total_tokens":105}}}',
+  '{"event":"step_update","step_update":{"conversation_id":"conv-1","step_index":3,"state":"DONE","step_type":"agent_response","usage":{"input_tokens":200,"output_tokens":20,"thinking_tokens":10,"cache_read_tokens":60,"total_tokens":220}}}',
 ];
 
 test("parseAgyRunMetadata reads the conversation and the tokens so far", () => {
   assert.deepEqual(parseAgyRunMetadata(agyStream.join("\n")), {
     sessionId: "conv-1",
-    usedTokens: 335,
-    // Thinking is billed as output; AGY reports no cache kinds.
+    usedTokens: 425,
+    // Output already counts thinking; AGY writes no cache, and total_tokens leaves out cache reads.
     inputTokens: 300,
-    cacheWriteTokens: null,
-    cacheReadTokens: null,
-    outputTokens: 35,
+    cacheWriteTokens: 0,
+    cacheReadTokens: 100,
+    outputTokens: 25,
   });
   // A repeated step event counts once.
   assert.equal(
     parseAgyRunMetadata([...agyStream, agyStream[2]].join("\n")).usedTokens,
-    335,
+    425,
   );
   assert.deepEqual(parseAgyRunMetadata("not json\n{broken"), {});
 });
 
 test("parseAgyRunMetadata prefers the final result usage", () => {
   const result =
-    '{"event":"result","result":{"conversation_id":"conv-1","status":"SUCCESS","response":"OK\\n","usage":{"input_tokens":300,"output_tokens":25,"thinking_tokens":10,"total_tokens":340}}}';
+    '{"event":"result","result":{"conversation_id":"conv-1","status":"SUCCESS","response":"OK\\n","usage":{"input_tokens":300,"output_tokens":25,"thinking_tokens":10,"total_tokens":325}}}';
   assert.deepEqual(parseAgyRunMetadata([...agyStream, result].join("\n")), {
     sessionId: "conv-1",
-    usedTokens: 340,
+    // No cache_read_tokens counts as none read.
+    usedTokens: 325,
     inputTokens: 300,
-    cacheWriteTokens: null,
-    cacheReadTokens: null,
-    outputTokens: 35,
+    cacheWriteTokens: 0,
+    cacheReadTokens: 0,
+    outputTokens: 25,
+  });
+});
+
+test("parseAgyRunMetadata does not add thinking to output again", () => {
+  // A real "OK" reply: its 39 output tokens are 38 thinking plus the answer.
+  const step =
+    '{"event":"step_update","step_update":{"conversation_id":"c895d234-d976-4697-afa7-f80ca917aa24","step_index":1,"state":"DONE","step_type":"agent_response","duration_seconds":2.60945,"usage":{"input_tokens":11840,"output_tokens":39,"thinking_tokens":38,"cache_read_tokens":0,"total_tokens":11879}}}';
+  const result =
+    '{"event":"result","result":{"conversation_id":"c895d234-d976-4697-afa7-f80ca917aa24","status":"SUCCESS","response":"OK\\n","duration_seconds":2.643841,"num_turns":1,"usage":{"input_tokens":11840,"output_tokens":39,"thinking_tokens":38,"cache_read_tokens":0,"total_tokens":11879}}}';
+  const tokens = {
+    usedTokens: 11_879,
+    inputTokens: 11_840,
+    cacheWriteTokens: 0,
+    cacheReadTokens: 0,
+    outputTokens: 39,
+  };
+  assert.deepEqual(parseAgyRunMetadata(step), tokens);
+  assert.deepEqual(parseAgyRunMetadata([step, result].join("\n")), {
+    sessionId: "c895d234-d976-4697-afa7-f80ca917aa24",
+    ...tokens,
+  });
+});
+
+test("parseAgyRunMetadata counts the cache reads of a real result", () => {
+  const step =
+    '{"event":"step_update","step_update":{"conversation_id":"2246f936-cf63-451d-b265-7fcd502e99b1","step_index":1,"state":"DONE","step_type":"agent_response","duration_seconds":11.777314,"usage":{"input_tokens":7993,"output_tokens":861,"thinking_tokens":0,"cache_read_tokens":9673,"total_tokens":8854}}}';
+  const result =
+    '{"event":"result","result":{"conversation_id":"2246f936-cf63-451d-b265-7fcd502e99b1","status":"ERROR","error":"Individual quota reached.","num_turns":1,"usage":{"input_tokens":203240,"output_tokens":14560,"thinking_tokens":0,"cache_read_tokens":1300290,"total_tokens":217800}}}';
+  assert.deepEqual(parseAgyRunMetadata([step, result].join("\n")), {
+    sessionId: "2246f936-cf63-451d-b265-7fcd502e99b1",
+    usedTokens: 1_518_090,
+    inputTokens: 203_240,
+    cacheWriteTokens: 0,
+    cacheReadTokens: 1_300_290,
+    outputTokens: 14_560,
   });
 });
 
