@@ -5,7 +5,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import { demoSnapshot } from "./demo-data.ts";
-import { resolveWorktreeMainRepos } from "./live-snapshot.ts";
+import { resolveWorktreeMainRepos, tasksUseAgy } from "./live-snapshot.ts";
 
 test("resolveWorktreeMainRepos ignores an agent without an absolute cwd", async () => {
   const directory = await realpath(
@@ -38,4 +38,18 @@ test("resolveWorktreeMainRepos ignores an agent without an absolute cwd", async 
     process.chdir(previousCwd);
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("tasksUseAgy only counts open cards that ask for an AGY model", () => {
+  const card = (
+    status: "todo" | "done",
+    requestedModel: string | null,
+    requestedReviewModel: string | null = null,
+  ) => ({ status, requestedModel, requestedReviewModel });
+
+  assert.equal(tasksUseAgy([]), false);
+  assert.equal(tasksUseAgy([card("todo", null), card("todo", "codex-sol")]), false);
+  assert.equal(tasksUseAgy([card("done", "agy-opus")]), false);
+  assert.equal(tasksUseAgy([card("todo", "agy-gemini")]), true);
+  assert.equal(tasksUseAgy([card("todo", "claude-opus", "agy-sonnet")]), true);
 });
