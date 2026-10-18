@@ -1,5 +1,6 @@
 import {
   formatStepModel,
+  kanbanModels,
   type KanbanWorkflowStep,
 } from "./kanban.ts";
 
@@ -104,8 +105,16 @@ export function tokenPrice(model: string): TokenPrice | null {
   return prefix ? tokenPrices[prefix] : null;
 }
 
+/** The series name: a model family, with Codex split by the model it ran ("codex-sol"). */
 function family(model: string | null): string | null {
-  return formatStepModel(model, null)?.toLowerCase() ?? null;
+  const base = formatStepModel(model, null)?.toLowerCase() ?? null;
+  if (base !== "codex" || !model) return base;
+  const tokens = model.toLowerCase().split(/[-/._]/);
+  const codex = kanbanModels.find(
+    (option) =>
+      option.id.startsWith("codex-") && tokens.includes(option.id.split("-").at(-1)!),
+  );
+  return codex?.id ?? base;
 }
 
 /** null when the step's model has no price or its four token kinds are missing. */
@@ -169,7 +178,9 @@ export function buildPerformanceSeries(
   for (const snapshot of snapshots) {
     const effort = snapshot.effort?.toLowerCase() ?? null;
     const seriesLabel = family(snapshot.model);
-    const label = formatStepModel(snapshot.model, effort)?.toLowerCase();
+    const label = formatStepModel(snapshot.model, effort)
+      ?.toLowerCase()
+      .replace(/^[^:]*/, seriesLabel ?? "");
     if (!seriesLabel || !label) continue;
     const cost = codingCost(snapshot);
     if (cost === null) continue;
