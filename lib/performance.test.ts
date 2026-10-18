@@ -174,7 +174,7 @@ test("joins one model's efforts into one series ordered by cost per task", () =>
   );
 });
 
-test("labels codex-sol by its family, codex", () => {
+test("labels codex-sol by the Codex model it ran", () => {
   const series = buildPerformanceSeries([
     snapshot({
       model: "codex-sol",
@@ -182,8 +182,8 @@ test("labels codex-sol by its family, codex", () => {
       workflowSteps: [step({ model: "gpt-6.1-sol" })],
     }),
   ]);
-  assert.equal(series[0]?.label, "codex");
-  assert.equal(series[0]?.points[0]?.label, "codex:high");
+  assert.equal(series[0]?.label, "codex-sol");
+  assert.equal(series[0]?.points[0]?.label, "codex-sol:high");
 });
 
 test("drops a snapshot with no model", () => {
