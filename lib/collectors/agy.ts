@@ -557,8 +557,11 @@ function collectAgyUsage(): QuotaLimit[] {
   return usage.cached?.quotaLimits ?? [];
 }
 
-export async function collectAgyTelemetry(): Promise<CollectorResult> {
-  const usage = collectAgyUsage();
+// `agy -p /usage` signs in, so it only runs when a card is going to use AGY.
+export async function collectAgyTelemetry(
+  checkUsage = true,
+): Promise<CollectorResult> {
+  const usage = checkUsage ? collectAgyUsage() : [];
   const result = await collectAgyAgents();
   return { ...result, quotaLimits: [...result.quotaLimits, ...usage] };
 }

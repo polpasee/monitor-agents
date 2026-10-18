@@ -15,6 +15,8 @@ import { collectAgyTelemetry } from "./collectors/agy.ts";
 import { collectClaudeTelemetry } from "./collectors/claude.ts";
 import { collectCodexTelemetry } from "./collectors/codex.ts";
 import { collectQwenTelemetry } from "./collectors/qwen.ts";
+import type { KanbanTask } from "./kanban.ts";
+import { getTaskStore } from "./task-store.ts";
 
 // A linked worktree keeps a `.git` file rather than a directory:
 // `gitdir: /repo/.git/worktrees/<name>`.
@@ -72,11 +74,27 @@ async function readSpawnLinks(): Promise<SpawnLink[]> {
   return parseSpawnLinks(ledger).slice(-MAX_SPAWN_LINK_RECORDS);
 }
 
+/** A card that is not Done and asks for an AGY model, to code or to review. */
+export function tasksUseAgy(
+  tasks: readonly Pick<
+    KanbanTask,
+    "status" | "requestedModel" | "requestedReviewModel"
+  >[],
+): boolean {
+  return tasks.some(
+    (task) =>
+      task.status !== "done" &&
+      [task.requestedModel, task.requestedReviewModel].some((model) =>
+        model?.startsWith("agy-"),
+      ),
+  );
+}
+
 export async function collectLiveSnapshot(): Promise<DashboardSnapshot> {
   const results = await Promise.all([
     collectCodexTelemetry(),
     collectClaudeTelemetry(),
-    collectAgyTelemetry(),
+    collectAgyTelemetry(tasksUseAgy(getTaskStore().listTasks())),
     collectQwenTelemetry(),
   ]);
   // Declared links are exact, so they run before every inference below; each
