@@ -14,7 +14,6 @@ import {
 import { collectAgyTelemetry } from "./collectors/agy.ts";
 import { collectClaudeTelemetry } from "./collectors/claude.ts";
 import { collectCodexTelemetry } from "./collectors/codex.ts";
-import { collectGeminiTelemetry } from "./collectors/gemini.ts";
 import { collectQwenTelemetry } from "./collectors/qwen.ts";
 
 // A linked worktree keeps a `.git` file rather than a directory:
@@ -78,7 +77,6 @@ export async function collectLiveSnapshot(): Promise<DashboardSnapshot> {
     collectCodexTelemetry(),
     collectClaudeTelemetry(),
     collectAgyTelemetry(),
-    collectGeminiTelemetry(),
     collectQwenTelemetry(),
   ]);
   // Declared links are exact, so they run before every inference below; each

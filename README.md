@@ -1,7 +1,7 @@
 # Monitor Agents
 
 A local multi-LLM observability portal for following real agent runs across
-Codex, Claude Code, and AGY, with Gemini quota monitoring from Antigravity CLI.
+Codex, Claude Code, and AGY.
 The dashboard reads provider state on the same machine, turns parent/child
 relationships into a recursive topology, and refreshes the browser every three
 seconds.
@@ -43,11 +43,6 @@ tool counts remain blank instead of being estimated.
 - **AGY:** remains unconfigured unless `AGY_TELEMETRY_FILE` points to a local JSON
   snapshot. No AGY installation or stable telemetry contract was found, so the
   app does not fabricate one.
-- **Gemini usage:** reads the five-hour and weekly quota windows exposed by an
-  already-running Antigravity CLI on localhost. The collector does not read or
-  refresh OAuth credentials; when the quota summary is unavailable, the weekly
-  limit remains blank and the five-hour limit falls back to Antigravity's model
-  status.
 
 Collectors never return prompt/message content, reasoning content, tool arguments,
 commands, tool output, environment variables, titles, descriptions, or results.
@@ -117,7 +112,6 @@ CLAUDE_RATE_LIMITS_FILE="$HOME/.claude/usage-status.json"
 MONITOR_WORKSPACE="/absolute/path/to/workspace" # exact Codex and Claude cwd filter
 MONITOR_MAX_AGENTS=24                           # Codex agent cap across recent families
 AGY_TELEMETRY_FILE="/absolute/path/to/agy.json"
-ANTIGRAVITY_CLI_DIR="$HOME/.gemini/antigravity-cli" # optional non-default location
 MONITOR_TASK_DB="/absolute/path/to/monitor-tasks.sqlite"
 GITHUB_TOKEN="ghp_..."                          # repository list; falls back to `gh auth token`
 ```
@@ -270,7 +264,7 @@ components/             Interactive dashboard, topology, and inspector
 lib/telemetry.ts        Provider-neutral telemetry contract and derivations
 lib/live-snapshot.ts    Live collector orchestration
 lib/task-store.ts       SQLite Kanban queue and atomic Agent leases
-lib/collectors/         Codex, Claude Code, Gemini usage, and AGY adapters
+lib/collectors/         Codex, Claude Code, and AGY adapters
 lib/demo-data.ts        Synthetic fixture used only by unit tests
 lib/telemetry.test.ts   Domain derivation tests
 ```
