@@ -8,6 +8,7 @@ import {
   parseKanbanEffort,
   parseKanbanModel,
   parseKanbanPriority,
+  parseKanbanWorkType,
 } from "@/lib/kanban";
 import { getTaskStore } from "@/lib/task-store";
 
@@ -31,6 +32,7 @@ export async function POST(request: Request) {
   const requestedEffort = parseKanbanEffort(body?.requestedEffort);
   const requestedReviewModel = parseKanbanModel(body?.requestedReviewModel);
   const requestedReviewEffort = parseKanbanEffort(body?.requestedReviewEffort);
+  const workType = parseKanbanWorkType(body?.workType);
 
   if (
     !body ||
@@ -41,7 +43,8 @@ export async function POST(request: Request) {
     requestedModel === false ||
     requestedEffort === false ||
     requestedReviewModel === false ||
-    requestedReviewEffort === false
+    requestedReviewEffort === false ||
+    workType === false
   ) {
     return Response.json({ error: "Invalid task input." }, { status: 400 });
   }
@@ -58,6 +61,7 @@ export async function POST(request: Request) {
       requestedReviewModel,
       requestedReviewEffort,
     ),
+    workType,
   });
   return Response.json(task, { status: 201 });
 }

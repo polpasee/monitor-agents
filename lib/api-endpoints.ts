@@ -15,6 +15,8 @@ export interface ApiEndpoint {
 const runMetadata = [
   "sessionId?, agentRunId?, model?, effort?: string, 1–200 chars",
   "usedTokens?: integer 0–1000000000000, this attempt's running total (not an increment)",
+  "filesChanged?, additions?, deletions?, testFilesChanged?: integer 0–10000000, the size of the change",
+  "hasMigration?, hasNewDependency?: boolean",
   "Run details left out or null keep the stored value",
 ];
 
@@ -47,6 +49,7 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
       'requestedEffort?: "inherit" | "xhigh" | "high" | "medium" | "low" (default "inherit", stored as null)',
       "requestedModel and requestedEffort are for the coding agent; agy-sonnet, agy-opus and agy-gpt-oss take no effort (any sent is stored as null)",
       "requestedReviewModel?, requestedReviewEffort?: same options as requestedModel and requestedEffort, for the review agent",
+      'workType?: "ui-text" | "ui-layout" | "table-column" | "export-import" | "query-action" | "migration" | "concurrency-permissions" | "job-script" (default null); set at creation only',
     ],
     responses: [
       { status: 201, description: "KanbanTask in todo" },
@@ -123,6 +126,20 @@ export const apiEndpoints: readonly ApiEndpoint[] = [
     ],
     description:
       "Atomically claims the highest-priority, oldest Todo task in the given repositories and moves it to In Coding Progress.",
+  },
+  {
+    method: "GET",
+    path: "/api/performance",
+    request: [],
+    responses: [
+      {
+        status: 200,
+        description:
+          "PerformanceSnapshot[] oldest first: { taskId, model, effort, reviewScore, workflowSteps, recordedAt, title, pullRequestNumber, attemptCount, workType, filesChanged, additions, deletions, testFilesChanged, hasMigration, hasNewDependency }; the fields after recordedAt are null on snapshots recorded before they were kept",
+      },
+    ],
+    description:
+      "Lists every scored run, kept after its task is deleted. Review rounds = workflowSteps with step 4; implement runs = step 3.",
   },
   {
     method: "GET",
