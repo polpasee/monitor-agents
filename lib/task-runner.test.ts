@@ -54,6 +54,13 @@ const task: KanbanTask = {
   statusHistory: [],
   workflowSteps: [],
   reviewScore: null,
+  workType: null,
+  filesChanged: null,
+  additions: null,
+  deletions: null,
+  testFilesChanged: null,
+  hasMigration: null,
+  hasNewDependency: null,
   createdAt: "2026-08-05T00:00:00.000Z",
   updatedAt: "2026-08-05T00:00:00.000Z",
 };

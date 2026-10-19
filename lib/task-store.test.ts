@@ -1466,6 +1466,16 @@ test("TaskStore keeps a scored task's performance after the task is deleted", as
         reviewScore: 9,
         workflowSteps: steps,
         recordedAt: at(30).toISOString(),
+        title: "Scored",
+        pullRequestNumber: null,
+        attemptCount: 1,
+        workType: null,
+        filesChanged: null,
+        additions: null,
+        deletions: null,
+        testFilesChanged: null,
+        hasMigration: null,
+        hasNewDependency: null,
       },
     ]);
 
@@ -1516,6 +1526,270 @@ test("TaskStore keeps a scored task's performance after the task is deleted", as
     );
   } finally {
     reopened.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("TaskStore snapshots the work type, PR number and size a run reports", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-perf-size-"));
+  const store = new TaskStore(join(directory, "tasks.sqlite"));
+  const at = (seconds: number) => new Date(`2026-08-04T00:00:${seconds}.000Z`);
+  try {
+    const task = store.createTask({
+      title: "Add SFP column",
+      repository: "monitor-agents",
+      workType: "table-column",
+    });
+    assert.equal(task.workType, "table-column");
+    store.claimTask({
+      agentId: "agent-1",
+      repositories: ["monitor-agents"],
+      now: at(10),
+      leaseMs: 600_000,
+    });
+    store.heartbeatTask(task.id, "agent-1", at(20), 600_000, {
+      reviewScore: 8,
+      filesChanged: 3,
+      additions: 40,
+      deletions: 2,
+      testFilesChanged: 1,
+      hasMigration: false,
+      hasNewDependency: true,
+    });
+    const snapshot = () => {
+      const [row] = store.listPerformanceSnapshots();
+      return {
+        title: row.title,
+        pullRequestNumber: row.pullRequestNumber,
+        attemptCount: row.attemptCount,
+        workType: row.workType,
+        filesChanged: row.filesChanged,
+        additions: row.additions,
+        deletions: row.deletions,
+        testFilesChanged: row.testFilesChanged,
+        hasMigration: row.hasMigration,
+        hasNewDependency: row.hasNewDependency,
+      };
+    };
+    const reported = {
+      title: "Add SFP column",
+      pullRequestNumber: null,
+      attemptCount: 1,
+      workType: "table-column",
+      filesChanged: 3,
+      additions: 40,
+      deletions: 2,
+      testFilesChanged: 1,
+      hasMigration: false,
+      hasNewDependency: true,
+    };
+    assert.deepEqual(snapshot(), reported);
+    assert.equal(store.getTask(task.id)?.hasNewDependency, true);
+
+    // A report without the size keeps it; a later PR number and size refresh the row.
+    store.heartbeatTask(task.id, "agent-1", at(30), 600_000, { usedTokens: 5 });
+    assert.deepEqual(snapshot(), reported);
+    store.completeTask(
+      task.id,
+      "agent-1",
+      "done",
+      at(40),
+      { additions: 55, hasMigration: true },
+      { pullRequestNumber: 42 },
+    );
+    assert.deepEqual(snapshot(), {
+      ...reported,
+      pullRequestNumber: 42,
+      additions: 55,
+      hasMigration: true,
+    });
+
+    // A claim nulls the score, so the retry writes no snapshot until it is scored.
+    store.updateTaskStatus(task.id, "todo", at(50));
+    store.claimTask({
+      agentId: "agent-1",
+      repositories: ["monitor-agents"],
+      now: at(55),
+      leaseMs: 600_000,
+      metadata: { filesChanged: 9 },
+    });
+    assert.equal(store.getTask(task.id)?.attemptCount, 2);
+    assert.deepEqual(snapshot(), {
+      ...reported,
+      pullRequestNumber: 42,
+      additions: 55,
+      hasMigration: true,
+    });
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("TaskStore boots on a snapshot table from before the work columns existed", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-perf-old-"));
+  const path = join(directory, "tasks.sqlite");
+  new TaskStore(path).close();
+
+  const raw = new DatabaseSync(path);
+  raw.exec(`
+    DROP TRIGGER tasks_performance_snapshot;
+    DROP TABLE performance_snapshots;
+    CREATE TABLE performance_snapshots (
+      task_id TEXT PRIMARY KEY,
+      model TEXT,
+      effort TEXT,
+      review_score REAL NOT NULL,
+      workflow_steps TEXT NOT NULL DEFAULT '[]',
+      recorded_at TEXT NOT NULL
+    );
+    INSERT INTO performance_snapshots VALUES
+      ('gone-1', 'opus', 'low', 7, '[{"step":3,"model":"opus","effort":"low","usedTokens":10,"startedAt":null,"endedAt":null}]', '2026-08-01T00:00:00.000Z'),
+      ('gone-2', NULL, NULL, 9.5, '[]', '2026-08-02T00:00:00.000Z');
+  `);
+  raw.close();
+
+  const store = new TaskStore(path);
+  try {
+    const empty = {
+      title: null,
+      pullRequestNumber: null,
+      attemptCount: null,
+      workType: null,
+      filesChanged: null,
+      additions: null,
+      deletions: null,
+      testFilesChanged: null,
+      hasMigration: null,
+      hasNewDependency: null,
+    };
+    assert.deepEqual(store.listPerformanceSnapshots(), [
+      {
+        taskId: "gone-1",
+        model: "opus",
+        effort: "low",
+        reviewScore: 7,
+        workflowSteps: [
+          { step: 3, model: "opus", effort: "low", usedTokens: 10, startedAt: null, endedAt: null },
+        ],
+        recordedAt: "2026-08-01T00:00:00.000Z",
+        ...empty,
+      },
+      {
+        taskId: "gone-2",
+        model: null,
+        effort: null,
+        reviewScore: 9.5,
+        workflowSteps: [],
+        recordedAt: "2026-08-02T00:00:00.000Z",
+        ...empty,
+      },
+    ]);
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("TaskStore refreshes a scored task's snapshot when its Todo details are edited", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-perf-rename-"));
+  const store = new TaskStore(join(directory, "tasks.sqlite"));
+  const at = (seconds: number) => new Date(`2026-08-04T00:00:${seconds}.000Z`);
+  try {
+    const task = store.createTask({ title: "Old title", repository: "monitor-agents" });
+    store.claimTask({
+      agentId: "agent-1",
+      repositories: ["monitor-agents"],
+      now: at(10),
+      leaseMs: 600_000,
+    });
+    store.completeTask(task.id, "agent-1", "done", at(20), { reviewScore: 8 });
+    store.updateTaskStatus(task.id, "todo", at(30));
+    store.updateTodoTaskDetails(
+      task.id,
+      { title: "New title", description: "", repository: "monitor-agents" },
+      at(40),
+    );
+
+    const [snapshot] = store.listPerformanceSnapshots();
+    assert.equal(snapshot.title, "New title");
+    assert.equal(snapshot.recordedAt, at(40).toISOString());
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("TaskStore clears the last attempt's size on a retry claim but keeps its PR number", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-perf-retry-"));
+  const store = new TaskStore(join(directory, "tasks.sqlite"));
+  const at = (seconds: number) => new Date(`2026-08-04T00:00:${seconds}.000Z`);
+  const claim = (seconds: number, metadata?: { model?: string; filesChanged?: number; hasMigration?: boolean }) =>
+    store.claimTask({
+      agentId: "agent-1",
+      repositories: ["monitor-agents"],
+      now: at(seconds),
+      leaseMs: 600_000,
+      metadata,
+    });
+  const size = (row: {
+    filesChanged?: number | null;
+    additions?: number | null;
+    deletions?: number | null;
+    testFilesChanged?: number | null;
+    hasMigration?: boolean | null;
+    hasNewDependency?: boolean | null;
+  } | null | undefined) => [
+    row?.filesChanged,
+    row?.additions,
+    row?.deletions,
+    row?.testFilesChanged,
+    row?.hasMigration,
+    row?.hasNewDependency,
+  ];
+  try {
+    const task = store.createTask({ title: "Retried", repository: "monitor-agents" });
+    claim(10, { model: "opus" });
+    store.completeTask(
+      task.id,
+      "agent-1",
+      "done",
+      at(20),
+      {
+        reviewScore: 5,
+        filesChanged: 10,
+        additions: 100,
+        deletions: 20,
+        testFilesChanged: 2,
+        hasMigration: true,
+        hasNewDependency: false,
+      },
+      { pullRequestNumber: 42 },
+    );
+
+    // (a) A claim without sizes clears them; the next score snapshots them empty.
+    store.updateTaskStatus(task.id, "todo", at(30));
+    claim(35, { model: "gpt-6.1-sol" });
+    const retried = store.getTask(task.id);
+    assert.deepEqual(size(retried), [null, null, null, null, null, null]);
+    // (c) The PR number survives the claim.
+    assert.equal(retried?.pullRequestNumber, 42);
+    store.heartbeatTask(task.id, "agent-1", at(40), 600_000, { reviewScore: 7 });
+    const [snapshot] = store.listPerformanceSnapshots();
+    assert.deepEqual(
+      [snapshot.model, snapshot.reviewScore, snapshot.pullRequestNumber],
+      ["gpt-6.1-sol", 7, 42],
+    );
+    assert.deepEqual(size(snapshot), [null, null, null, null, null, null]);
+
+    // (b) A claim that sends sizes stores them, and they reach the snapshot.
+    store.updateTaskStatus(task.id, "todo", at(45));
+    claim(50, { filesChanged: 3, hasMigration: false });
+    assert.deepEqual(size(store.getTask(task.id)), [3, null, null, null, false, null]);
+    store.heartbeatTask(task.id, "agent-1", at(55), 600_000, { reviewScore: 9 });
+    assert.deepEqual(size(store.listPerformanceSnapshots()[0]), [3, null, null, null, false, null]);
+  } finally {
+    store.close();
     await rm(directory, { recursive: true, force: true });
   }
 });

@@ -41,6 +41,13 @@ interface TaskRow {
   status_history: string;
   workflow_steps: string;
   review_score: number | null;
+  work_type: string | null;
+  files_changed: number | null;
+  additions: number | null;
+  deletions: number | null;
+  test_files_changed: number | null;
+  has_migration: number | null;
+  has_new_dependency: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -54,6 +61,7 @@ export interface CreateTaskInput {
   requestedEffort?: string | null;
   requestedReviewModel?: string | null;
   requestedReviewEffort?: string | null;
+  workType?: string | null;
 }
 
 export interface UpdateTaskDetailsInput {
@@ -96,6 +104,11 @@ function workflowStepsFromRow(value: string): KanbanWorkflowStep[] {
   }
 }
 
+/** Stored 0/1; null is not reported. */
+function booleanFromRow(value: number | null): boolean | null {
+  return value === null ? null : value === 1;
+}
+
 /** Rows completed before the number was reported still name the PR in `result`. */
 function pullRequestNumberFromResult(result: string | null): number | null {
   const match =
@@ -134,6 +147,13 @@ function taskFromRow(row: TaskRow): KanbanTask {
     statusHistory: statusHistoryFromRow(row.status_history),
     workflowSteps: workflowStepsFromRow(row.workflow_steps),
     reviewScore: row.review_score,
+    workType: row.work_type,
+    filesChanged: row.files_changed,
+    additions: row.additions,
+    deletions: row.deletions,
+    testFilesChanged: row.test_files_changed,
+    hasMigration: booleanFromRow(row.has_migration),
+    hasNewDependency: booleanFromRow(row.has_new_dependency),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -154,12 +174,20 @@ const runMetadataSql = `
   effort = COALESCE(?, effort),
   used_tokens = CASE
     WHEN ? IS NULL THEN used_tokens ELSE carried_tokens + ?
-  END
+  END,
+  files_changed = COALESCE(?, files_changed),
+  additions = COALESCE(?, additions),
+  deletions = COALESCE(?, deletions),
+  test_files_changed = COALESCE(?, test_files_changed),
+  has_migration = COALESCE(?, has_migration),
+  has_new_dependency = COALESCE(?, has_new_dependency)
 `;
 
 /**
  * A claim starts a new attempt, so the run ids it names replace the last
- * attempt's, even when it names none. Takes the same values as `runMetadataSql`.
+ * attempt's, even when it names none, and so does the size of the change: the
+ * last attempt's would otherwise be snapshotted with this one's score. Takes
+ * the same values as `runMetadataSql`.
  */
 const claimRunMetadataSql = `
   session_id = ?,
@@ -168,7 +196,13 @@ const claimRunMetadataSql = `
   effort = COALESCE(?, effort),
   used_tokens = CASE
     WHEN ? IS NULL THEN used_tokens ELSE carried_tokens + ?
-  END
+  END,
+  files_changed = ?,
+  additions = ?,
+  deletions = ?,
+  test_files_changed = ?,
+  has_migration = ?,
+  has_new_dependency = ?
 `;
 
 /** Banks the current total before an attempt that starts counting again. */
@@ -179,6 +213,8 @@ const carryTokensSql = `
 
 function runMetadataValues(metadata: TaskRunMetadata | undefined) {
   const usedTokens = metadata?.usedTokens ?? null;
+  const flag = (value: boolean | undefined) =>
+    value === undefined ? null : value ? 1 : 0;
   return [
     metadata?.sessionId ?? null,
     metadata?.agentRunId ?? null,
@@ -186,6 +222,12 @@ function runMetadataValues(metadata: TaskRunMetadata | undefined) {
     metadata?.effort ?? null,
     usedTokens,
     usedTokens,
+    metadata?.filesChanged ?? null,
+    metadata?.additions ?? null,
+    metadata?.deletions ?? null,
+    metadata?.testFilesChanged ?? null,
+    flag(metadata?.hasMigration),
+    flag(metadata?.hasNewDependency),
   ] as const;
 }
 
@@ -241,6 +283,13 @@ function tasksTableSql(target: string) {
     status_history TEXT NOT NULL DEFAULT '[]',
     workflow_steps TEXT NOT NULL DEFAULT '[]',
     review_score REAL,
+    work_type TEXT,
+    files_changed INTEGER,
+    additions INTEGER,
+    deletions INTEGER,
+    test_files_changed INTEGER,
+    has_migration INTEGER,
+    has_new_dependency INTEGER,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -282,10 +331,6 @@ export class TaskStore {
    * each start, which also lets a changed body take effect.
    */
   private trackPerformance() {
-    const snapshotColumns = `
-      SELECT id, COALESCE(model, requested_model), COALESCE(effort, requested_effort),
-        review_score, workflow_steps, updated_at
-    `;
     this.database.exec(`
       CREATE TABLE IF NOT EXISTS performance_snapshots (
         task_id TEXT PRIMARY KEY,
@@ -293,11 +338,62 @@ export class TaskStore {
         effort TEXT,
         review_score REAL NOT NULL,
         workflow_steps TEXT NOT NULL DEFAULT '[]',
-        recorded_at TEXT NOT NULL
+        recorded_at TEXT NOT NULL,
+        title TEXT,
+        pull_request_number INTEGER,
+        attempt_count INTEGER,
+        work_type TEXT,
+        files_changed INTEGER,
+        additions INTEGER,
+        deletions INTEGER,
+        test_files_changed INTEGER,
+        has_migration INTEGER,
+        has_new_dependency INTEGER
       );
+    `);
 
+    // Snapshots kept before these columns existed gain them, empty.
+    const columns = new Set(
+      (
+        this.database
+          .prepare("PRAGMA table_info(performance_snapshots)")
+          .all() as unknown as { name: string }[]
+      ).map((column) => column.name),
+    );
+    const additions: [string, string][] = [
+      ["title", "TEXT"],
+      ["pull_request_number", "INTEGER"],
+      ["attempt_count", "INTEGER"],
+      ["work_type", "TEXT"],
+      ["files_changed", "INTEGER"],
+      ["additions", "INTEGER"],
+      ["deletions", "INTEGER"],
+      ["test_files_changed", "INTEGER"],
+      ["has_migration", "INTEGER"],
+      ["has_new_dependency", "INTEGER"],
+    ];
+    for (const [name, definition] of additions) {
+      if (!columns.has(name)) {
+        this.database.exec(
+          `ALTER TABLE performance_snapshots ADD COLUMN ${name} ${definition}`,
+        );
+      }
+    }
+
+    const snapshotColumns = `
+      (task_id, model, effort, review_score, workflow_steps, recorded_at,
+        title, pull_request_number, attempt_count, work_type, files_changed,
+        additions, deletions, test_files_changed, has_migration, has_new_dependency)
+      SELECT id, COALESCE(model, requested_model), COALESCE(effort, requested_effort),
+        review_score, workflow_steps, updated_at,
+        title, pull_request_number, attempt_count, work_type, files_changed,
+        additions, deletions, test_files_changed, has_migration, has_new_dependency
+    `;
+    this.database.exec(`
       CREATE TRIGGER tasks_performance_snapshot
-      AFTER UPDATE OF review_score, workflow_steps, model, effort ON tasks
+      AFTER UPDATE OF review_score, workflow_steps, model, effort,
+        title, pull_request_number, work_type, files_changed, additions,
+        deletions, test_files_changed, has_migration, has_new_dependency ON tasks
       WHEN NEW.review_score IS NOT NULL
       BEGIN
         INSERT OR REPLACE INTO performance_snapshots
@@ -339,6 +435,13 @@ export class TaskStore {
       ["requested_review_effort", "TEXT"],
       ["workflow_steps", "TEXT NOT NULL DEFAULT '[]'"],
       ["review_score", "REAL"],
+      ["work_type", "TEXT"],
+      ["files_changed", "INTEGER"],
+      ["additions", "INTEGER"],
+      ["deletions", "INTEGER"],
+      ["test_files_changed", "INTEGER"],
+      ["has_migration", "INTEGER"],
+      ["has_new_dependency", "INTEGER"],
     ];
     for (const [name, definition] of additions) {
       if (!columns.has(name)) {
@@ -430,6 +533,16 @@ export class TaskStore {
       review_score: number;
       workflow_steps: string;
       recorded_at: string;
+      title: string | null;
+      pull_request_number: number | null;
+      attempt_count: number | null;
+      work_type: string | null;
+      files_changed: number | null;
+      additions: number | null;
+      deletions: number | null;
+      test_files_changed: number | null;
+      has_migration: number | null;
+      has_new_dependency: number | null;
     }[];
     return rows.map((row) => ({
       taskId: row.task_id,
@@ -438,6 +551,16 @@ export class TaskStore {
       reviewScore: row.review_score,
       workflowSteps: workflowStepsFromRow(row.workflow_steps),
       recordedAt: row.recorded_at,
+      title: row.title,
+      pullRequestNumber: row.pull_request_number,
+      attemptCount: row.attempt_count,
+      workType: row.work_type,
+      filesChanged: row.files_changed,
+      additions: row.additions,
+      deletions: row.deletions,
+      testFilesChanged: row.test_files_changed,
+      hasMigration: booleanFromRow(row.has_migration),
+      hasNewDependency: booleanFromRow(row.has_new_dependency),
     }));
   }
 
@@ -468,12 +591,12 @@ export class TaskStore {
         INSERT INTO tasks (
           id, title, description, repository, status, priority,
           requested_model, requested_effort,
-          requested_review_model, requested_review_effort,
+          requested_review_model, requested_review_effort, work_type,
           status_history, created_at, updated_at
         ) VALUES (
           ?, ?, ?, ?, 'todo', ?,
           ?, ?,
-          ?, ?,
+          ?, ?, ?,
           json_array(json_object('status', 'todo', 'at', ?)), ?, ?
         )
       `)
@@ -487,6 +610,7 @@ export class TaskStore {
         input.requestedEffort ?? null,
         input.requestedReviewModel ?? null,
         input.requestedReviewEffort ?? null,
+        input.workType ?? null,
         timestamp,
         timestamp,
         timestamp,

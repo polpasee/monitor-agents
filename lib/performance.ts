@@ -13,6 +13,17 @@ export interface PerformanceSnapshot {
   reviewScore: number;
   workflowSteps: KanbanWorkflowStep[];
   recordedAt: string;
+  /** Copied from the task; null on snapshots recorded before these were kept. */
+  title?: string | null;
+  pullRequestNumber?: number | null;
+  attemptCount?: number | null;
+  workType?: string | null;
+  filesChanged?: number | null;
+  additions?: number | null;
+  deletions?: number | null;
+  testFilesChanged?: number | null;
+  hasMigration?: boolean | null;
+  hasNewDependency?: boolean | null;
 }
 
 export interface PerformancePoint {
