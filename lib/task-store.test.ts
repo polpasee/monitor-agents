@@ -1690,3 +1690,32 @@ test("TaskStore boots on a snapshot table from before the work columns existed",
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("TaskStore refreshes a scored task's snapshot when its Todo details are edited", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-perf-rename-"));
+  const store = new TaskStore(join(directory, "tasks.sqlite"));
+  const at = (seconds: number) => new Date(`2026-08-04T00:00:${seconds}.000Z`);
+  try {
+    const task = store.createTask({ title: "Old title", repository: "monitor-agents" });
+    store.claimTask({
+      agentId: "agent-1",
+      repositories: ["monitor-agents"],
+      now: at(10),
+      leaseMs: 600_000,
+    });
+    store.completeTask(task.id, "agent-1", "done", at(20), { reviewScore: 8 });
+    store.updateTaskStatus(task.id, "todo", at(30));
+    store.updateTodoTaskDetails(
+      task.id,
+      { title: "New title", description: "", repository: "monitor-agents" },
+      at(40),
+    );
+
+    const [snapshot] = store.listPerformanceSnapshots();
+    assert.equal(snapshot.title, "New title");
+    assert.equal(snapshot.recordedAt, at(40).toISOString());
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
