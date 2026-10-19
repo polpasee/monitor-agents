@@ -1529,3 +1529,164 @@ test("TaskStore keeps a scored task's performance after the task is deleted", as
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("TaskStore snapshots the work type, PR number and size a run reports", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-perf-size-"));
+  const store = new TaskStore(join(directory, "tasks.sqlite"));
+  const at = (seconds: number) => new Date(`2026-08-04T00:00:${seconds}.000Z`);
+  try {
+    const task = store.createTask({
+      title: "Add SFP column",
+      repository: "monitor-agents",
+      workType: "table-column",
+    });
+    assert.equal(task.workType, "table-column");
+    store.claimTask({
+      agentId: "agent-1",
+      repositories: ["monitor-agents"],
+      now: at(10),
+      leaseMs: 600_000,
+    });
+    store.heartbeatTask(task.id, "agent-1", at(20), 600_000, {
+      reviewScore: 8,
+      filesChanged: 3,
+      additions: 40,
+      deletions: 2,
+      testFilesChanged: 1,
+      hasMigration: false,
+      hasNewDependency: true,
+    });
+    const snapshot = () => {
+      const [row] = store.listPerformanceSnapshots();
+      return {
+        title: row.title,
+        pullRequestNumber: row.pullRequestNumber,
+        attemptCount: row.attemptCount,
+        workType: row.workType,
+        filesChanged: row.filesChanged,
+        additions: row.additions,
+        deletions: row.deletions,
+        testFilesChanged: row.testFilesChanged,
+        hasMigration: row.hasMigration,
+        hasNewDependency: row.hasNewDependency,
+      };
+    };
+    const reported = {
+      title: "Add SFP column",
+      pullRequestNumber: null,
+      attemptCount: 1,
+      workType: "table-column",
+      filesChanged: 3,
+      additions: 40,
+      deletions: 2,
+      testFilesChanged: 1,
+      hasMigration: false,
+      hasNewDependency: true,
+    };
+    assert.deepEqual(snapshot(), reported);
+    assert.equal(store.getTask(task.id)?.hasNewDependency, true);
+
+    // A report without the size keeps it; a later PR number and size refresh the row.
+    store.heartbeatTask(task.id, "agent-1", at(30), 600_000, { usedTokens: 5 });
+    assert.deepEqual(snapshot(), reported);
+    store.completeTask(
+      task.id,
+      "agent-1",
+      "done",
+      at(40),
+      { additions: 55, hasMigration: true },
+      { pullRequestNumber: 42 },
+    );
+    assert.deepEqual(snapshot(), {
+      ...reported,
+      pullRequestNumber: 42,
+      additions: 55,
+      hasMigration: true,
+    });
+
+    // A claim nulls the score, so the retry writes no snapshot until it is scored.
+    store.updateTaskStatus(task.id, "todo", at(50));
+    store.claimTask({
+      agentId: "agent-1",
+      repositories: ["monitor-agents"],
+      now: at(55),
+      leaseMs: 600_000,
+      metadata: { filesChanged: 9 },
+    });
+    assert.equal(store.getTask(task.id)?.attemptCount, 2);
+    assert.deepEqual(snapshot(), {
+      ...reported,
+      pullRequestNumber: 42,
+      additions: 55,
+      hasMigration: true,
+    });
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("TaskStore boots on a snapshot table from before the work columns existed", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-perf-old-"));
+  const path = join(directory, "tasks.sqlite");
+  new TaskStore(path).close();
+
+  const raw = new DatabaseSync(path);
+  raw.exec(`
+    DROP TRIGGER tasks_performance_snapshot;
+    DROP TABLE performance_snapshots;
+    CREATE TABLE performance_snapshots (
+      task_id TEXT PRIMARY KEY,
+      model TEXT,
+      effort TEXT,
+      review_score REAL NOT NULL,
+      workflow_steps TEXT NOT NULL DEFAULT '[]',
+      recorded_at TEXT NOT NULL
+    );
+    INSERT INTO performance_snapshots VALUES
+      ('gone-1', 'opus', 'low', 7, '[{"step":3,"model":"opus","effort":"low","usedTokens":10,"startedAt":null,"endedAt":null}]', '2026-08-01T00:00:00.000Z'),
+      ('gone-2', NULL, NULL, 9.5, '[]', '2026-08-02T00:00:00.000Z');
+  `);
+  raw.close();
+
+  const store = new TaskStore(path);
+  try {
+    const empty = {
+      title: null,
+      pullRequestNumber: null,
+      attemptCount: null,
+      workType: null,
+      filesChanged: null,
+      additions: null,
+      deletions: null,
+      testFilesChanged: null,
+      hasMigration: null,
+      hasNewDependency: null,
+    };
+    assert.deepEqual(store.listPerformanceSnapshots(), [
+      {
+        taskId: "gone-1",
+        model: "opus",
+        effort: "low",
+        reviewScore: 7,
+        workflowSteps: [
+          { step: 3, model: "opus", effort: "low", usedTokens: 10, startedAt: null, endedAt: null },
+        ],
+        recordedAt: "2026-08-01T00:00:00.000Z",
+        ...empty,
+      },
+      {
+        taskId: "gone-2",
+        model: null,
+        effort: null,
+        reviewScore: 9.5,
+        workflowSteps: [],
+        recordedAt: "2026-08-02T00:00:00.000Z",
+        ...empty,
+      },
+    ]);
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
