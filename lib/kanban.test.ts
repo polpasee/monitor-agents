@@ -25,9 +25,11 @@ import {
   kanbanEfforts,
   kanbanModels,
   kanbanStatuses,
+  kanbanWorkTypes,
   parseKanbanEffort,
   parseKanbanModel,
   parseKanbanPriority,
+  parseKanbanWorkType,
   parseBoardSettingsPatch,
   parseClaimModelFilter,
   parseKanbanTaskPatch,
@@ -66,6 +68,13 @@ const tasks: KanbanTask[] = [
     statusHistory: [],
     workflowSteps: [],
     reviewScore: null,
+    workType: null,
+    filesChanged: null,
+    additions: null,
+    deletions: null,
+    testFilesChanged: null,
+    hasMigration: null,
+    hasNewDependency: null,
     createdAt: "2026-08-04T00:00:00.000Z",
     updatedAt: "2026-08-04T00:00:00.000Z",
   },
@@ -96,6 +105,13 @@ const tasks: KanbanTask[] = [
     statusHistory: [],
     workflowSteps: [],
     reviewScore: null,
+    workType: null,
+    filesChanged: null,
+    additions: null,
+    deletions: null,
+    testFilesChanged: null,
+    hasMigration: null,
+    hasNewDependency: null,
     createdAt: "2026-08-04T01:00:00.000Z",
     updatedAt: "2026-08-04T01:00:00.000Z",
   },
@@ -432,6 +448,13 @@ const task: KanbanTask = {
   ],
   workflowSteps: [],
   reviewScore: null,
+  workType: null,
+  filesChanged: null,
+  additions: null,
+  deletions: null,
+  testFilesChanged: null,
+  hasMigration: null,
+  hasNewDependency: null,
   createdAt: "2026-08-04T00:00:00.000Z",
   updatedAt: "2026-08-04T00:04:30.000Z",
 };
@@ -1235,6 +1258,54 @@ test("parseTaskRunMetadata accepts a review score from 0 to 10, decimals include
   assert.deepEqual(parseTaskRunMetadata({}), {});
   for (const bad of [-0.1, 10.1, Number.NaN, Infinity, "8", true, [8]]) {
     assert.equal(parseTaskRunMetadata({ reviewScore: bad }), null);
+  }
+});
+
+test("parseTaskRunMetadata accepts the size of the change", () => {
+  const size = {
+    filesChanged: 4,
+    additions: 120,
+    deletions: 0,
+    testFilesChanged: 10_000_000,
+    hasMigration: false,
+    hasNewDependency: true,
+  };
+  assert.deepEqual(parseTaskRunMetadata(size), size);
+  // Left out or null keeps what is stored.
+  assert.deepEqual(
+    parseTaskRunMetadata({ filesChanged: null, hasMigration: null }),
+    {},
+  );
+  for (const key of ["filesChanged", "additions", "deletions", "testFilesChanged"]) {
+    for (const bad of [-1, 10_000_001, 1.5, "4", true, Number.NaN]) {
+      assert.equal(parseTaskRunMetadata({ [key]: bad }), null, `${key}: ${bad}`);
+    }
+  }
+  for (const key of ["hasMigration", "hasNewDependency"]) {
+    for (const bad of [0, 1, "true", "false", []]) {
+      assert.equal(parseTaskRunMetadata({ [key]: bad }), null, `${key}: ${bad}`);
+    }
+  }
+});
+
+test("parseKanbanWorkType accepts only the allowlist, missing as null", () => {
+  assert.deepEqual(kanbanWorkTypes, [
+    "ui-text",
+    "ui-layout",
+    "table-column",
+    "export-import",
+    "query-action",
+    "migration",
+    "concurrency-permissions",
+    "job-script",
+  ]);
+  for (const workType of kanbanWorkTypes) {
+    assert.equal(parseKanbanWorkType(workType), workType);
+  }
+  assert.equal(parseKanbanWorkType(undefined), null);
+  assert.equal(parseKanbanWorkType(null), null);
+  for (const bad of ["inherit", "UI-TEXT", "", " ui-text", 1, true]) {
+    assert.equal(parseKanbanWorkType(bad), false);
   }
 });
 

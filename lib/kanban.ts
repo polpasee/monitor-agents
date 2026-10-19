@@ -53,6 +53,20 @@ export const kanbanEfforts = [
 
 export type KanbanEffort = (typeof kanbanEfforts)[number]["id"];
 
+/** The kind of work a task is, so later cards of the same kind can be compared. */
+export const kanbanWorkTypes = [
+  "ui-text", // label, copy, button
+  "ui-layout", // grid, ordering
+  "table-column", // add, remove, sort, filter or search a column
+  "export-import", // export, import or report files
+  "query-action", // new query + server action + UI, copying an existing pattern
+  "migration", // schema change or new dependency
+  "concurrency-permissions", // locks, transactions, permissions, bulk writes
+  "job-script", // Python or ops scripts, CI
+] as const;
+
+export type KanbanWorkType = (typeof kanbanWorkTypes)[number];
+
 /** How many tasks may sit in In Coding / In Review Progress at once. */
 export interface BoardSettings {
   codingLimit: number;
@@ -133,6 +147,15 @@ export interface KanbanTask {
   workflowSteps: KanbanWorkflowStep[];
   /** The Review Agent's mark for the coding agent's work, 0–10; null until reported. */
   reviewScore: number | null;
+  /** One of `kanbanWorkTypes`, set when the task is created; null when not given. */
+  workType: string | null;
+  /** The size of the change, as the agent reported it; null until reported. */
+  filesChanged: number | null;
+  additions: number | null;
+  deletions: number | null;
+  testFilesChanged: number | null;
+  hasMigration: boolean | null;
+  hasNewDependency: boolean | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -148,6 +171,13 @@ export interface TaskRunMetadata {
   workflowSteps?: KanbanWorkflowStep[];
   /** 0–10, decimals allowed; the first review round's. A report without it keeps the stored one. */
   reviewScore?: number;
+  /** The size of the change, 0–10000000 each. A report without one keeps the stored one. */
+  filesChanged?: number;
+  additions?: number;
+  deletions?: number;
+  testFilesChanged?: number;
+  hasMigration?: boolean;
+  hasNewDependency?: boolean;
 }
 
 export type KanbanTaskPatch =
@@ -204,6 +234,14 @@ export function parseKanbanModel(value: unknown): string | null | false {
 
 export function parseKanbanEffort(value: unknown): string | null | false {
   return parseRequestedOption(kanbanEfforts, value);
+}
+
+/** A missing work type is stored as null; `false` marks anything not in `kanbanWorkTypes`. */
+export function parseKanbanWorkType(value: unknown): string | null | false {
+  if (value === undefined || value === null) return null;
+  return kanbanWorkTypes.some((workType) => workType === value)
+    ? (value as string)
+    : false;
 }
 
 /** Models a claim must not dispatch, and the model an Inherit task runs on. */
@@ -750,6 +788,27 @@ export function parseTaskRunMetadata(
       return null;
     }
     metadata.reviewScore = score;
+  }
+
+  for (const key of ["filesChanged", "additions", "deletions", "testFilesChanged"] as const) {
+    const count = body[key];
+    if (count === undefined || count === null) continue;
+    if (
+      typeof count !== "number" ||
+      !Number.isInteger(count) ||
+      count < 0 ||
+      count > 10_000_000
+    ) {
+      return null;
+    }
+    metadata[key] = count;
+  }
+
+  for (const key of ["hasMigration", "hasNewDependency"] as const) {
+    const flag = body[key];
+    if (flag === undefined || flag === null) continue;
+    if (typeof flag !== "boolean") return null;
+    metadata[key] = flag;
   }
 
   // The reporter sends its whole list every time, so it replaces the stored one.
