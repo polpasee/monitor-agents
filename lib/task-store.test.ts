@@ -1466,6 +1466,16 @@ test("TaskStore keeps a scored task's performance after the task is deleted", as
         reviewScore: 9,
         workflowSteps: steps,
         recordedAt: at(30).toISOString(),
+        title: "Scored",
+        pullRequestNumber: null,
+        attemptCount: 1,
+        workType: null,
+        filesChanged: null,
+        additions: null,
+        deletions: null,
+        testFilesChanged: null,
+        hasMigration: null,
+        hasNewDependency: null,
       },
     ]);
 
