@@ -1719,3 +1719,77 @@ test("TaskStore refreshes a scored task's snapshot when its Todo details are edi
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test("TaskStore clears the last attempt's size on a retry claim but keeps its PR number", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "monitor-task-perf-retry-"));
+  const store = new TaskStore(join(directory, "tasks.sqlite"));
+  const at = (seconds: number) => new Date(`2026-08-04T00:00:${seconds}.000Z`);
+  const claim = (seconds: number, metadata?: { model?: string; filesChanged?: number; hasMigration?: boolean }) =>
+    store.claimTask({
+      agentId: "agent-1",
+      repositories: ["monitor-agents"],
+      now: at(seconds),
+      leaseMs: 600_000,
+      metadata,
+    });
+  const size = (row: {
+    filesChanged?: number | null;
+    additions?: number | null;
+    deletions?: number | null;
+    testFilesChanged?: number | null;
+    hasMigration?: boolean | null;
+    hasNewDependency?: boolean | null;
+  } | null | undefined) => [
+    row?.filesChanged,
+    row?.additions,
+    row?.deletions,
+    row?.testFilesChanged,
+    row?.hasMigration,
+    row?.hasNewDependency,
+  ];
+  try {
+    const task = store.createTask({ title: "Retried", repository: "monitor-agents" });
+    claim(10, { model: "opus" });
+    store.completeTask(
+      task.id,
+      "agent-1",
+      "done",
+      at(20),
+      {
+        reviewScore: 5,
+        filesChanged: 10,
+        additions: 100,
+        deletions: 20,
+        testFilesChanged: 2,
+        hasMigration: true,
+        hasNewDependency: false,
+      },
+      { pullRequestNumber: 42 },
+    );
+
+    // (a) A claim without sizes clears them; the next score snapshots them empty.
+    store.updateTaskStatus(task.id, "todo", at(30));
+    claim(35, { model: "gpt-6.1-sol" });
+    const retried = store.getTask(task.id);
+    assert.deepEqual(size(retried), [null, null, null, null, null, null]);
+    // (c) The PR number survives the claim.
+    assert.equal(retried?.pullRequestNumber, 42);
+    store.heartbeatTask(task.id, "agent-1", at(40), 600_000, { reviewScore: 7 });
+    const [snapshot] = store.listPerformanceSnapshots();
+    assert.deepEqual(
+      [snapshot.model, snapshot.reviewScore, snapshot.pullRequestNumber],
+      ["gpt-6.1-sol", 7, 42],
+    );
+    assert.deepEqual(size(snapshot), [null, null, null, null, null, null]);
+
+    // (b) A claim that sends sizes stores them, and they reach the snapshot.
+    store.updateTaskStatus(task.id, "todo", at(45));
+    claim(50, { filesChanged: 3, hasMigration: false });
+    assert.deepEqual(size(store.getTask(task.id)), [3, null, null, null, false, null]);
+    store.heartbeatTask(task.id, "agent-1", at(55), 600_000, { reviewScore: 9 });
+    assert.deepEqual(size(store.listPerformanceSnapshots()[0]), [3, null, null, null, false, null]);
+  } finally {
+    store.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});

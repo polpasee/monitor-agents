@@ -15,8 +15,8 @@ export interface ApiEndpoint {
 const runMetadata = [
   "sessionId?, agentRunId?, model?, effort?: string, 1–200 chars",
   "usedTokens?: integer 0–1000000000000, this attempt's running total (not an increment)",
-  "filesChanged?, additions?, deletions?, testFilesChanged?: integer 0–10000000, the size of the change",
-  "hasMigration?, hasNewDependency?: boolean",
+  "filesChanged?, additions?, deletions?, testFilesChanged?: integer 0–10000000, the size of the change; a claim clears the last attempt's, so only the sizes it sends are kept",
+  "hasMigration?, hasNewDependency?: boolean; a claim clears these the same way",
   "Run details left out or null keep the stored value",
 ];
 

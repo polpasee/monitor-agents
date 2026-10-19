@@ -185,7 +185,9 @@ const runMetadataSql = `
 
 /**
  * A claim starts a new attempt, so the run ids it names replace the last
- * attempt's, even when it names none. Takes the same values as `runMetadataSql`.
+ * attempt's, even when it names none, and so does the size of the change: the
+ * last attempt's would otherwise be snapshotted with this one's score. Takes
+ * the same values as `runMetadataSql`.
  */
 const claimRunMetadataSql = `
   session_id = ?,
@@ -195,12 +197,12 @@ const claimRunMetadataSql = `
   used_tokens = CASE
     WHEN ? IS NULL THEN used_tokens ELSE carried_tokens + ?
   END,
-  files_changed = COALESCE(?, files_changed),
-  additions = COALESCE(?, additions),
-  deletions = COALESCE(?, deletions),
-  test_files_changed = COALESCE(?, test_files_changed),
-  has_migration = COALESCE(?, has_migration),
-  has_new_dependency = COALESCE(?, has_new_dependency)
+  files_changed = ?,
+  additions = ?,
+  deletions = ?,
+  test_files_changed = ?,
+  has_migration = ?,
+  has_new_dependency = ?
 `;
 
 /** Banks the current total before an attempt that starts counting again. */
