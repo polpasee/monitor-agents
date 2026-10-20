@@ -56,12 +56,21 @@ function coversDot(box: LabelBox, dotX: number, dotY: number): boolean {
   );
 }
 
+const pageSizes = [10, 20, 50];
+const defaultPageSize = 10;
+
 const yesNo = (value: boolean | null | undefined) =>
   value == null ? "—" : value ? "Yes" : "No";
 
 /** One row per scored PR, newest first, with every parameter its snapshot kept. */
 function ScoreTable({ snapshots }: { snapshots: PerformanceSnapshot[] }) {
-  const rows = [...snapshots].sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
+  const [pageSize, setPageSize] = useState(defaultPageSize);
+  const [page, setPage] = useState(0);
+  const sorted = [...snapshots].sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
+  const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize));
+  // Snapshots can disappear on refresh, so a page past the end falls back to the last.
+  const current = Math.min(page, pageCount - 1);
+  const rows = sorted.slice(current * pageSize, (current + 1) * pageSize);
   return (
     <section className="performance-panel" aria-labelledby="performance-table-title">
       <header className="panel-header">
@@ -117,6 +126,33 @@ function ScoreTable({ snapshots }: { snapshots: PerformanceSnapshot[] }) {
         </tbody>
       </table>
       </div>
+      <footer className="performance-pagination">
+        <label>
+          Rows per page{" "}
+          <select
+            onChange={(event) => {
+              setPageSize(Number(event.target.value));
+              setPage(0);
+            }}
+            value={pageSize}
+          >
+            {pageSizes.map((size) => (
+              <option key={size} value={size}>
+                {size}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span>
+          {current * pageSize + 1}–{current * pageSize + rows.length} of {sorted.length}
+        </span>
+        <button disabled={current === 0} onClick={() => setPage(current - 1)} type="button">
+          Previous
+        </button>
+        <button disabled={current >= pageCount - 1} onClick={() => setPage(current + 1)} type="button">
+          Next
+        </button>
+      </footer>
     </section>
   );
 }

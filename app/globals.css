@@ -525,6 +525,31 @@ button:focus-visible,
   margin-top: 16px;
 }
 
+.performance-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 12px 18px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.performance-pagination select,
+.performance-pagination button {
+  padding: 4px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface-1);
+  color: var(--text-soft);
+  font: inherit;
+}
+
+.performance-pagination button:disabled {
+  opacity: 0.4;
+}
+
 .performance-chart {
   display: grid;
   gap: 12px;
