@@ -56,14 +56,32 @@ function coversDot(box: LabelBox, dotX: number, dotY: number): boolean {
   );
 }
 
+const pageSizes = [10, 20, 50];
+const defaultPageSize = 10;
+
 const yesNo = (value: boolean | null | undefined) =>
   value == null ? "—" : value ? "Yes" : "No";
 
 /** One row per scored PR, newest first, with every parameter its snapshot kept. */
 function ScoreTable({ snapshots }: { snapshots: PerformanceSnapshot[] }) {
-  const rows = [...snapshots].sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
+  const [pageSize, setPageSize] = useState(defaultPageSize);
+  const [page, setPage] = useState(0);
+  const sorted = [...snapshots].sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
+  const pageCount = Math.max(1, Math.ceil(sorted.length / pageSize));
+  // Snapshots can disappear on refresh, so a page past the end falls back to the last.
+  const current = Math.min(page, pageCount - 1);
+  const rows = sorted.slice(current * pageSize, (current + 1) * pageSize);
   return (
-    <div className="api-table-wrap">
+    <section className="performance-panel" aria-labelledby="performance-table-title">
+      <header className="panel-header">
+        <div>
+          <p className="panel-header__eyebrow">Performance</p>
+          <h2 id="performance-table-title" className="panel-header__title">
+            PR score by parameter
+          </h2>
+        </div>
+      </header>
+      <div className="api-table-wrap">
       <table className="api-table" aria-label="PR score by parameter">
         <thead>
           <tr>
@@ -107,7 +125,35 @@ function ScoreTable({ snapshots }: { snapshots: PerformanceSnapshot[] }) {
           })}
         </tbody>
       </table>
-    </div>
+      </div>
+      <footer className="performance-pagination">
+        <label>
+          Rows per page{" "}
+          <select
+            onChange={(event) => {
+              setPageSize(Number(event.target.value));
+              setPage(0);
+            }}
+            value={pageSize}
+          >
+            {pageSizes.map((size) => (
+              <option key={size} value={size}>
+                {size}
+              </option>
+            ))}
+          </select>
+        </label>
+        <span>
+          {current * pageSize + 1}–{current * pageSize + rows.length} of {sorted.length}
+        </span>
+        <button disabled={current === 0} onClick={() => setPage(current - 1)} type="button">
+          Previous
+        </button>
+        <button disabled={current >= pageCount - 1} onClick={() => setPage(current + 1)} type="button">
+          Next
+        </button>
+      </footer>
+    </section>
   );
 }
 
@@ -255,6 +301,7 @@ export function PerformanceView() {
   }
 
   return (
+    <>
     <section className="performance-panel" aria-labelledby="performance-title">
       <header className="panel-header">
         <div>
@@ -391,8 +438,8 @@ export function PerformanceView() {
           </div>
         </div>
       )}
-
-      {snapshots.length > 0 && <ScoreTable snapshots={snapshots} />}
     </section>
+    {snapshots.length > 0 && <ScoreTable snapshots={snapshots} />}
+    </>
   );
 }
