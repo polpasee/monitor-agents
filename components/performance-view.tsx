@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { line, scaleLinear, scaleLog } from "d3";
 
-import { maxReviewScore } from "@/lib/kanban";
+import { formatStepModel, maxReviewScore } from "@/lib/kanban";
 import {
   buildPerformanceSeries,
+  codingCost,
   type PerformancePoint,
   type PerformanceSnapshot,
 } from "@/lib/performance";
@@ -52,6 +53,61 @@ function coversDot(box: LabelBox, dotX: number, dotY: number): boolean {
     Math.abs(box.x - dotX) < label.width / 2 + 5 &&
     dotY > box.top - 5 &&
     dotY < box.top + label.height + 5
+  );
+}
+
+const yesNo = (value: boolean | null | undefined) =>
+  value == null ? "—" : value ? "Yes" : "No";
+
+/** One row per scored PR, newest first, with every parameter its snapshot kept. */
+function ScoreTable({ snapshots }: { snapshots: PerformanceSnapshot[] }) {
+  const rows = [...snapshots].sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
+  return (
+    <div className="api-table-wrap">
+      <table className="api-table" aria-label="PR score by parameter">
+        <thead>
+          <tr>
+            <th>PR</th>
+            <th>Task</th>
+            <th>Model:Effort</th>
+            <th>Score</th>
+            <th>Cost</th>
+            <th>Attempts</th>
+            <th>Type</th>
+            <th>Files</th>
+            <th>+ / −</th>
+            <th>Tests</th>
+            <th>Migration</th>
+            <th>New dep</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const cost = codingCost(row);
+            return (
+              <tr key={row.taskId}>
+                <td>{row.pullRequestNumber != null ? `#${row.pullRequestNumber}` : "—"}</td>
+                <td>{row.title ?? row.taskId}</td>
+                <td>{formatStepModel(row.model, row.effort) ?? "—"}</td>
+                <td>{row.reviewScore.toFixed(1)}</td>
+                <td>{cost === null ? "—" : `$${cost.toFixed(2)}`}</td>
+                <td>{row.attemptCount ?? "—"}</td>
+                <td>{row.workType ?? "—"}</td>
+                <td>{row.filesChanged ?? "—"}</td>
+                <td>
+                  {row.additions == null && row.deletions == null
+                    ? "—"
+                    : `+${row.additions ?? 0} / −${row.deletions ?? 0}`}
+                </td>
+                <td>{row.testFilesChanged ?? "—"}</td>
+                <td>{yesNo(row.hasMigration)}</td>
+                <td>{yesNo(row.hasNewDependency)}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -335,6 +391,8 @@ export function PerformanceView() {
           </div>
         </div>
       )}
+
+      {snapshots.length > 0 && <ScoreTable snapshots={snapshots} />}
     </section>
   );
 }

@@ -431,24 +431,26 @@ export function Dashboard({ snapshot: initialSnapshot }: DashboardProps) {
         <PerformanceView />
       )}
 
-      <section className="metric-grid" aria-label="Session summary">
-        {metrics.map((metric) => (
-          <article
-            className="metric-card"
-            data-tone={metric.tone}
-            key={metric.label}
-          >
-            <div className="metric-card__heading">
-              <span className="metric-card__label">{metric.label}</span>
-              <span className="metric-card__icon-wrap">
-                <MetricIcon name={metric.icon} />
-              </span>
-            </div>
-            <strong className="metric-card__value">{metric.value}</strong>
-            <span className="metric-card__detail">{metric.detail}</span>
-          </article>
-        ))}
-      </section>
+      {view !== "performance" && (
+        <section className="metric-grid" aria-label="Session summary">
+          {metrics.map((metric) => (
+            <article
+              className="metric-card"
+              data-tone={metric.tone}
+              key={metric.label}
+            >
+              <div className="metric-card__heading">
+                <span className="metric-card__label">{metric.label}</span>
+                <span className="metric-card__icon-wrap">
+                  <MetricIcon name={metric.icon} />
+                </span>
+              </div>
+              <strong className="metric-card__value">{metric.value}</strong>
+              <span className="metric-card__detail">{metric.detail}</span>
+            </article>
+          ))}
+        </section>
+      )}
     </main>
   );
 }
