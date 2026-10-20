@@ -63,7 +63,16 @@ const yesNo = (value: boolean | null | undefined) =>
 function ScoreTable({ snapshots }: { snapshots: PerformanceSnapshot[] }) {
   const rows = [...snapshots].sort((a, b) => b.recordedAt.localeCompare(a.recordedAt));
   return (
-    <div className="api-table-wrap">
+    <section className="performance-panel" aria-labelledby="performance-table-title">
+      <header className="panel-header">
+        <div>
+          <p className="panel-header__eyebrow">Performance</p>
+          <h2 id="performance-table-title" className="panel-header__title">
+            PR score by parameter
+          </h2>
+        </div>
+      </header>
+      <div className="api-table-wrap">
       <table className="api-table" aria-label="PR score by parameter">
         <thead>
           <tr>
@@ -107,7 +116,8 @@ function ScoreTable({ snapshots }: { snapshots: PerformanceSnapshot[] }) {
           })}
         </tbody>
       </table>
-    </div>
+      </div>
+    </section>
   );
 }
 
@@ -255,6 +265,7 @@ export function PerformanceView() {
   }
 
   return (
+    <>
     <section className="performance-panel" aria-labelledby="performance-title">
       <header className="panel-header">
         <div>
@@ -391,8 +402,8 @@ export function PerformanceView() {
           </div>
         </div>
       )}
-
-      {snapshots.length > 0 && <ScoreTable snapshots={snapshots} />}
     </section>
+    {snapshots.length > 0 && <ScoreTable snapshots={snapshots} />}
+    </>
   );
 }

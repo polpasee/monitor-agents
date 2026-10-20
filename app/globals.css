@@ -521,6 +521,10 @@ button:focus-visible,
   box-shadow: var(--shadow);
 }
 
+.performance-panel + .performance-panel {
+  margin-top: 16px;
+}
+
 .performance-chart {
   display: grid;
   gap: 12px;
