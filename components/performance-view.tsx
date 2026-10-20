@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { line, scaleLinear, scaleLog } from "d3";
 
+import { shortDateTimeFormatter } from "@/lib/format-time";
 import { formatStepModel, maxReviewScore } from "@/lib/kanban";
 import {
   buildPerformanceSeries,
@@ -56,8 +57,9 @@ function coversDot(box: LabelBox, dotX: number, dotY: number): boolean {
   );
 }
 
-const pageSizes = [10, 20, 50];
-const defaultPageSize = 10;
+const pageSizes = [5, 10, 20, 50];
+const defaultPageSize = 5;
+const completedAt = shortDateTimeFormatter({ timeZone: "UTC" });
 
 const yesNo = (value: boolean | null | undefined) =>
   value == null ? "—" : value ? "Yes" : "No";
@@ -86,6 +88,7 @@ function ScoreTable({ snapshots }: { snapshots: PerformanceSnapshot[] }) {
         <thead>
           <tr>
             <th>PR</th>
+            <th>Completed (UTC)</th>
             <th>Task</th>
             <th>Model:Effort</th>
             <th>Score</th>
@@ -105,6 +108,7 @@ function ScoreTable({ snapshots }: { snapshots: PerformanceSnapshot[] }) {
             return (
               <tr key={row.taskId}>
                 <td>{row.pullRequestNumber != null ? `#${row.pullRequestNumber}` : "—"}</td>
+                <td>{completedAt.format(new Date(row.recordedAt))}</td>
                 <td>{row.title ?? row.taskId}</td>
                 <td>{formatStepModel(row.model, row.effort) ?? "—"}</td>
                 <td>{row.reviewScore.toFixed(1)}</td>
