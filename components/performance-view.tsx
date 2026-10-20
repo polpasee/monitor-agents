@@ -59,7 +59,7 @@ function coversDot(box: LabelBox, dotX: number, dotY: number): boolean {
 
 const pageSizes = [5, 10, 20, 50];
 const defaultPageSize = 5;
-const completedAt = shortDateTimeFormatter({ timeZone: "UTC" });
+const completedAt = shortDateTimeFormatter({ timeZone: "Asia/Bangkok" });
 
 const yesNo = (value: boolean | null | undefined) =>
   value == null ? "—" : value ? "Yes" : "No";
@@ -88,7 +88,7 @@ function ScoreTable({ snapshots }: { snapshots: PerformanceSnapshot[] }) {
         <thead>
           <tr>
             <th>PR</th>
-            <th>Completed (UTC)</th>
+            <th>Completed (GMT+7)</th>
             <th>Task</th>
             <th>Model:Effort</th>
             <th>Score</th>
